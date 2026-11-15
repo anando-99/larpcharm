@@ -1,9 +1,11 @@
 /*
-  LARP CHARM firmware v8.0
+  LARP CHARM firmware v8.1
   Board : Waveshare ESP32-S3-Touch-LCD-1.69 (240x280 ST7789V2, CST816T touch)
   Control: Bluetooth LE from the Larp Charm web app
 
-  One look, the cyberdeck: one fused screen with live blocks; tap a block to open it full screen.
+  Home is a live tmux session: panes labelled with the command that prints them ($ date, $ np, $ ps pet,
+  $ imu --scope, $ cat motd), the charm's own event log tailed like `dmesg -w`, and a status bar of
+  windows. Tap a pane and the prompt types `open <pane>` before it zooms in.
   Swipe down (or the side button) closes whatever is open.
 
   Blocks: clock, music, eyes, jukebox, pet, dice, message, photo, ID card, torch,
@@ -75,7 +77,7 @@ struct EyeShape { float w, h, rad, lidT, slope, lidB; };
 #define SVC_UUID    "6e400001-c4a7-4d2e-9b3c-c4a2d7c0ffee"
 #define RX_UUID     "6e400002-c4a7-4d2e-9b3c-c4a2d7c0ffee"
 #define STATUS_UUID "6e400003-c4a7-4d2e-9b3c-c4a2d7c0ffee"
-#define FW_VERSION  "8.0"
+#define FW_VERSION  "8.1"
 #define DEVICE_NAME "Larp Charm"
 
 enum Cmd : uint8_t {
@@ -285,6 +287,22 @@ void idleEyesEnd();
 void stepFeed(float x, float y, float z, uint32_t now);
 extern bool jbPlaying;
 void toast(const String &m, uint32_t ms = 1200) { toastMsg = m; toastUntil = millis() + ms; }
+
+// klog: the charm's own event log, tailed on the deck like `dmesg -w`
+#define KLOG_N 8
+struct KLine { uint32_t t; char s[32]; };
+KLine   klogBuf[KLOG_N];
+uint8_t klogHead = 0, klogCount = 0;
+void klog(const char *fmt, ...) {
+  KLine &l = klogBuf[klogHead];
+  va_list ap; va_start(ap, fmt);
+  vsnprintf(l.s, sizeof(l.s), fmt, ap);
+  va_end(ap);
+  for (char *c = l.s; *c; c++) if ((uint8_t)*c < 32 || (uint8_t)*c > 126) *c = '?';
+  l.t = millis();
+  klogHead = (klogHead + 1) % KLOG_N;
+  if (klogCount < KLOG_N) klogCount++;
+}
 
 void touchActivity() {
   lastInteraction = millis();
@@ -1079,19 +1097,35 @@ void drawSprite(const char *const *spr, int ox, int oy, int scale, uint16_t body
   }
 }
 
-// ───────────── The deck: everything live on one screen ─────────────
-// Tap a block to open it full screen. Order: chrono, audio, daemon, rng, msg, img, vid, id.
+// ───────────── The deck: a live tmux session ─────────────
+// Every pane is labelled with the command that would print it. Tap a pane and the prompt types
+// "open <pane>" before it zooms in. The bottom pane tails the charm's own event log (klog).
 #define TILE_COUNT 10
-const int16_t TILE_X[TILE_COUNT] = {8, 8, 160, 8, 86, 9, 54, 99, 144, 189};
-const int16_t TILE_Y[TILE_COUNT] = {26, 104, 104, 174, 174, 238, 238, 238, 238, 238};
-const int16_t TILE_W[TILE_COUNT] = {224, 146, 72, 72, 146, 42, 42, 42, 42, 42};
-const int16_t TILE_H[TILE_COUNT] = {72, 64, 64, 58, 58, 22, 22, 22, 22, 22};
+const int16_t TILE_X[TILE_COUNT] = {2, 2, 152, 2, 92, 10, 54, 98, 142, 186};
+const int16_t TILE_Y[TILE_COUNT] = {15, 81, 81, 141, 141, 258, 258, 258, 258, 258};
+const int16_t TILE_W[TILE_COUNT] = {236, 146, 86, 86, 146, 44, 44, 44, 44, 44};
+const int16_t TILE_H[TILE_COUNT] = {62, 56, 56, 54, 54, 22, 22, 22, 22, 22};
 const uint8_t TILE_MODE[TILE_COUNT] = {M_CLOCK, M_MUSIC, M_PET, M_TOY, M_TEXT, M_PHOTO, M_SING, M_CARD, M_EYES, M_JUKE};
+const char *TILE_CMD[TILE_COUNT]   = {"date", "np", "ps pet", "imu --scope", "cat motd", "img", "sng", "id", "eye", "jbx"};
+const char *TILE_OPEN[TILE_COUNT]  = {"clock", "audio", "pet", "rng", "motd", "img", "sing", "id", "eyes", "jukebox"};
+#define LOG_X 2
+#define LOG_Y 199
+#define LOG_W 236
+#define LOG_H 55
+
+const uint16_t TTY_TEXT = c565(205, 214, 224), TTY_DIM = c565(96, 106, 120), TTY_BG = c565(4, 6, 10);
+String   deckCmd;                 // what the prompt is typing
+uint32_t deckCmdAt = 0;
+int8_t   deckPending = -1;        // the tile it will open once the command is typed
+#define DECK_TYPE_MS 18
+#define SCOPE_N 74
+int8_t   scopeBuf[SCOPE_N];
+uint8_t  scopeHead = 0;
 
 int tileAt(int x, int y) {
   for (int i = 0; i < TILE_COUNT; i++) {
-    int bottom = i >= 5 ? SCR_H : TILE_Y[i] + TILE_H[i] + 3;     // the dock reaches the bottom edge
-    if (x >= TILE_X[i] - 3 && x < TILE_X[i] + TILE_W[i] + 3 && y >= TILE_Y[i] - 3 && y < bottom) return i;
+    int bottom = i >= 5 ? SCR_H : TILE_Y[i] + TILE_H[i] + 3;     // the status bar reaches the bottom edge
+    if (x >= TILE_X[i] - 2 && x < TILE_X[i] + TILE_W[i] + 2 && y >= TILE_Y[i] - 2 && y < bottom) return i;
   }
   return -1;
 }
@@ -1101,104 +1135,197 @@ int tileOfMode(uint8_t m) {
   return -1;
 }
 
+// a pane: a thin border with its command set into the top edge
+void ttyPane(int x, int y, int w, int h, const char *cmd, bool active) {
+  uint16_t edge = active ? ACC : ACC_LOW;
+  gfx->drawRect(x, y, w, h, edge);
+  int tw = (strlen(cmd) + 4) * 6;
+  gfx->fillRect(x + 6, y - 4, tw, 9, TTY_BG);
+  textAt("$", x + 9, y - 3, 1, active ? ACC : TTY_DIM);
+  textAt(cmd, x + 21, y - 3, 1, active ? COL_WHITE : ACC);
+}
+
+// "[=====>----]" style bar, n characters wide
+String asciiBar(float f, int n, char fill, char head, char empty) {
+  int k = (int)(clamp01(f) * (n - 2) + 0.5f);
+  String s = "[";
+  for (int i = 0; i < n - 2; i++) s += i < k - 1 ? fill : i == k - 1 ? head : empty;
+  return s + "]";
+}
+
+String fmtUptime(uint32_t ms) {
+  uint32_t s = ms / 1000;
+  char b[12];
+  if (s >= 86400) snprintf(b, sizeof(b), "%lud%02luh", (unsigned long)(s / 86400), (unsigned long)((s / 3600) % 24));
+  else if (s >= 3600) snprintf(b, sizeof(b), "%luh%02lum", (unsigned long)(s / 3600), (unsigned long)((s / 60) % 60));
+  else snprintf(b, sizeof(b), "%lum%02lus", (unsigned long)(s / 60), (unsigned long)(s % 60));
+  return String(b);
+}
+
+void openModule(int m);
+void deckRun(int ti) {                         // tap on a pane: type its command, then open it
+  if (ti < 0 || deckPending >= 0) return;
+  deckCmd = String("open ") + TILE_OPEN[ti];
+  deckCmdAt = millis();
+  deckPending = ti;
+}
+
 void drawDeck() {
-  drawBackground();
-  dimRect(0, 0, SCR_W, SCR_H, 1);
-  topBar("LARP//OS", false);
-  char buf[24];
+  uint32_t now = millis();
+  if (deckPending >= 0 && now - deckCmdAt >= deckCmd.length() * DECK_TYPE_MS + 160) {
+    int ti = deckPending;
+    deckPending = -1;
+    klog("sh: open %s", TILE_OPEN[ti]);
+    deckCmd = "";
+    openModule(TILE_MODE[ti]);
+    return;
+  }
+  gfx->fillScreen(TTY_BG);
+  char buf[48];
   struct tm t;
   bool haveTime = localNow(t);
+  int activeTile = deckPending;
 
-  // chrono: sits straight on the background
-  brackets(TILE_X[0], TILE_Y[0], TILE_W[0], TILE_H[0], 10, ACC);
-  int hh = -1, mm = 0;
-  if (haveTime) { hh = t.tm_hour; if (!use24h) { hh %= 12; if (hh == 0) hh = 12; } mm = t.tm_min; }
-  segTime(16, 34, 30, 52, 6, hh, mm, !haveTime || (millis() / 500) % 2, ACC, ACC_LOW);
-  if (haveTime) {
-    segDigit(180, 34, 14, 25, 3, t.tm_sec / 10, COL_WHITE, ACC_LOW);
-    segDigit(198, 34, 14, 25, 3, t.tm_sec % 10, COL_WHITE, ACC_LOW);
-    snprintf(buf, sizeof(buf), "%s %02d", DAYS[t.tm_wday], t.tm_mday);
-    textAt(buf, 180, 66, 1, COL_WHITE);
-    textAt(MON[t.tm_mon], 180, 77, 1, ACC);
-    for (int i = 0; i < 60; i++) gfx->fillRect(16 + i * 208 / 60, 91, 2, 3, i <= t.tm_sec ? ACC : ACC_LOW);
-  } else {
-    textAt("NO SYNC", 180, 40, 1, COL_AMBER);
-    textAt("open", 180, 56, 1, COL_WHITE);
-    textAt("the app", 180, 67, 1, COL_WHITE);
+  // prompt line
+  textAt("larp@charm", 16, 3, 1, ACC);                 // kept clear of the screen's rounded corners
+  textAt(":~$", 76, 3, 1, TTY_TEXT);
+  int typed = deckPending >= 0 ? min((int)deckCmd.length(), (int)((now - deckCmdAt) / DECK_TYPE_MS)) : 0;
+  textAt(deckCmd.substring(0, typed), 100, 3, 1, COL_WHITE);
+  if ((now / 450) % 2 || deckPending >= 0) gfx->fillRect(100 + typed * 6, 2, 6, 9, ACC);
+  uint16_t bc = charging ? COL_LIME : batPct > 30 ? TTY_TEXT : batPct > 15 ? COL_AMBER : COL_RED;
+  if (deckPending < 0) {
+    snprintf(buf, sizeof(buf), "%s%d%%", charging ? "+" : "", batPct);
+    textAt(buf, 224 - (int)strlen(buf) * 6, 3, 1, bc);
   }
 
-  // audio
-  int x = TILE_X[1], y = TILE_Y[1];
-  hudPanel(x, y, TILE_W[1], TILE_H[1], ACC, 1);
-  int ax = x + 8, ay = y + 10, tx = x + 62;
-  if (artLoaded && artBuf && FB) {
-    for (int j = 0; j < 48; j++) {
-      const uint16_t *src = artBuf + (20 + j * 5) * SCR_W;
-      uint16_t *dst = FB + (ay + j) * SCR_W + ax;
-      for (int i = 0; i < 48; i++) dst[i] = src[i * 5];
+  // $ date
+  int x = TILE_X[0], y = TILE_Y[0];
+  ttyPane(x, y, TILE_W[0], TILE_H[0], TILE_CMD[0], activeTile == 0);
+  if (haveTime) {
+    int hh = t.tm_hour;
+    if (!use24h) { hh %= 12; if (hh == 0) hh = 12; }
+    snprintf(buf, sizeof(buf), "%02d%c%02d", hh, (now / 500) % 2 ? ':' : ' ', t.tm_min);
+    textAt(buf, x + 6, y + 11, 4, COL_WHITE);
+    snprintf(buf, sizeof(buf), ":%02d", t.tm_sec);
+    textAt(buf, x + 128, y + 25, 2, ACC);
+    snprintf(buf, sizeof(buf), "%s %02d %s %d  utc%+d:%02d", DAYS[t.tm_wday], t.tm_mday, MON[t.tm_mon], t.tm_year + 1900, tzMin / 60, abs(tzMin) % 60);
+    String d = buf; d.toLowerCase();
+    textAt(d, x + 6, y + 47, 1, TTY_DIM);
+  } else {
+    textAt("--:--", x + 6, y + 11, 4, TTY_DIM);
+    textAt("rtc: no sync", x + 6, y + 47, 1, COL_AMBER);
+  }
+  int cx = x + 172;
+  textAt("up", cx, y + 10, 1, TTY_DIM);  textAt(fmtUptime(now), cx + 24, y + 10, 1, TTY_TEXT);
+  snprintf(buf, sizeof(buf), "%.2fv", batVolts);
+  textAt("bat", cx, y + 21, 1, TTY_DIM); textAt(buf, cx + 24, y + 21, 1, bc);
+  textAt("ble", cx, y + 32, 1, TTY_DIM); textAt(bleConnected ? "up" : "down", cx + 24, y + 32, 1, bleConnected ? ACC : TTY_DIM);
+  if (timerEndAt) {
+    unsigned long left = (timerEndAt - now) / 1000;
+    snprintf(buf, sizeof(buf), "%lu:%02lu", left / 60, left % 60);
+    textAt("tmr", cx, y + 43, 1, TTY_DIM); textAt(buf, cx + 24, y + 43, 1, COL_AMBER);
+  } else {
+    snprintf(buf, sizeof(buf), "%lu", (unsigned long)stepsToday);
+    textAt("stp", cx, y + 43, 1, TTY_DIM); textAt(buf, cx + 24, y + 43, 1, TTY_TEXT);
+  }
+
+  // $ np
+  x = TILE_X[1]; y = TILE_Y[1];
+  ttyPane(x, y, TILE_W[1], TILE_H[1], TILE_CMD[1], activeTile == 1);
+  if (npTitle.length()) {
+    textAt(">", x + 6, y + 9, 1, ACC);
+    textAt(marquee(asciiOnly(npTitle), 21, 8), x + 16, y + 9, 1, COL_WHITE);
+    textAt(marquee(asciiOnly(npArtist), 21, 11), x + 16, y + 20, 1, ACC);
+    uint32_t pos = npPosition();
+    textAt(asciiBar(npDurMs ? (float)pos / npDurMs : 0, 22, '=', '>', '-'), x + 6, y + 31, 1, TTY_TEXT);
+    snprintf(buf, sizeof(buf), "%lu:%02lu/%lu:%02lu", (unsigned long)(pos / 60000), (unsigned long)((pos / 1000) % 60),
+             (unsigned long)(npDurMs / 60000), (unsigned long)((npDurMs / 1000) % 60));
+    textAt(buf, x + 6, y + 42, 1, TTY_DIM);
+    for (int i = 0; i < 8; i++) {
+      float v = npPlaying ? fabsf(sinf(frameNo * 0.3f + i * 0.9f) * sinf(i * 1.7f + frameNo * 0.11f)) : 0.05f;
+      int h = 1 + (int)(v * 8);
+      gfx->fillRect(x + 92 + i * 6, y + 50 - h, 4, h, ACC);
     }
   } else {
-    for (int j = 0; j < 48; j += 4)
-      for (int i = 0; i < 48; i += 4) gfx->fillRect(ax + i, ay + j, 4, 4, random(0, 4) == 0 ? ACC_DIM : COL_BLACK);
+    textAt("> idle", x + 6, y + 9, 1, TTY_TEXT);
+    textAt("waiting on /dev/np", x + 6, y + 20, 1, TTY_DIM);
+    textAt(asciiBar(0, 22, '=', '>', '-'), x + 6, y + 31, 1, TTY_DIM);
   }
-  gfx->drawRect(ax - 1, ay - 1, 50, 50, ACC_DIM);
-  if (npTitle.length()) {
-    textAt(marquee(asciiOnly(npTitle), 13, 8), tx, y + 10, 1, COL_WHITE);
-    textAt(marquee(asciiOnly(npArtist), 13, 11), tx, y + 22, 1, ACC);
-  } else {
-    textAt("NO SIGNAL", tx, y + 10, 1, COL_WHITE);
-    textAt("play a song", tx, y + 22, 1, ACC_DIM);
-  }
-  for (int i = 0; i < 13; i++) {
-    float v = npPlaying ? fabsf(sinf(frameNo * 0.3f + i * 0.9f) * sinf(i * 1.7f + frameNo * 0.11f)) : 0.06f;
-    int h = 2 + (int)(v * 14);
-    gfx->fillRect(tx + i * 6, y + 50 - h, 4, h, ACC);
-  }
-  gfx->drawFastHLine(tx, y + 55, 78, ACC_LOW);
-  if (npDurMs) gfx->fillRect(tx, y + 54, max(2, (int)(78.0f * npPosition() / npDurMs)), 3, COL_WHITE);
-  tagLabel("AUDIO", x + 10, y - 4);
 
-  // daemon (the pet)
+  // $ ps pet
   x = TILE_X[2]; y = TILE_Y[2];
-  hudPanel(x, y, TILE_W[2], TILE_H[2], ACC, 1);
+  ttyPane(x, y, TILE_W[2], TILE_H[2], TILE_CMD[2], activeTile == 2);
   const char *const *spr = petSpecies == 1 ? GHOST : petSpecies == 2 ? FROG : CAT;
-  bool dizzy = millis() < petDizzyUntil;
-  int bob = (int)(fabsf(sinf(frameNo * (petMood > 40 ? 0.18f : 0.07f))) * 4);
-  int lean = imuOK ? constrain((int)(tiltX * 8), -8, 8) : 0;
-  if (dizzy) lean += (int)(sinf(frameNo * 0.9f) * 3);
-  drawSprite(spr, x + 18 + lean, y + 16 - bob, 3, petColor, (frameNo % 60) < 3 || dizzy);
-  for (int i = 0; i < 8; i++) gfx->fillRect(x + 8 + i * 7, y + 55, 5, 4, i < (petMood + 6) / 13 ? (petMood > 35 ? ACC : COL_RED) : ACC_LOW);
-  tagLabel("DAEMON", x + 10, y - 4);
+  bool dizzy = now < petDizzyUntil;
+  int bob = (int)(fabsf(sinf(frameNo * (petMood > 40 ? 0.18f : 0.07f))) * 3);
+  int lean = imuOK ? constrain((int)(tiltX * 5), -5, 5) : 0;
+  if (dizzy) lean += (int)(sinf(frameNo * 0.9f) * 2);
+  drawSprite(spr, x + 7 + lean, y + 10 - bob, 2, petColor, (frameNo % 60) < 3 || dizzy);
+  String pn = asciiOnly(petName); if (pn.length() > 7) pn = pn.substring(0, 7);
+  textAt(pn, x + 38, y + 10, 1, COL_WHITE);
+  textAt(dizzy ? "@_@" : petSpecies == 1 ? "ghost" : petSpecies == 2 ? "frog" : "cat", x + 38, y + 21, 1, TTY_DIM);
+  snprintf(buf, sizeof(buf), "mood %d%%", petMood);
+  textAt(buf, x + 6, y + 33, 1, petMood > 35 ? TTY_TEXT : COL_RED);
+  textAt(asciiBar(petMood / 100.0f, 12, '#', '#', '.'), x + 6, y + 43, 1, petMood > 35 ? ACC : COL_RED);
 
-  // rng: a gimbal that follows the motion sensor
+  // $ imu --scope: an oscilloscope of how hard the charm is moving
   x = TILE_X[3]; y = TILE_Y[3];
-  hudPanel(x, y, TILE_W[3], TILE_H[3], ACC, 1);
-  int gx0 = x + 36, gy0 = y + 32;
-  gfx->drawCircle(gx0, gy0, 19, ACC_DIM);
-  gfx->drawFastHLine(gx0 - 23, gy0, 47, ACC_LOW);
-  gfx->drawFastVLine(gx0, gy0 - 23, 47, ACC_LOW);
-  int px = gx0, py = gy0;
-  if (imuOK) { px += constrain((int)(tiltX * 18), -18, 18); py += constrain((int)(tiltY * 18), -18, 18); }
-  else       { px += (int)(cosf(frameNo * 0.08f) * 12); py += (int)(sinf(frameNo * 0.08f) * 12); }
-  gfx->fillRect(px - 2, py - 2, 5, 5, COL_WHITE);
-  gfx->drawRect(px - 4, py - 4, 9, 9, ACC);
-  tagLabel("RNG", x + 10, y - 4);
+  ttyPane(x, y, TILE_W[3], TILE_H[3], TILE_CMD[3], activeTile == 3);
+  float mag = sqrtf(accX * accX + accY * accY + accZ * accZ);
+  float v = imuOK ? (mag - 1.0f) * 40 + tiltX * 6 : 0;
+  scopeBuf[scopeHead] = (int8_t)constrain((int)v, -13, 13);
+  scopeHead = (scopeHead + 1) % SCOPE_N;
+  int sx = x + 6, sy = y + 22;
+  for (int i = 0; i < SCOPE_N; i += 4) gfx->drawPixel(sx + i, sy, ACC_LOW);
+  for (int k = -12; k <= 12; k += 6) gfx->drawPixel(sx - 2, sy + k, ACC_LOW);
+  int prev = sy - scopeBuf[scopeHead];
+  for (int i = 1; i < SCOPE_N; i++) {
+    int yy = sy - scopeBuf[(scopeHead + i) % SCOPE_N];
+    gfx->drawLine(sx + i - 1, prev, sx + i, yy, ACC);
+    prev = yy;
+  }
+  if (imuOK) snprintf(buf, sizeof(buf), "|a| %.2fg", mag); else snprintf(buf, sizeof(buf), "no imu");
+  textAt(buf, x + 6, y + 41, 1, imuOK ? TTY_TEXT : COL_AMBER);
 
-  // msg
+  // $ cat motd
   x = TILE_X[4]; y = TILE_Y[4];
-  hudPanel(x, y, TILE_W[4], TILE_H[4], ACC, 1);
+  ttyPane(x, y, TILE_W[4], TILE_H[4], TILE_CMD[4], activeTile == 4);
   String m = asciiOnly(textMsg);
   m.replace('\n', ' ');
-  textAt(marquee(m, 11, 5), x + 8, y + 16, 2, COL_WHITE);
-  textAt((millis() / 400) % 2 ? "> _" : ">", x + 8, y + 41, 1, ACC);
-  tagLabel("MSG", x + 10, y - 4);
+  textAt(marquee(m, 11, 5), x + 6, y + 12, 2, COL_WHITE);
+  snprintf(buf, sizeof(buf), "%u bytes", (unsigned)textMsg.length());
+  textAt(buf, x + 6, y + 37, 1, TTY_DIM);
+  if ((now / 450) % 2) gfx->fillRect(x + 6 + (strlen(buf) + 1) * 6, y + 36, 6, 9, ACC);
 
-  // dock
-  static const char *DOCK[5] = {"IMG", "SNG", "ID", "EYE", "JBX"};
+  // $ dmesg -w: the newest line types itself in
+  gfx->drawRect(LOG_X, LOG_Y, LOG_W, LOG_H, ACC_LOW);
+  gfx->fillRect(LOG_X + 6, LOG_Y - 4, 13 * 6, 9, TTY_BG);
+  textAt("$", LOG_X + 9, LOG_Y - 3, 1, TTY_DIM);
+  textAt("dmesg -w", LOG_X + 21, LOG_Y - 3, 1, ACC);
+  int shown = min((int)klogCount, 4);
+  for (int k = 0; k < shown; k++) {
+    const KLine &l = klogBuf[(klogHead + KLOG_N - shown + k) % KLOG_N];
+    int ly = LOG_Y + 7 + k * 11;
+    bool newest = k == shown - 1;
+    snprintf(buf, sizeof(buf), "[%6.1f]", l.t / 1000.0f);
+    textAt(buf, LOG_X + 5, ly, 1, TTY_DIM);
+    String s = l.s;
+    if (newest) s = s.substring(0, min((int)s.length(), (int)((now - l.t) / 28)));
+    int colon = s.indexOf(':');
+    if (colon > 0) {
+      textAt(s.substring(0, colon + 1), LOG_X + 5 + 54, ly, 1, ACC);
+      textAt(s.substring(colon + 1), LOG_X + 5 + 54 + (colon + 1) * 6, ly, 1, newest ? COL_WHITE : TTY_TEXT);
+    } else textAt(s, LOG_X + 5 + 54, ly, 1, newest ? COL_WHITE : TTY_TEXT);
+  }
+
+  // tmux status bar: the other screens, as windows
+  gfx->fillRect(0, 258, SCR_W, 22, ACC);
   for (int i = 0; i < 5; i++) {
-    int k = 5 + i;
-    hudPanel(TILE_X[k], TILE_Y[k], TILE_W[k], TILE_H[k], ACC, 2);
-    textAt(DOCK[i], TILE_X[k] + (TILE_W[k] - (int)strlen(DOCK[i]) * 12) / 2, TILE_Y[k] + 4, 2, ACC);
+    int k = 5 + i, wx = TILE_X[k];
+    bool act = activeTile == k;
+    if (act) gfx->fillRect(wx, 258, TILE_W[k], 22, TTY_BG);
+    if (i) gfx->drawFastVLine(wx, 261, 16, act ? ACC : TTY_BG);
+    textAt(TILE_CMD[k], wx + (TILE_W[k] - (int)strlen(TILE_CMD[k]) * 12) / 2 + 1, 262, 2, act ? ACC : TTY_BG);
   }
 }
 
@@ -3382,6 +3509,7 @@ void xferEnd() {
     if (fsOK) { File f = FFat.open("/photo.bin", "w"); if (f) { f.write((uint8_t *)photoBuf, FB_BYTES); f.close(); } }
     xferActive = false;
     setMode(M_PHOTO, false);
+    klog("fs: photo.bin %luk", (unsigned long)(xferSize / 1024));
   } else if (xferKind == 3) {
     xferActive = false;
     bool ok = false;
@@ -3400,6 +3528,7 @@ void xferEnd() {
     setMode(M_SING, false);
     singRestart();
     toast("new show", 1200);
+    klog("fs: show.bin, %lu bytes", (unsigned long)xferSize);
   } else if (xferKind == 4) {
     xferFlush();
     xferFile.close();
@@ -3414,6 +3543,7 @@ void xferEnd() {
     scanMySongs();
     jbCat = MY_CAT; jbSelId = 100 + xferId;
     toast("song added", 1200);
+    klog("fs: song %d saved", 100 + (int)xferId);
   }
   char b[32]; snprintf(b, sizeof(b), "ack=%lu", (unsigned long)xferGot);
   notifyText(b);
@@ -3421,7 +3551,6 @@ void xferEnd() {
 }
 
 // ───────────── Command handling ─────────────
-void setSkin(uint8_t s);
 void handlePacket(const uint8_t *d, uint16_t n) {
   if (n == 0) return;
   // background traffic (now-playing updates, album art, time sync) must not keep the screen awake
@@ -3443,6 +3572,7 @@ void handlePacket(const uint8_t *d, uint16_t n) {
         prefs.putString("text", textMsg); prefs.putUChar("tstyle", textStyle);
         prefs.putUShort("tfg", textFg);   prefs.putUShort("tbg", textBg);
         setMode(M_TEXT, false);
+        klog("rx: motd, %u bytes", (unsigned)textMsg.length());
       }
       break;
 
@@ -3453,6 +3583,7 @@ void handlePacket(const uint8_t *d, uint16_t n) {
         setSystemTime(e);
         rtcWriteUTC(e);
         prefs.putShort("tz", tzMin);
+        klog("rtc: synced, utc%+d:%02d", tzMin / 60, abs(tzMin) % 60);
       }
       break;
 
@@ -3538,6 +3669,7 @@ void handlePacket(const uint8_t *d, uint16_t n) {
         themePreviewUntil = millis() + 2500;
         glitchFrames = 2;
         toast(THEME_NAMES[theme], 900);
+        klog("tty: theme %s", THEME_NAMES[theme]);
       }
       break;
 
@@ -3756,7 +3888,7 @@ void onTap(bool dbl) {
   sfx(0);
   switch (mode) {
     case M_DECK:
-      { int ti = tileAt(tch.x0, tch.y0); if (ti >= 0) openModule(TILE_MODE[ti]); }
+      deckRun(tileAt(tch.x0, tch.y0));
       break;
     case M_CLOCK:
       if (dbl) {              // second tap of a double tap: undo the style change, flip 12/24 h
@@ -3810,10 +3942,11 @@ void onTap(bool dbl) {
 
 void onShake() {
   if (sleeping) {
-    if (shakeWake) { touchActivity(); sfx(0); }
+    if (shakeWake) { touchActivity(); sfx(0); klog("imu: shake, waking up"); }
     return;
   }
   touchActivity();
+  klog("imu: shake, |a|=%.1fg", sqrtf(accX * accX + accY * accY + accZ * accZ));
   switch (mode) {
     case M_DECK:
       // fall through
@@ -4101,6 +4234,33 @@ void setup() {
   if (charging) { chargeReturn = mode; setMode(M_CHARGE, false); }
   else setMode(mode, false);
   glitchFrames = 5;
+  klog("kernel: larp-os " FW_VERSION " up");
+  klog("imu: %s", imuOK ? "qmi8658 online" : "no reply");
+  klog("fs: %s", fsOK ? "ffat mounted" : "not mounted");
+  klog("rtc: %s", timeValid ? "clock ok" : "needs sync");
+}
+
+// Turns changes in the charm's state into log lines for the deck's dmesg pane.
+void klogWatch() {
+  static bool inited = false, ble = false, chg = false;
+  static int batBand = -1, songWas = -1;
+  static uint32_t stepsBand = 0, timerWas = 0, alarmWas = 0;
+  static String trackWas;
+  if (!inited) {
+    inited = true; ble = bleConnected; chg = charging; batBand = batPct / 10; stepsBand = stepsToday / 500;
+    songWas = jbPlaying ? jbSong : -1; trackWas = npTitle;
+    return;
+  }
+  if (bleConnected != ble) { ble = bleConnected; klog(ble ? "ble: link up" : "ble: link down"); }
+  if (charging != chg) { chg = charging; klog(chg ? "pwr: charging, %d%%" : "pwr: on battery, %d%%", batPct); }
+  if (batPct / 10 != batBand) { if (!charging && batPct / 10 < batBand) klog("pwr: battery %d%%, %.2fv", batPct, batVolts); batBand = batPct / 10; }
+  if (stepsToday / 500 != stepsBand) { stepsBand = stepsToday / 500; if (stepsBand) klog("ped: %lu steps today", (unsigned long)stepsToday); }
+  if ((timerEndAt != 0) != (timerWas != 0)) { if (timerEndAt) klog("tmr: armed, %lum", (unsigned long)((timerEndAt - millis() + 59999) / 60000)); timerWas = timerEndAt; }
+  if ((alarmUntil != 0) && !alarmWas) klog("tmr: time's up");
+  alarmWas = alarmUntil;
+  int song = jbPlaying ? jbSong : -1;
+  if (song != songWas) { songWas = song; if (song >= 0) klog("snd: %s", songName(song)); }
+  if (npTitle != trackWas) { trackWas = npTitle; if (npTitle.length()) klog("np: %s", asciiOnly(npTitle).c_str()); }
 }
 
 void loop() {
@@ -4121,6 +4281,7 @@ void loop() {
 
   handleTouch();
   handleButton();
+  klogWatch();
   if (imuUpdate()) onShake();
   serviceTimers();
   updateBattery();

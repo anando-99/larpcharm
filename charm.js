@@ -1,4 +1,4 @@
-// A working copy of the charm's screen. It draws the same deck and blocks as firmware 4.0,
+// A working copy of the charm's screen. It draws the same deck and blocks as firmware 8.1,
 // follows the controls on this page, and opens a block when you tap it.
 (() => {
   const $ = id => document.getElementById(id);
@@ -9,7 +9,7 @@
   const THEMES = ['#00E5FF', '#FF2BD6', '#FFB000', '#39FF14', '#FF3B30', '#C8DCFF'];
   const VOID = '#03050c';
   const val = id => $(id).value;
-  let frame = 0, glitch = 0, tiltX = 0, tiltY = 0.4, ACC = THEMES[0];
+  let frame = 0, glitch = 0, tiltX = 0, ACC = THEMES[0];
 
   // ── tilt toward the pointer (or with the phone) ──
   let rx = 0, ry = 0, trx = 0, tryy = 0;
@@ -44,7 +44,6 @@
     [[x, y, 1, 1], [x + w - 1, y, -1, 1], [x, y + h - 1, 1, -1], [x + w - 1, y + h - 1, -1, -1]].forEach(([px, py, sx, sy]) => { c.moveTo(px + .5 + sx * k, py + .5); c.lineTo(px + .5, py + .5); c.lineTo(px + .5, py + .5 + sy * k); });
     c.stroke();
   }
-  const tag = (s, x, y) => { R(x, y, s.length * 6 + 5, 9, ACC); T(s, x + 3, y + 1, 1, '#000'); };
   const SEG7 = [0x3F, 0x06, 0x5B, 0x4F, 0x66, 0x6D, 0x7D, 0x07, 0x7F, 0x6F];
   function segDigit(x, y, w, h, t, d, on, off) {
     const m = d >= 0 && d <= 9 ? SEG7[d] : 0x40, vl = ((h - 3 * t) / 2 | 0) - 2, hl = w - 2 * t - 2, yg = y + t + vl + 2, yd = yg + t + vl + 2;
@@ -120,9 +119,24 @@
     }
   }
 
-  // ── the deck ──
-  const TX = [8, 8, 160, 8, 86, 9, 54, 99, 144, 189], TY = [26, 104, 104, 174, 174, 238, 238, 238, 238, 238], TW = [224, 146, 72, 72, 146, 42, 42, 42, 42, 42], TH = [72, 64, 64, 58, 58, 22, 22, 22, 22, 22];
+  // ── the deck: a live tmux session (same layout as the firmware's drawDeck) ──
+  // The classic 5x7 GLCD font the charm draws with (Adafruit GFX, BSD licence), so the preview matches pixel for pixel.
+  const FONT = Uint8Array.from(atob('AAAAAAA+W09bPj5rT2s+HD58PhwYPH48GBxXfVccHF5/XhwAGDwYAP/nw+f/ABgkGAD/59vn/zBIOgYOJil5KSZAfwUFB0B/BSU/WjznPFp/PhwcCAgcHD5/FCJ/IhRfXwBfXwYJfwF/AGaJlWpgYGBgYJSi/6KUCAR+BAgQIH4gEAgIKhwICBwqCAgeEBAQEAweDB4MMDg+ODAGDj4OBgAAAAAAAABfAAAABwAHABR/FH8UJCp/KhIjEwhkYjZJViBQAAgHAwAAHCJBAABBIhwAKhx/HCoICD4ICACAcDAACAgICAgAAGBgACAQCAQCPlFJRT4AQn9AAHJJSUlGIUFJTTMYFBJ/ECdFRUU5PEpJSTFBIREJBzZJSUk2RklJKR4AABQAAABANAAAAAgUIkEUFBQUFABBIhQIAgFZCQY+QV1ZTnwSERJ8f0lJSTY+QUFBIn9BQUE+f0lJSUF/CQkJAT5BQVFzfwgICH8AQX9BACBAQT8BfwgUIkF/QEBAQH8CHAJ/fwQIEH8+QUFBPn8JCQkGPkFRIV5/CRkpRiZJSUkyAwF/AQM/QEBAPx8gQCAfP0A4QD9jFAgUYwMEeAQDYVlJTUMAf0FBQQIECBAgAEFBQX8EAgECBEBAQEBAAAMHCAAgVFR4QH8oREQ4OERERCg4REQofzhUVFQYAAh+CQIYpKSceH8IBAR4AER9QAAgQEA9AH8QKEQAAEF/QAB8BHgEeHwIBAR4OERERDj8GCQkGBgkJBj8fAgEBAhIVFRUJAQEP0QkPEBAIHwcIEAgHDxAMEA8RCgQKERMkJCQfERkVExEAAg2QQAAAHcAAABBNggAAgECBAI8JiMmPB6hoWESOkBAIHo4VFRVWSFVVXlBIlRUeEIhVVR4QCBUVXlADB5SchI5VVVVWTlUVFRZOVVUVFgAAEV8QQACRX1CAAFFfEB9EhESffAoJSjwfFRVRQAgVFR8VHwKCX9JMklJSTI6REREOjJKSEgwOkFBIXo6QkAgeACdoKB9PUJCQj09QEBAPTwk/yQkSH5JQ2YrL/wvK/8JKfYgwIh+CQMgVFR5QQAARH1BMEhISjI4QEAiegB6CgpyfQ0ZMX0mKSkvKCYpKSkmMEhNQCA4CAgICAgICAg4LxDIrLovECg0+gAAewAACBQqFCIiFCoUCFUAVQBVqlWqVar/Vf9V/wAAAP8AEBAQ/wAUFBT/ABAQ/wD/EBDwEPAUFBT8ABQU9wD/AAD/AP8UFPQE/BQUFxAfEBAfEB8UFBQfABAQEPAAAAAAHxAQEBAfEBAQEPAQAAAA/xAQEBAQEBAQEP8QAAAA/xQAAP8A/wAAHxAXAAD8BPQUFBcQFxQU9AT0AAD/APcUFBQUFBQU9wD3FBQUFxQQEB8QHxQUFPQUEBDwEPAAAB8QHwAAAB8UAAAA/BQAAPAQ8BAQ/xD/FBQU/xQQEBAfAAAAAPAQ///////w8PDw8P///wAAAAAA//8PDw8PDzhERDhE/EpKSjR+AgIGBgJ+An4CY1VJQWM4REQ8BEB+IB4gBgJ+AgKZpeelmRwqSSocTHIBckwwSk1NMDBIeEgwvGJaRj0+SUlJAH4BAQF+KioqKipERF9EREBRSkRAQERKUUAAAP8BA+CA/wAACAhrawg2EjYkNgAGCQkGAAAYGAAAABAQADBA/wEBAB8BAR4AGR0XEgA8PDw8AAAAAAA='), ch => ch.charCodeAt(0));
+  const atlas = {};
+  function glyphs(col, size) {
+    const k = col + size; if (atlas[k]) return atlas[k];
+    const o = document.createElement('canvas'); o.width = 256 * 6 * size; o.height = 8 * size; const x = o.getContext('2d'); x.fillStyle = col;
+    for (let ch = 0; ch < 256; ch++) for (let i = 0; i < 5; i++) { let l = FONT[ch * 5 + i]; for (let j = 0; j < 8; j++, l >>= 1) if (l & 1) x.fillRect((ch * 6 + i) * size, j * size, size, size); }
+    return (atlas[k] = o);
+  }
+  function G(s, x, y, size, col) {                 // text exactly as the charm draws it
+    const a = glyphs(col, size); s = String(s);
+    for (let i = 0; i < s.length; i++) { const ch = s.charCodeAt(i) & 255; c.drawImage(a, ch * 6 * size, 0, 6 * size, 8 * size, x + i * 6 * size, y, 6 * size, 8 * size); }
+  }
+  const TX = [2, 2, 152, 2, 92, 10, 54, 98, 142, 186], TY = [15, 81, 81, 141, 141, 258, 258, 258, 258, 258], TW = [236, 146, 86, 86, 146, 44, 44, 44, 44, 44], TH = [62, 56, 56, 54, 54, 22, 22, 22, 22, 22];
   const TMODE = [0, 4, 5, 6, 1, 2, 3, 7, 9, 10];
+  const TCMD = ['date', 'np', 'ps pet', 'imu --scope', 'cat motd', 'img', 'sng', 'id', 'eye', 'jbx'];
+  const TOPEN = ['clock', 'audio', 'pet', 'rng', 'motd', 'img', 'sing', 'id', 'eyes', 'jukebox'];
   const DAYS = ['SUN', 'MON', 'TUE', 'WED', 'THU', 'FRI', 'SAT'], MON = ['JAN', 'FEB', 'MAR', 'APR', 'MAY', 'JUN', 'JUL', 'AUG', 'SEP', 'OCT', 'NOV', 'DEC'];
   const SPR = [
     ['K..........K', 'KK........KK', 'KBK......KBK', 'KBBKKKKKKBBK', 'KBBBBBBBBBBK', 'KBBKBBBBKBBK', 'KBBKBBBBKBBK', 'KBPBBKKBBPBK', 'KBBBBBBBBBBK', '.KBBBBBBBBK.', '..KBBBBBBK..', '...KKKKKK...'],
@@ -132,41 +146,90 @@
     const col = val('petCol'), spr = SPR[+$('petSp').value] || SPR[0];
     spr.forEach((row, y) => [...row].forEach((ch, x) => { if (ch !== '.') R(ox + x * sc, oy + y * sc, sc, sc, ch === 'K' ? '#1e1432' : ch === 'W' ? '#fff' : ch === 'P' ? '#f472b6' : col); }));
   }
+  const TTY_TEXT = '#cdd6e0', TTY_DIM = '#606a78', TTY_BG = '#04060a';
+  const boot = performance.now();
+  const klog = [];
+  const charmLog = window.charmLog = msg => { klog.push({ t: performance.now() - boot, s: String(msg).replace(/[^\x20-\x7e]/g, '?').slice(0, 31) }); if (klog.length > 8) klog.shift(); };
+  ['kernel: larp-os 8.0 up', 'imu: qmi8658 online', 'fs: ffat mounted', 'rtc: clock ok'].forEach(charmLog);
+  const typing = { cmd: '', at: 0, tile: -1 };
+  const scope = new Array(74).fill(0); let scopeHead = 0, lastTilt = 0;
+  const bar = (f, n, fill, head, empty) => { const k = Math.round(Math.max(0, Math.min(1, f)) * (n - 2)); let s = '['; for (let i = 0; i < n - 2; i++) s += i < k - 1 ? fill : i === k - 1 ? head : empty; return s + ']'; };
+  const uptime = ms => { const s = ms / 1000 | 0; return s >= 86400 ? `${s / 86400 | 0}d${pad((s / 3600 | 0) % 24)}h` : s >= 3600 ? `${s / 3600 | 0}h${pad((s / 60 | 0) % 60)}m` : `${s / 60 | 0}m${pad(s % 60)}s`; };
+  function pane(i, active) {
+    const x = TX[i], y = TY[i];
+    c.strokeStyle = active ? ACC : mixk(ACC, .2); c.lineWidth = 1; c.strokeRect(x + .5, y + .5, TW[i] - 1, TH[i] - 1);
+    R(x + 6, y - 4, (TCMD[i].length + 4) * 6, 9, TTY_BG);
+    G('$', x + 9, y - 3, 1, active ? ACC : TTY_DIM); G(TCMD[i], x + 21, y - 3, 1, active ? '#fff' : ACC);
+  }
+  function deckRun(i) { if (i < 0 || typing.tile >= 0) return; typing.cmd = 'open ' + TOPEN[i]; typing.at = performance.now(); typing.tile = i; }
   function deck() {
-    background(ui.bg); dim(0, 0, W, H, .5); topBar('LARP//OS', false);
-    T(((($('stepCount') || {}).textContent || '').replace(/[^0-9]/g, '') || '0') + ' STP', 88, 9, 1, '#fff');
-    const LOW = mixk(ACC, .2), DIM = mixk(ACC, .45), d = new Date();
-    brackets(TX[0], TY[0], TW[0], TH[0], 10, ACC);
-    segTime(16, 34, 30, 52, 6, d.getHours(), d.getMinutes(), d.getMilliseconds() < 500, ACC, LOW);
-    segDigit(180, 34, 14, 25, 3, d.getSeconds() / 10 | 0, '#fff', LOW); segDigit(198, 34, 14, 25, 3, d.getSeconds() % 10, '#fff', LOW);
-    T(DAYS[d.getDay()] + ' ' + pad(d.getDate()), 180, 66, 1, '#fff'); T(MON[d.getMonth()], 180, 77, 1, ACC);
-    for (let i = 0; i < 60; i++) R(16 + (i * 208 / 60 | 0), 91, 2, 3, i <= d.getSeconds() ? ACC : LOW);
-    // audio
-    let x = TX[1], y = TY[1]; hudPanel(x, y, TW[1], TH[1], ACC, .5);
-    const s = song(), tx = x + 62;
-    if (ui.artReady) c.drawImage($('artCv'), 0, 20, 240, 240, x + 8, y + 10, 48, 48);
-    else for (let j = 0; j < 48; j += 4) for (let i = 0; i < 48; i += 4) R(x + 8 + i, y + 10 + j, 4, 4, Math.random() < .25 ? DIM : '#000');
-    c.strokeStyle = DIM; c.strokeRect(x + 7.5, y + 9.5, 49, 49);
-    if (s.title) { T(marquee(s.title, 13, 8), tx, y + 10, 1, '#fff'); T(marquee(s.artist, 13, 11), tx, y + 22, 1, ACC); }
-    else { T('NO SIGNAL', tx, y + 10, 1, '#fff'); T('play a song', tx, y + 22, 1, DIM); }
-    for (let i = 0; i < 13; i++) { const h = 2 + (eq(i) * 14 | 0); R(tx + i * 6, y + 50 - h, 4, h, ACC); }
-    R(tx, y + 55, 78, 1, LOW); if (s.title) R(tx, y + 54, 30 + (frame / 8) % 48, 3, '#fff');
-    tag('AUDIO', x + 10, y - 4);
-    // daemon
-    x = TX[2]; y = TY[2]; hudPanel(x, y, TW[2], TH[2], ACC, .5);
-    sprite(x + 18 + Math.round(tiltX * 8), y + 16 - (Math.abs(Math.sin(frame * 0.18)) * 4 | 0), 3);
-    for (let i = 0; i < 8; i++) R(x + 8 + i * 7, y + 55, 5, 4, i < 6 ? ACC : LOW);
-    tag('DAEMON', x + 10, y - 4);
-    // rng
-    x = TX[3]; y = TY[3]; hudPanel(x, y, TW[3], TH[3], ACC, .5);
-    const gx = x + 36, gy = y + 32; circle(gx, gy, 19, DIM); R(gx - 23, gy, 47, 1, LOW); R(gx, gy - 23, 1, 47, LOW);
-    const px = gx + Math.round(tiltX * 18), py = gy + Math.round(tiltY * 18); R(px - 2, py - 2, 5, 5, '#fff'); c.strokeStyle = ACC; c.strokeRect(px - 3.5, py - 3.5, 8, 8);
-    tag('RNG', x + 10, y - 4);
-    // msg
-    x = TX[4]; y = TY[4]; hudPanel(x, y, TW[4], TH[4], ACC, .5);
-    T(marquee((val('txt') || ' ').replace(/\n/g, ' '), 11, 5), x + 8, y + 16, 2, '#fff'); T(frame % 48 < 24 ? '> _' : '>', x + 8, y + 41, 1, ACC);
-    tag('MSG', x + 10, y - 4);
-    ['IMG', 'SNG', 'ID', 'EYE', 'JBX'].forEach((l, i) => { const k = 5 + i; hudPanel(TX[k], TY[k], TW[k], TH[k], ACC, .75); T(l, TX[k] + (TW[k] - l.length * 12) / 2, TY[k] + 4, 2, ACC); });
+    const now = performance.now(), up = now - boot, d = new Date(), on = document.body.classList.contains('connected');
+    if (typing.tile >= 0 && now - typing.at >= typing.cmd.length * 18 + 160) { const i = typing.tile; typing.tile = -1; typing.cmd = ''; charmLog('sh: open ' + TOPEN[i]); window.charmGoto(TMODE[i]); }
+    const act = typing.tile, LOW = mixk(ACC, .2);
+    R(0, 0, W, H, TTY_BG);
+    // prompt
+    G('larp@charm', 16, 3, 1, ACC); G(':~$', 76, 3, 1, TTY_TEXT);
+    const typed = act >= 0 ? Math.min(typing.cmd.length, (now - typing.at) / 18 | 0) : 0;
+    G(typing.cmd.slice(0, typed), 100, 3, 1, '#fff');
+    if ((now / 450 | 0) % 2 || act >= 0) R(100 + typed * 6, 2, 6, 9, ACC);
+    const bt = (ui.charging ? '+' : '') + (ui.bat || 76) + '%', bcol = ui.charging ? '#34c759' : TTY_TEXT;
+    if (act < 0) G(bt, 224 - bt.length * 6, 3, 1, bcol);
+    // $ date
+    let x = TX[0], y = TY[0]; pane(0, act === 0);
+    G(pad(d.getHours()) + ((now / 500 | 0) % 2 ? ':' : ' ') + pad(d.getMinutes()), x + 6, y + 11, 4, '#fff');
+    G(':' + pad(d.getSeconds()), x + 128, y + 25, 2, ACC);
+    const tz = -new Date().getTimezoneOffset(), tzs = (tz < 0 ? '-' : '+') + (Math.abs(tz) / 60 | 0) + ':' + pad(Math.abs(tz) % 60);
+    G(`${DAYS[d.getDay()]} ${pad(d.getDate())} ${MON[d.getMonth()]} ${d.getFullYear()}  utc${tzs}`.toLowerCase(), x + 6, y + 47, 1, TTY_DIM);
+    const cx = x + 172;
+    [['up', uptime(up), TTY_TEXT], ['bat', '3.98v', bcol], ['ble', on ? 'up' : 'down', on ? ACC : TTY_DIM], ['stp', (($('stepCount') || {}).textContent || '0').replace(/[^0-9]/g, '') || '0', TTY_TEXT]]
+      .forEach(([k, v, col], i) => { G(k, cx, y + 10 + i * 11, 1, TTY_DIM); G(v, cx + 24, y + 10 + i * 11, 1, col); });
+    // $ np
+    x = TX[1]; y = TY[1]; pane(1, act === 1);
+    const s = song();
+    if (s.title) {
+      G('>', x + 6, y + 9, 1, ACC); G(marquee(s.title, 21, 8), x + 16, y + 9, 1, '#fff'); G(marquee(s.artist, 21, 11), x + 16, y + 20, 1, ACC);
+      const p = ((frame / 30) % 210) / 210; G(bar(p, 22, '=', '>', '-'), x + 6, y + 31, 1, TTY_TEXT);
+      const sec = p * 210 | 0; G(`${sec / 60 | 0}:${pad(sec % 60)}/3:30`, x + 6, y + 42, 1, TTY_DIM);
+      for (let i = 0; i < 8; i++) { const h = 1 + (eq(i) * 8 | 0); R(x + 92 + i * 6, y + 50 - h, 4, h, ACC); }
+    } else { G('> idle', x + 6, y + 9, 1, TTY_TEXT); G('waiting on /dev/np', x + 6, y + 20, 1, TTY_DIM); G(bar(0, 22, '=', '>', '-'), x + 6, y + 31, 1, TTY_DIM); }
+    // $ ps pet
+    x = TX[2]; y = TY[2]; pane(2, act === 2);
+    sprite(x + 7 + Math.round(tiltX * 5), y + 10 - (Math.abs(Math.sin(frame * 0.18)) * 3 | 0), 2);
+    G((val('petName') || 'pet').slice(0, 7), x + 38, y + 10, 1, '#fff'); G(['cat', 'ghost', 'frog'][+$('petSp').value] || 'cat', x + 38, y + 21, 1, TTY_DIM);
+    G('mood 82%', x + 6, y + 33, 1, TTY_TEXT); G(bar(0.82, 12, '#', '#', '.'), x + 6, y + 43, 1, ACC);
+    // $ imu --scope: the pointer stands in for the motion sensor
+    x = TX[3]; y = TY[3]; pane(3, act === 3);
+    scope[scopeHead] = Math.max(-13, Math.min(13, Math.round((tiltX - lastTilt) * 260 + tiltX * 6))); lastTilt = tiltX; scopeHead = (scopeHead + 1) % 74;
+    const sx = x + 6, sy = y + 22;
+    for (let i = 0; i < 74; i += 4) R(sx + i, sy, 1, 1, LOW);
+    for (let k = -12; k <= 12; k += 6) R(sx - 2, sy + k, 1, 1, LOW);
+    c.strokeStyle = ACC; c.lineWidth = 1; c.beginPath();
+    for (let i = 0; i < 74; i++) { const yy = sy - scope[(scopeHead + i) % 74] + .5; i ? c.lineTo(sx + i + .5, yy) : c.moveTo(sx + .5, yy); }
+    c.stroke();
+    G('|a| ' + (1 + Math.abs(tiltX - lastTilt) * 4).toFixed(2) + 'g', x + 6, y + 41, 1, TTY_TEXT);
+    // $ cat motd
+    x = TX[4]; y = TY[4]; pane(4, act === 4);
+    const msg = (val('txt') || ' ').replace(/\n/g, ' ');
+    G(marquee(msg, 11, 5), x + 6, y + 12, 2, '#fff');
+    const by = msg.length + ' bytes'; G(by, x + 6, y + 37, 1, TTY_DIM);
+    if ((now / 450 | 0) % 2) R(x + 6 + (by.length + 1) * 6, y + 36, 6, 9, ACC);
+    // $ dmesg -w
+    c.strokeStyle = LOW; c.strokeRect(2.5, 199.5, 235, 54); R(8, 195, 78, 9, TTY_BG); G('$', 11, 196, 1, TTY_DIM); G('dmesg -w', 23, 196, 1, ACC);
+    const shown = klog.slice(-4);
+    shown.forEach((l, k) => {
+      const ly = 206 + k * 11, newest = k === shown.length - 1, txt = newest ? l.s.slice(0, (now - boot - l.t) / 28 | 0) : l.s;
+      G('[' + (l.t / 1000).toFixed(1).padStart(6) + ']', 7, ly, 1, TTY_DIM);
+      const ci = txt.indexOf(':');
+      if (ci > 0) { G(txt.slice(0, ci + 1), 61, ly, 1, ACC); G(txt.slice(ci + 1), 61 + (ci + 1) * 6, ly, 1, newest ? '#fff' : TTY_TEXT); } else G(txt, 61, ly, 1, newest ? '#fff' : TTY_TEXT);
+    });
+    // tmux status bar
+    R(0, 258, W, 22, ACC);
+    for (let i = 0; i < 5; i++) {
+      const k = 5 + i, wx = TX[k], a = act === k;
+      if (a) R(wx, 258, TW[k], 22, TTY_BG);
+      if (i) R(wx, 261, 1, 16, a ? ACC : TTY_BG);
+      G(TCMD[k], wx + ((TW[k] - TCMD[k].length * 12) / 2 | 0) + 1, 262, 2, a ? ACC : TTY_BG);
+    }
   }
 
   // ── full-screen blocks ──
@@ -353,13 +416,13 @@
   function tapAt(e) {
     const r = cv.getBoundingClientRect(), x = (e.clientX - r.left) * W / r.width, y = (e.clientY - r.top) * H / r.height;
     if (ui.mode !== 8) return window.charmGoto(8);
-    for (let i = 0; i < 10; i++) if (x >= TX[i] - 3 && x < TX[i] + TW[i] + 3 && y >= TY[i] - 3 && y < (i >= 5 ? H : TY[i] + TH[i] + 3)) return window.charmGoto(TMODE[i]);
+    for (let i = 0; i < 10; i++) if (x >= TX[i] - 2 && x < TX[i] + TW[i] + 2 && y >= TY[i] - 2 && y < (i >= 5 ? H : TY[i] + TH[i] + 3)) return deckRun(i);
   }
 
   let shownMode = ui.mode, zoom = null;       // zoom: { ti, s, opening }
   function tick() {
     frame++;
-    rx += (trx - rx) * 0.08; ry += (tryy - ry) * 0.08; tiltX = ry; tiltY = 0.4 + rx * 0.6;
+    rx += (trx - rx) * 0.08; ry += (tryy - ry) * 0.08; tiltX = ry;
     if (!calm) rig.style.transform = `rotateX(${(-rx * 9).toFixed(2)}deg) rotateY(${(ry * 13).toFixed(2)}deg)`;
     const s = song(), [r, g, b] = rgb(val('mColor') || '#f472b6'), mx = Math.max(r, g, b);
     ACC = ui.playing && s.title && mx >= 40 ? `rgb(${r * 255 / mx | 0},${g * 255 / mx | 0},${b * 255 / mx | 0})` : THEMES[ui.theme] || THEMES[0];

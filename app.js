@@ -5,6 +5,7 @@ const ST  = '6e400003-c4a7-4d2e-9b3c-c4a2d7c0ffee';
 const CMD = {MODE:1, TEXT:2, TIME:3, NOWPLAYING:4, XFER_BEGIN:5, XFER_DATA:6, XFER_END:7, BRIGHT:8, PET:9, CARD:10, SETTINGS:11, PING:12, BUZZ:13, FEED:14, LOOK:18, TIMER:19, TOY:20, THEME:21, SKIN:22, EYES:23, TUNE:24, TORCH:25, SONG_LIST:26, SONG_DELETE:27};
 const MODE = {CLOCK:0, TEXT:1, PHOTO:2, SING:3, MUSIC:4, PET:5, TOY:6, CARD:7, DECK:8, EYES:9, JUKE:10, TORCH:11, CHARGE:12};
 const THEMES = ['#00E5FF', '#FF2BD6', '#FFB000', '#39FF14', '#FF3B30', '#C8DCFF'];
+const klog = m => { if (window.charmLog) window.charmLog(m); };       // lines for the preview's dmesg pane
 const ui = window.ui = { mode: 8, bg: 9, face: 0, toy: 0, theme: 0, playing: false, artReady: false, expr: 255, torch: 0, jbSong: -1, jbQueue: 0, charging: false, bat: 76 };
 const CHUNK = 495, WINDOW = 16;
 const W = 240, H = 280;
@@ -61,10 +62,12 @@ async function connectGatt(){
   await write(packet(CMD.PING));
   await refreshMySongs();
   hud('Connected to ' + (device.name || 'Larp Charm'));
+  klog('ble: link up');
   if (spotifyToken()) startSpotifyLoop();
 }
 
 async function onDisconnected(){
+  klog('ble: link down');
   rxChar = stChar = null;
   document.body.classList.remove('connected');
   $('dot').classList.remove('on');
@@ -124,6 +127,7 @@ function setActiveMode(m){ ui.mode = m; document.querySelectorAll('#modes .tile'
 async function syncTime(){
   const epoch = Math.floor(Date.now() / 1000), tz = -new Date().getTimezoneOffset();
   await write(packet(CMD.TIME, [...u32(epoch), ...i16(tz)]));
+  klog(`rtc: synced, utc${tz < 0 ? '-' : '+'}${Math.abs(tz) / 60 | 0}:${String(Math.abs(tz) % 60).padStart(2, '0')}`);
 }
 
 // ─────────── Controls ───────────
@@ -157,7 +161,7 @@ seg('txtStyle');
 $('sendTxt').onclick = act(async () => {
   const t = ascii($('txt').value).slice(0, 300);
   await write(packet(CMD.TEXT, [+$('txtStyle').value, ...rgb565($('txtFg').value), ...rgb565($('txtBg').value)], t));
-  setActiveMode(MODE.TEXT); hud('Message sent');
+  setActiveMode(MODE.TEXT); hud('Message sent'); klog(`rx: motd, ${ascii($('txt').value).length} bytes`);
 });
 
 // ─────────── Images ───────────
@@ -246,7 +250,7 @@ $('sendPhoto').onclick = act(async () => {
   const pr = progress('photoProg'); pr.show('Sending…'); $('sendPhoto').disabled = true;
   try {
     await sendBlob(0, toRGB565(pctx, W, H), 0, (f, eta) => pr.set(f, eta != null ? `Sending… ${fmtTime(eta)} left` : 'Sending…'));
-    pr.set(1, 'Saved on your charm.'); setActiveMode(MODE.PHOTO);
+    pr.set(1, 'Saved on your charm.'); setActiveMode(MODE.PHOTO); klog('fs: photo.bin 131k');
   } catch (e) { pr.set(0, e.message); throw e; }
   finally { $('sendPhoto').disabled = false; pr.hide(2500); }
 });
@@ -413,6 +417,7 @@ async function pollSpotify(){
     await write(nowPlayingPacket(rgb, j.is_playing, j.progress_ms || 0, it.duration_ms || 0, title, artist));
     if (artBytes) await sendBlob(3, artBytes, 0);
     lastTrack = it.id; lastPlaying = j.is_playing; lastSent = Date.now(); ui.playing = j.is_playing;
+    if ($('spTitle').textContent !== title) klog('np: ' + title);
     $('spNow').style.display = 'flex'; $('spTitle').textContent = title; $('spArtist').textContent = artist;
   } catch (e) { console.warn(e); }
 }
@@ -490,7 +495,7 @@ function setTheme(t, send = true){
   document.documentElement.style.setProperty('--acc', THEMES[t]);
   document.querySelectorAll('#themes .thm').forEach(b => b.classList.toggle('on', +b.dataset.v === t));
   localStorage.setItem('o_theme', t);
-  if (send) { if (window.kickCharm) kickCharm(3); if (rxChar) write(packet(CMD.THEME, [t])).catch(() => {}); }
+  if (send) { if (window.kickCharm) kickCharm(3); klog('tty: theme ' + ['ice', 'neon', 'amber', 'phosphor', 'redline', 'ghost'][t]); if (rxChar) write(packet(CMD.THEME, [t])).catch(() => {}); }
 }
 document.querySelectorAll('#themes .thm').forEach(b => b.onclick = () => setTheme(+b.dataset.v));
 setTheme(+(localStorage.getItem('o_theme') || 0), false);
@@ -517,7 +522,7 @@ $('rollToy').onclick = act(async () => { await write(packet(CMD.TOY, [ui.toy, 1]
 // ─────────── Timer ───────────
 const startTimer = act(async min => {
   if (!(min > 0) || min > 1080) throw new Error('Pick between 1 minute and 18 hours.');
-  await write(packet(CMD.TIMER, i16(Math.round(min * 60)))); hud(`Timer set for ${min} min`);
+  await write(packet(CMD.TIMER, i16(Math.round(min * 60)))); hud(`Timer set for ${min} min`); klog(`tmr: armed, ${min}m`);
 });
 document.querySelectorAll('#timerPresets button').forEach(b => b.onclick = () => startTimer(+b.dataset.min));
 $('startTimer').onclick = () => startTimer(+$('timerMin').value);

@@ -11,7 +11,8 @@ Larp Charm runs on a Waveshare ESP32-S3-Touch-LCD-1.69 (240×280 IPS, capacitive
 ## Highlights
 
 - **Custom BLE protocol.** A Nordic-UART-style GATT service with 23 binary commands, chunked file transfer (JPEG photos, album art, songs, sing-along shows) and a notify channel for battery, version and storage status.
-- **The deck.** One fused cyberdeck screen with live tiles for the clock, now playing, the pet, motion and your message. Tap a tile to zoom it full screen; swipe down to close.
+- **The deck: a live tmux session.** Home is a terminal drawn in the classic 5×7 bitmap font. Each pane is labelled with the command that would print it (`$ date`, `$ np`, `$ ps pet`, `$ imu --scope` with a live accelerometer oscilloscope, `$ cat motd`), and a tmux-style status bar holds the other screens as windows. Tap a pane and the prompt types `open <pane>` before zooming in.
+- **`dmesg -w` for a bag charm.** The firmware keeps its own kernel-style event log (`klog`) and tails it on the deck: Bluetooth link changes, charging and battery steps, shakes with their g-force, step milestones, time syncs, received messages and files, songs, timers. Every line is a real event, timestamped from boot.
 - **Spotify integration.** OAuth 2.0 PKCE runs entirely in the browser (no client secret, no server). The charm shows the album art full screen, takes its accent colour from the cover, and gives you tap zones for previous, play/pause and next.
 - **Sing-along.** Type lyrics and a pencil-doodle kitten acts each line out with faces, props and scenes. The browser preview (`sing.js`) is a line-by-line port of the firmware renderer, drawing into the same 240×280 RGB565 frame with the same glyph bitmaps.
 - **Motion and sound.** Shake to wake, roll dice, ask the oracle or shuffle backdrops. There's a buzzer jukebox of public-domain melodies, and you can upload your own songs from MIDI files.
@@ -85,15 +86,15 @@ arduino-cli compile --upload -p <port> \
   firmware/LarpCharm
 ```
 
-The web app and the firmware are versioned together; this app expects firmware **8.0** (shown on the charm's status screen and in the app once connected).
+The web app and the firmware are versioned together; this app expects firmware **8.1** (shown on the charm's status screen and in the app once connected).
 
 ## Using the charm
 
 | Gesture | Action |
 | --- | --- |
-| Tap | Open a tile / interact |
+| Tap | Open a pane (the prompt types the command first) / interact |
 | Swipe down, or the side button | Close / back home |
-| Swipe left or right | Colour theme on home, backdrop on the clock, next or previous track, depending on the screen |
+| Swipe left or right | Colour theme (the terminal's colour) on home, backdrop on the clock, next or previous track, depending on the screen |
 | Swipe up or down on home | Brightness |
 | Press and hold | ID card |
 | Shake | Wake, roll dice, shuffle, make the pet dizzy |
