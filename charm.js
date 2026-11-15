@@ -464,11 +464,45 @@
     if (cc.log.length) cc.log.push({ k: 'gap', t: '' });
     cc.script = sc; cc.pos = 0; cc.state = 'type'; cc.at = performance.now(); cc.verb = Math.random() * 12 | 0;
   }
-  window.ccPoke = () => { if (cc.state === 'rest') ccPlan('hi'); };
+  window.ccPoke = () => { if (cc.state === 'rest') { ccPlan('hi'); ccPose('wave', 2200); } };
   function ccStar(cx, cy, ph, col) {
     const a = [0, 1, 2, 3, 3, 2][ph % 6]; R(cx, cy, 1, 1, col);
     if (a >= 1) { R(cx - a, cy, 2 * a + 1, 1, col); R(cx, cy - a, 1, 2 * a + 1, col); }
     if (a >= 2) for (let k = 1; k < a; k++) [[-k, -k], [k, k], [k, -k], [-k, k]].forEach(([dx, dy]) => R(cx + dx, cy + dy, 1, 1, col));
+  }
+
+  // the mascot: a blocky orange critter on a 16x10 grid (same as the firmware's ccMascot)
+  const cm = { pose: 'idle', until: 0, at: 0, blink: 0, nextBlink: 0, look: 0, lookUntil: 0 };
+  const ccPose = (p, ms) => { cm.pose = p; cm.at = performance.now(); cm.until = cm.at + ms; };
+  function ccMascot(x0, y0, s) {
+    const now = performance.now();
+    if (now > cm.until) cm.pose = 'idle';
+    if (now > cm.nextBlink) { cm.blink = now; cm.nextBlink = now + 2400 + Math.random() * 3000; }
+    const busy = (cc.state === 'think' || cc.state === 'stream') && cc.pos < cc.script.length, typing = cc.state === 'type';
+    if (!busy && !typing && now > cm.lookUntil && Math.random() < 1 / 160) { cm.look = Math.random() < .5 ? 1 : -1; cm.lookUntil = now + 1200; }
+    let dy = 0, dx = 0;
+    if (busy) dy = -((now / 140 | 0) % 2);
+    else if (cm.pose === 'happy' || cm.pose === 'wave') { const p = (now - cm.at) / 450; if (p < 1) dy = -Math.round(Math.sin(p * Math.PI) * 3); }
+    else dy = (now / 1100 | 0) % 2;
+    if (cm.pose === 'dizzy') dx = Math.round(Math.sin(now / 70) * 1.6);
+    x0 += dx * s; y0 += dy * s;
+    const B = CC.o, E = CC.bg, rect = (cx, cy, w, h, col) => R(x0 + cx * s, y0 + cy * s, w * s, h * s, col);
+    rect(2, 0, 12, 8, B);
+    const flap = busy && (now / 200 | 0) % 2;
+    rect(0, flap ? 3 : 4, 2, 2, B);
+    if (cm.pose === 'wave') rect(14, (now / 180 | 0) % 2 ? 1 : 2, 2, 2, B); else rect(14, flap ? 5 : 4, 2, 2, B);
+    const step = busy && (now / 160 | 0) % 2;
+    [3, 5, 10, 12].forEach((lx, k) => rect(lx, 8, 1, step && k % 2 ? 1 : 2, B));
+    const blink = now - cm.blink < 130;
+    [4, 11].forEach(ex => {
+      const x = ex + (now < cm.lookUntil ? cm.look : 0);
+      if (blink && cm.pose !== 'dizzy' && cm.pose !== 'happy') rect(x, 3, 1, 1, E);
+      else if (cm.pose === 'happy') { rect(ex - 1, 3, 1, 1, E); rect(ex, 2, 1, 1, E); rect(ex + 1, 3, 1, 1, E); }
+      else if (cm.pose === 'dizzy') [[-1, 2], [1, 2], [0, 3], [-1, 4], [1, 4]].forEach(([a, b]) => rect(ex + a, b, 1, 1, E));
+      else if (typing) rect(ex, 3, 1, 2, E);
+      else if (busy) rect(ex + 1, 1, 1, 2, E);
+      else rect(x, 2, 1, 2, E);
+    });
   }
   const ccBox = (x, y, w, h, col) => { c.strokeStyle = col; c.lineWidth = 1; c.beginPath(); c.roundRect(x + .5, y + .5, w - 1, h - 1, 6); c.stroke(); };
   function claude() {
@@ -476,16 +510,16 @@
     if (!cc.script.length) ccPlan();
     const st = cc.script[cc.pos];
     if (cc.state === 'type') { if (!st || st.k !== 'user') { cc.state = 'think'; cc.at = now; } else if (now - cc.at > st.t.length * 55 + 500) { cc.log.push({ k: 'user', t: st.t }); cc.pos++; cc.state = 'think'; cc.at = now; } }
-    else if (cc.state === 'think') { if (cc.pos >= cc.script.length) { cc.state = 'rest'; cc.at = now; } else if (now - cc.at > cc.script[cc.pos].think) { cc.state = 'stream'; cc.at = now; cc.log.push({ k: cc.script[cc.pos].k, t: '' }); } }
+    else if (cc.state === 'think') { if (cc.pos >= cc.script.length) { cc.state = 'rest'; cc.at = now; ccPose('happy', 2200); } else if (now - cc.at > cc.script[cc.pos].think) { cc.state = 'stream'; cc.at = now; cc.log.push({ k: cc.script[cc.pos].k, t: '' }); } }
     else if (cc.state === 'stream') { const cur = cc.script[cc.pos], n = Math.min(cur.t.length, (now - cc.at) / 14 | 0); cc.log[cc.log.length - 1].t = cur.t.slice(0, n); if (n >= cur.t.length) { cc.pos++; cc.state = 'think'; cc.at = now; if (cc.pos < cc.script.length && cc.script[cc.pos].k !== 'res') cc.verb = Math.random() * 12 | 0; } }
     else if (now - cc.at > 5000) ccPlan();
-    while (cc.log.length > 14) cc.log.shift();
+    while (cc.log.length > 13) cc.log.shift();
     R(0, 0, W, H, CC.bg);
-    ccBox(12, 14, 216, 44, CC.o); ccStar(24, 25, 4, CC.o);
-    G('Welcome to', 34, 22, 1, CC.text); G('Claude Code', 100, 22, 1, '#fff'); G('!', 166, 22, 1, CC.text);
-    G('/help for help', 34, 34, 1, CC.dim); G('cwd: /larp/charm', 34, 45, 1, CC.dim);
-    const thinking = cc.state === 'think' && cc.pos < cc.script.length, rows = thinking ? 14 : 15, lines = cc.log.slice(-rows);
-    let yy = 66 + (rows - lines.length) * 11;
+    ccBox(12, 14, 216, 58, CC.o); ccMascot(21, 31, 3); ccStar(80, 25, 4, CC.o);
+    G('Welcome to', 88, 22, 1, CC.text); G('Claude Code!', 88, 33, 1, '#fff');
+    G('/help for help', 80, 47, 1, CC.dim); G('cwd: /larp/charm', 80, 58, 1, CC.dim);
+    const thinking = cc.state === 'think' && cc.pos < cc.script.length, rows = thinking ? 12 : 13, lines = cc.log.slice(-rows);
+    let yy = 80 + (rows - lines.length) * 11;
     lines.forEach((l, i) => {
       if (l.k === 'user') { G('>', 16, yy, 1, CC.dim); G(l.t.slice(0, 33), 28, yy, 1, CC.dim); }
       else if (l.k === 'text') { circle(19.5, yy + 3.5, 2, CC.text, true); G(l.t.slice(0, 33), 28, yy, 1, CC.text); }

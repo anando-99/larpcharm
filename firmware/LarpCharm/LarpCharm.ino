@@ -2231,16 +2231,24 @@ void ccStep(uint8_t kind, uint16_t think, const char *fmt, ...) {
   st.kind = kind; st.think = think;
   va_list ap; va_start(ap, fmt); vsnprintf(st.s, sizeof(st.s), fmt, ap); va_end(ap);
 }
+// the mascot's pose (drawn by ccMascot below)
+enum CcPose : uint8_t { CP_IDLE, CP_WAVE, CP_DIZZY, CP_HAPPY };
+uint8_t  ccPose = CP_IDLE;
+uint32_t ccPoseUntil = 0, ccPoseAt = 0, ccBlinkAt = 0, ccNextBlink = 0, ccLookUntil = 0;
+int8_t   ccLook = 0;
+void ccSetPose(uint8_t p, uint32_t ms) { ccPose = p; ccPoseAt = millis(); ccPoseUntil = millis() + ms; }
 // write the next little session, using what the charm knows right now
 void ccPlan(int which) {
   ccLen = 0; ccPos = 0;
   switch (which) {
     case 100:                                                    // you tapped
+      ccSetPose(CP_WAVE, 2200);
       ccStep(CK_USER, 0, "hi claude");
       ccStep(CK_TEXT, 900, "Hi! I'm keeping an eye on the");
       ccStep(CK_TEXT, 0, "charm. Uptime %s.", fmtUptime(millis()).c_str());
       break;
     case 101:                                                    // you shook it
+      ccSetPose(CP_DIZZY, 2600);
       ccStep(CK_USER, 0, "what was that?");
       ccStep(CK_TOOL, 700, "Read(/dev/imu)");
       ccStep(CK_RESULT, 300, "peak |a| = %.1fg", sqrtf(accX * accX + accY * accY + accZ * accZ) + 1.2f);
@@ -2298,6 +2306,48 @@ void ccPlan(int which) {
 }
 void ccPoke(int which) { ccPlan(which); }
 
+// The mascot: a blocky orange critter drawn on a 16x10 grid. It reacts to the session and to you.
+void ccMascot(int x0, int y0, int s) {
+  uint32_t now = millis();
+  if (now > ccPoseUntil) ccPose = CP_IDLE;
+  if (now > ccNextBlink) { ccBlinkAt = now; ccNextBlink = now + 2400 + random(0, 3000); }
+  bool sleepy = idleEyesOn && ccPose == CP_IDLE;
+  bool busy = !sleepy && (ccState == CS_THINK || ccState == CS_STREAM) && ccPos < ccLen;
+  bool typing = ccState == CS_TYPE;
+  if (!busy && !typing && !sleepy && now > ccLookUntil && !random(0, 160)) { ccLook = random(0, 2) ? 1 : -1; ccLookUntil = now + 1200; }
+  // body motion
+  int dy = 0, dx = 0;
+  if (sleepy) dy = (now / 900) % 2;
+  else if (busy) dy = -(int)((now / 140) % 2);
+  else if (ccPose == CP_HAPPY || ccPose == CP_WAVE) { float p = (now - ccPoseAt) / 450.0f; if (p < 1) dy = -(int)(sinf(p * 3.1416f) * 3); }
+  else dy = (now / 1100) % 2;
+  if (ccPose == CP_DIZZY) dx = (int)(sinf(now / 70.0f) * 1.6f);
+  x0 += dx * s; y0 += dy * s;
+  const uint16_t B = CC_ORANGE, E = c565(12, 12, 14);
+  auto cell = [&](int cx, int cy, uint16_t c) { gfx->fillRect(x0 + cx * s, y0 + cy * s, s, s, c); };
+  auto rect = [&](int cx, int cy, int w, int h, uint16_t c) { gfx->fillRect(x0 + cx * s, y0 + cy * s, w * s, h * s, c); };
+  rect(2, 0, 12, 8, B);                                            // body
+  bool flap = busy && (now / 200) % 2;
+  rect(0, flap ? 3 : 4, 2, 2, B);                                  // left arm
+  if (ccPose == CP_WAVE) rect(14, ((now / 180) % 2) ? 1 : 2, 2, 2, B);   // waving
+  else rect(14, flap ? 5 : 4, 2, 2, B);                            // right arm
+  bool step = busy && (now / 160) % 2;
+  for (int k = 0; k < 4; k++) { static const uint8_t LX[4] = {3, 5, 10, 12}; rect(LX[k], 8, 1, (step && (k % 2)) ? 1 : 2, B); }
+  // eyes
+  int ex[2] = {4, 11};
+  bool blink = now - ccBlinkAt < 130;
+  for (int i = 0; i < 2; i++) {
+    int x = ex[i] + ccLook * (now < ccLookUntil ? 1 : 0);
+    if (sleepy || (blink && ccPose != CP_DIZZY && ccPose != CP_HAPPY)) rect(x - (i ? 0 : 0), 3, 1, 1, E);
+    else if (ccPose == CP_HAPPY) { cell(ex[i] - 1, 3, E); cell(ex[i], 2, E); cell(ex[i] + 1, 3, E); }
+    else if (ccPose == CP_DIZZY) { cell(ex[i] - 1, 2, E); cell(ex[i] + 1, 2, E); cell(ex[i], 3, E); cell(ex[i] - 1, 4, E); cell(ex[i] + 1, 4, E); }
+    else if (typing) rect(ex[i], 3, 1, 2, E);                      // looking down at what you type
+    else if (busy) rect(ex[i] + 1, 1, 1, 2, E);                    // looking up, thinking
+    else rect(x, 2, 1, 2, E);
+  }
+  if (sleepy) for (int i = 0; i < 2; i++) { float p = fmodf(now / 1600.0f + i * 0.5f, 1.0f); textAt(i ? "z" : "Z", x0 + 11 * s + (int)(p * 5), y0 - 6 - (int)(p * 10), 1, mix565(CC_ORANGE, c565(12, 12, 14), (uint8_t)(p * 255))); }
+}
+
 // the spinner star: grows from a dot to a six-armed star and back
 void ccStar(int cx, int cy, uint8_t phase, uint16_t col) {
   static const uint8_t ARM[6] = {0, 1, 2, 3, 3, 2};
@@ -2319,7 +2369,7 @@ void drawClaude() {
       if (now - ccAt > strlen(st.s) * 55 + 500) { ccAdd(CK_USER, st.s); ccPos++; ccState = CS_THINK; ccAt = now; }
       break;
     case CS_THINK:
-      if (ccPos >= ccLen) { ccState = CS_REST; ccAt = now; break; }
+      if (ccPos >= ccLen) { ccState = CS_REST; ccAt = now; if (ccPose != CP_DIZZY) ccSetPose(CP_HAPPY, 2200); break; }
       if (now - ccAt > ccScript[ccPos].think) { ccState = CS_STREAM; ccAt = now; ccAdd(ccScript[ccPos].kind, ""); }
       break;
     case CS_STREAM: {
@@ -2336,16 +2386,18 @@ void drawClaude() {
 
   gfx->fillScreen(c565(12, 12, 14));
   // welcome box
-  ccBox(12, 14, 216, 44, CC_ORANGE);
-  ccStar(24, 25, 4, CC_ORANGE);
-  textAt("Welcome to", 34, 22, 1, CC_TEXT); textAt("Claude Code", 100, 22, 1, COL_WHITE); textAt("!", 166, 22, 1, CC_TEXT);
-  textAt("/help for help", 34, 34, 1, CC_DIM);
-  textAt("cwd: /larp/charm", 34, 45, 1, CC_DIM);
+  ccBox(12, 14, 216, 58, CC_ORANGE);
+  ccMascot(21, 31, 3);
+  ccStar(80, 25, 4, CC_ORANGE);
+  textAt("Welcome to", 88, 22, 1, CC_TEXT);
+  textAt("Claude Code!", 88, 33, 1, COL_WHITE);
+  textAt("/help for help", 80, 47, 1, CC_DIM);
+  textAt("cwd: /larp/charm", 80, 58, 1, CC_DIM);
 
   // transcript, newest at the bottom
-  const int top = 66, lh = 11;
+  const int top = 80, lh = 11;
   bool thinking = ccState == CS_THINK && ccPos < ccLen;
-  int rows = (thinking ? 14 : 15), first = max(0, (int)ccLogN - rows);
+  int rows = (thinking ? 12 : 13), first = max(0, (int)ccLogN - rows);
   int yy = top + (rows - (ccLogN - first)) * lh;
   if (yy < top) yy = top;
   for (int i = first; i < ccLogN; i++, yy += lh) {
