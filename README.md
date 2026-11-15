@@ -4,6 +4,8 @@
 
 Larp Charm runs on a Waveshare ESP32-S3-Touch-LCD-1.69 (240×280 IPS, capacitive touch, 6-axis IMU, buzzer, LiPo). The firmware is a small single-sketch "OS" with four switchable looks and a dozen apps. The companion web app pairs over Bluetooth LE: no install, no backend, no native app. It also runs a pixel-accurate live copy of the charm's screen in the page.
 
+**Live web app: [anando-99.github.io/larpcharm](https://anando-99.github.io/larpcharm/)**
+
 ![Web app with the live charm preview](docs/web-app.png)
 
 ## Highlights
@@ -64,7 +66,7 @@ firmware/tools/                         generators: fonts, melodies, pixel art
 
 ### Web app
 
-Open the GitHub Pages site (or serve the repo root locally with `python3 -m http.server`) in Chrome on Android, Windows, macOS or Linux, then press **Connect**. Web Bluetooth needs a secure context (HTTPS or `localhost`). The preview works without a charm.
+Open the [web app](https://anando-99.github.io/larpcharm/) (or serve the repo root locally with `python3 -m http.server`) in Chrome on Android, Windows, macOS or Linux, then press **Connect**. Web Bluetooth needs a secure context (HTTPS or `localhost`). The preview works without a charm.
 
 **Spotify (optional).** Create an app at [developer.spotify.com/dashboard](https://developer.spotify.com/dashboard), add the page's exact URL as a redirect URI, and paste the Client ID into the Music panel. Playback controls need Spotify Premium.
 

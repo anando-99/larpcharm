@@ -44,7 +44,6 @@ async function connect(){
   } catch (e) { if (e.name !== 'NotFoundError') hud(e.message); }
 }
 $('connectBtn').onclick = connect;
-$('heroConnect').onclick = connect;
 
 async function connectGatt(){
   $('connText').textContent = 'Connecting…';
@@ -58,7 +57,6 @@ async function connectGatt(){
   $('dot').classList.add('on');
   $('connText').textContent = device.name || 'Larp Charm';
   $('connectBtn').textContent = 'Disconnect';
-  $('heroConnect').textContent = 'Connected';
   await syncTime();
   await write(packet(CMD.PING));
   await refreshMySongs();
@@ -72,7 +70,6 @@ async function onDisconnected(){
   $('dot').classList.remove('on');
   $('connText').textContent = 'Not connected';
   $('connectBtn').textContent = 'Connect';
-  $('heroConnect').textContent = 'Connect';
   $('bat').classList.remove('on');
   rejectWaiters(new Error('Disconnected'));
   if (manualDisconnect || !device) return;
@@ -265,16 +262,16 @@ function buildShow(){
   const lines = Sing.splitLines($('singText').value);
   window.singShow = { bpm: +$('singBpm').value, theme: +$('singTheme').value, hat: $('singHat').checked, blips: $('singBlips').checked, ink: $('singInk').value,
     lines: lines.map((text, i) => ({ ...Sing.guess(text, i), ...(singPick[text] || {}), text })) };
-  $('singBpmVal').textContent = $('singBpm').value + ' beats a minute';
+  $('singBpmVal').textContent = $('singBpm').value + ' bpm';
   const words = lines.reduce((n, l) => n + Sing.words(l), 0), secs = Math.round(lines.reduce((n, l) => n + Sing.words(l) + 2, 0) * 60 / +$('singBpm').value);
-  $('singInfo').textContent = lines.length ? `${lines.length} line${lines.length === 1 ? '' : 's'}, ${words} words, about ${fmtTime(secs)} a loop.` + (lines.length >= 24 ? ' 24 lines is the most.' : '') + ' Emoji and accents are left out.' : 'Type at least one line.';
+  $('singInfo').textContent = lines.length ? `${lines.length}${lines.length >= 24 ? ' (max)' : ''} lines · ${words} words · ${fmtTime(secs)} loop` : 'Add a line';
   $('singSend').disabled = !lines.length;
   renderSingLines();
 }
 function renderSingLines(){
   const ul = $('singLines'); ul.innerHTML = '';
   const show = window.singShow;
-  if (!show.lines.length) { ul.innerHTML = '<li class="empty">Type some words above.</li>'; return; }
+  if (!show.lines.length) { ul.innerHTML = '<li class="empty">No lines</li>'; return; }
   show.lines.forEach((l, i) => {
     const li = document.createElement('li'), t = document.createElement('span'); t.className = 't'; t.textContent = l.text;
     const set = (key, v) => { singPick[l.text] = { face: l.face, prop: l.prop, scene: l.scene, color: l.color, [key]: v }; buildShow(); singT0 = performance.now() - Sing.lineStart(window.singShow, i); };
@@ -582,12 +579,12 @@ function renderSongs(){
   if (!ul.children.length) (window.SONGS || []).forEach((sg, i) => { if (sg.cat === songCat) ul.append(songRow(i, sg.name, `${SONG_INFO[sg.name] || ''}, ${Math.round(songSecs(sg))} s`, btn => previewSong(sg, btn, i))); });
   document.querySelectorAll('#songList li, #mySongs li').forEach(li => li.classList.toggle('playing', +li.dataset.id === ui.jbSong));
   const name = ui.jbSong >= 100 ? (mySongs.find(m => m.id === ui.jbSong) || {}).name : ((window.SONGS || [])[ui.jbSong] || {}).name;
-  $('jbNow').textContent = ui.jbSong >= 0 && name ? `Playing ${name}` + (ui.jbQueue ? `, ${ui.jbQueue} more in the queue.` : '.') : 'Nothing playing.';
+  $('jbNow').textContent = ui.jbSong >= 0 && name ? `▶ ${name}` + (ui.jbQueue ? ` · +${ui.jbQueue} queued` : '') : 'Nothing playing';
 }
 async function refreshMySongs(){ if (!rxChar) return; songCollect = []; await write(packet(CMD.SONG_LIST)); }
 function renderMySongs(){
   const ul = $('mySongs'); ul.innerHTML = '';
-  if (!mySongs.length) { ul.innerHTML = '<li class="empty">No songs of your own on the charm yet.</li>'; return; }
+  if (!mySongs.length) { ul.innerHTML = '<li class="empty">No songs yet</li>'; return; }
   for (const m of mySongs) {
     const li = songRow(m.id, m.name, `${m.n} notes, on the charm`);
     const del = document.createElement('button'); del.className = 'btn plain sm'; del.textContent = 'Delete';
@@ -681,7 +678,7 @@ $('midiFile').onchange = act(async e => {
   midi = parseMidi(await f.arrayBuffer());
   $('midiName').value = f.name.replace(/\.[^.]+$/, '').slice(0, 23);
   $('midiPart').innerHTML = ''; midi.parts.forEach((pt, i) => { const o = document.createElement('option'); o.value = i; o.textContent = pt.label; $('midiPart').append(o); });
-  $('midiInfo').textContent = `${midi.parts.length} part${midi.parts.length > 1 ? 's' : ''}, ${midi.bpm} beats a minute. The busiest part is picked; choose another if it isn’t the tune.`;
+  $('midiInfo').textContent = `${midi.parts.length} part${midi.parts.length > 1 ? 's' : ''} · ${midi.bpm} bpm`;
   $('midiOpts').classList.remove('hidden');
 });
 function currentMidiSong(){
