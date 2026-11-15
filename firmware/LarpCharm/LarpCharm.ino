@@ -2307,6 +2307,35 @@ void ccPlan(int which) {
 void ccPoke(int which) { ccPlan(which); }
 
 // The mascot: a blocky orange critter drawn on a 16x10 grid. It reacts to the session and to you.
+// The critter itself, on a 16x10 grid of s-pixel cells.
+// eyes: 0 open, 1 blink/closed, 2 happy, 3 dizzy, 4 down, 5 up.  arms: 0 rest, 1 flap, 2 wave, 3 both up.
+// legs: 0 standing, 1 and 2 the two halves of a step, 3 tucked (in the air).
+enum CcEyes : uint8_t { CE_OPEN, CE_SHUT, CE_HAPPY, CE_DIZZY, CE_DOWN, CE_UP };
+void ccCritter(int x0, int y0, int s, uint8_t eyes, int8_t look, uint8_t arms, uint8_t legs, uint32_t now) {
+  const uint16_t B = CC_ORANGE, E = c565(12, 12, 14);
+  auto rect = [&](int cx, int cy, int w, int h, uint16_t c) { gfx->fillRect(x0 + cx * s, y0 + cy * s, w * s, h * s, c); };
+  rect(2, 0, 12, 8, B);
+  bool flap = arms == 1 && (now / 200) % 2;
+  int la = arms == 3 ? 1 : flap ? 3 : 4, ra = arms == 3 ? 1 : arms == 2 ? (((now / 180) % 2) ? 1 : 2) : flap ? 5 : 4;
+  rect(0, la, 2, 2, B);
+  rect(14, ra, 2, 2, B);
+  static const uint8_t LX[4] = {3, 5, 10, 12};
+  for (int k = 0; k < 4; k++) rect(LX[k], 8, 1, legs == 3 || (legs == 1 && k % 2) || (legs == 2 && !(k % 2)) ? 1 : 2, B);
+  static const uint8_t EX[2] = {4, 11};
+  for (int i = 0; i < 2; i++) {
+    int ex = EX[i], x = ex + look;
+    switch (eyes) {
+      case CE_SHUT:  rect(x, 3, 1, 1, E); break;
+      case CE_HAPPY: rect(ex - 1, 3, 1, 1, E); rect(ex, 2, 1, 1, E); rect(ex + 1, 3, 1, 1, E); break;
+      case CE_DIZZY: rect(ex - 1, 2, 1, 1, E); rect(ex + 1, 2, 1, 1, E); rect(ex, 3, 1, 1, E); rect(ex - 1, 4, 1, 1, E); rect(ex + 1, 4, 1, 1, E); break;
+      case CE_DOWN:  rect(ex, 3, 1, 2, E); break;
+      case CE_UP:    rect(ex + 1, 1, 1, 2, E); break;
+      default:       rect(x, 2, 1, 2, E); break;
+    }
+  }
+}
+
+// the small one in the welcome box, reacting to the session
 void ccMascot(int x0, int y0, int s) {
   uint32_t now = millis();
   if (now > ccPoseUntil) ccPose = CP_IDLE;
@@ -2315,7 +2344,6 @@ void ccMascot(int x0, int y0, int s) {
   bool busy = !sleepy && (ccState == CS_THINK || ccState == CS_STREAM) && ccPos < ccLen;
   bool typing = ccState == CS_TYPE;
   if (!busy && !typing && !sleepy && now > ccLookUntil && !random(0, 160)) { ccLook = random(0, 2) ? 1 : -1; ccLookUntil = now + 1200; }
-  // body motion
   int dy = 0, dx = 0;
   if (sleepy) dy = (now / 900) % 2;
   else if (busy) dy = -(int)((now / 140) % 2);
@@ -2323,29 +2351,117 @@ void ccMascot(int x0, int y0, int s) {
   else dy = (now / 1100) % 2;
   if (ccPose == CP_DIZZY) dx = (int)(sinf(now / 70.0f) * 1.6f);
   x0 += dx * s; y0 += dy * s;
-  const uint16_t B = CC_ORANGE, E = c565(12, 12, 14);
-  auto cell = [&](int cx, int cy, uint16_t c) { gfx->fillRect(x0 + cx * s, y0 + cy * s, s, s, c); };
-  auto rect = [&](int cx, int cy, int w, int h, uint16_t c) { gfx->fillRect(x0 + cx * s, y0 + cy * s, w * s, h * s, c); };
-  rect(2, 0, 12, 8, B);                                            // body
-  bool flap = busy && (now / 200) % 2;
-  rect(0, flap ? 3 : 4, 2, 2, B);                                  // left arm
-  if (ccPose == CP_WAVE) rect(14, ((now / 180) % 2) ? 1 : 2, 2, 2, B);   // waving
-  else rect(14, flap ? 5 : 4, 2, 2, B);                            // right arm
-  bool step = busy && (now / 160) % 2;
-  for (int k = 0; k < 4; k++) { static const uint8_t LX[4] = {3, 5, 10, 12}; rect(LX[k], 8, 1, (step && (k % 2)) ? 1 : 2, B); }
-  // eyes
-  int ex[2] = {4, 11};
   bool blink = now - ccBlinkAt < 130;
-  for (int i = 0; i < 2; i++) {
-    int x = ex[i] + ccLook * (now < ccLookUntil ? 1 : 0);
-    if (sleepy || (blink && ccPose != CP_DIZZY && ccPose != CP_HAPPY)) rect(x - (i ? 0 : 0), 3, 1, 1, E);
-    else if (ccPose == CP_HAPPY) { cell(ex[i] - 1, 3, E); cell(ex[i], 2, E); cell(ex[i] + 1, 3, E); }
-    else if (ccPose == CP_DIZZY) { cell(ex[i] - 1, 2, E); cell(ex[i] + 1, 2, E); cell(ex[i], 3, E); cell(ex[i] - 1, 4, E); cell(ex[i] + 1, 4, E); }
-    else if (typing) rect(ex[i], 3, 1, 2, E);                      // looking down at what you type
-    else if (busy) rect(ex[i] + 1, 1, 1, 2, E);                    // looking up, thinking
-    else rect(x, 2, 1, 2, E);
-  }
+  uint8_t eyes = sleepy ? CE_SHUT : ccPose == CP_HAPPY ? CE_HAPPY : ccPose == CP_DIZZY ? CE_DIZZY : blink ? CE_SHUT : typing ? CE_DOWN : busy ? CE_UP : CE_OPEN;
+  ccCritter(x0, y0, s, eyes, now < ccLookUntil ? ccLook : 0, ccPose == CP_WAVE ? 2 : busy ? 1 : 0, busy ? 1 + (now / 160) % 2 : 0, now);
   if (sleepy) for (int i = 0; i < 2; i++) { float p = fmodf(now / 1600.0f + i * 0.5f, 1.0f); textAt(i ? "z" : "Z", x0 + 11 * s + (int)(p * 5), y0 - 6 - (int)(p * 10), 1, mix565(CC_ORANGE, c565(12, 12, 14), (uint8_t)(p * 255))); }
+}
+
+// ───── the critter, popped out to full screen: a pocket pet ─────
+// tap it: pet (hearts) · double tap or swipe up: jump · tap beside it or swipe sideways: it walks there
+// tilt: it slides and leans · shake: dizzy · left alone: bored, then asleep · swipe down: back in its box
+#define CB_S 9
+#define CB_GROUND 204
+bool     ccBig = false;
+float    ccBigT = 0;                       // 0 in its box .. 1 full screen
+float    cbX = 0, cbVX = 0, cbY = 0, cbVY = 0, cbTarget = 0;
+bool     cbWalking = false;
+uint32_t cbSayUntil = 0, cbHappyUntil = 0, cbDizzyUntil = 0, cbTouchAt = 0, cbLoveDecay = 0;
+char     cbSay[24] = "";
+int      cbLove = 50;
+struct CbHeart { float x, y, vy; uint8_t life; };
+CbHeart  cbHearts[8];
+
+void cbSpeak(const char *s, uint32_t ms) { snprintf(cbSay, sizeof(cbSay), "%s", s); cbSayUntil = millis() + ms; }
+void ccBigOpen() {
+  ccBig = true; cbX = 0; cbVX = 0; cbY = 0; cbVY = 0; cbWalking = false; cbTouchAt = millis();
+  cbSpeak("hi!", 1600); cbHappyUntil = millis() + 1200; sfx(2);
+}
+void ccBigClose() { ccBig = false; sfx(1); }
+void cbJump(float v) { if (cbY < 1) { cbVY = v; sfx(4); } }
+void cbPet() {
+  static const char *SAY[8] = {"hehe", "*boop*", "<3", "again!", ":)", "purr?", "hi!", "yay"};
+  cbHappyUntil = millis() + 1400;
+  cbSpeak(SAY[random(0, 8)], 1300);
+  cbLove = min(100, cbLove + 8);
+  for (int i = 0, k = 0; i < 8 && k < 3; i++) if (!cbHearts[i].life) { cbHearts[i] = { 120 + cbX + (float)random(-40, 41), (float)(CB_GROUND - 10 * CB_S - cbY - 22), -1.2f - random(0, 10) / 10.0f, 50 }; k++; }
+  sfx(4);
+}
+// taps and swipes while it is full screen
+void cbTap(int x, int y, bool dbl) {
+  cbTouchAt = millis();
+  int cx = 120 + (int)cbX, top = CB_GROUND - 10 * CB_S - (int)cbY;
+  bool onIt = abs(x - cx) < 8 * CB_S + 6 && y > top - 10 && y < CB_GROUND + 6;
+  if (dbl) { cbJump(9.5f); cbSpeak("wheee", 900); return; }
+  if (onIt) { cbPet(); return; }
+  cbTarget = constrain(x - 120, -36, 36); cbWalking = true;
+}
+void cbSwipe(int dir) { cbTouchAt = millis(); cbTarget = dir > 0 ? -36 : 36; cbWalking = true; }
+void cbShake() { cbTouchAt = millis(); cbDizzyUntil = millis() + 2600; cbSpeak("whoa!", 1500); cbVX += random(-6, 7); cbJump(6); }
+
+void drawCcBig(uint32_t now) {
+  bool bored = now - cbTouchAt > 9000, asleep = now - cbTouchAt > 20000;
+  // physics, in steps of one 30 fps frame
+  if (cbWalking) { cbVX = constrain((cbTarget - cbX) * 0.12f, -2.6f, 2.6f); if (fabsf(cbTarget - cbX) < 1.5f) { cbWalking = false; cbVX = 0; } }
+  else {
+    if (imuOK && !asleep) cbVX += tiltX * 0.55f;
+    cbVX *= 0.86f;
+  }
+  cbX += cbVX;
+  if (cbX < -36) { cbX = -36; cbVX = 0; }
+  if (cbX > 36) { cbX = 36; cbVX = 0; }
+  if (cbY > 0 || cbVY > 0) { cbY += cbVY; cbVY -= 0.85f; if (cbY <= 0) { cbY = 0; cbVY = 0; } }
+  if (now - cbLoveDecay > 3000) { cbLoveDecay = now; if (cbLove > 0) cbLove--; }
+
+  gfx->fillScreen(c565(12, 12, 14));
+  textAt("swipe down to go back", 57, 16, 1, CC_DIM);
+  for (int x = 14; x < 226; x += 6) gfx->drawFastHLine(x, CB_GROUND + 10, 3, mix565(CC_DIM, COL_BLACK, 120));
+
+  int s = CB_S, x0 = 120 - 8 * s + (int)cbX, y0 = CB_GROUND - 10 * s - (int)cbY;
+  bool moving = fabsf(cbVX) > 0.4f, air = cbY > 0.5f, dizzy = now < cbDizzyUntil, happy = now < cbHappyUntil;
+  int rw = max(20, 62 - (int)(cbY * 0.6f));
+  gfx->fillEllipse(120 + (int)cbX, CB_GROUND + 3, rw, 4, c565(40, 30, 28));          // shadow
+  int bob = asleep ? (now / 900) % 2 : (!moving && !air) ? (now / 1100) % 2 : 0;
+  int wob = dizzy ? (int)(sinf(now / 70.0f) * 5) : 0;
+  int8_t look = moving ? (cbVX > 0 ? 1 : -1) : (imuOK && fabsf(tiltX) > 0.25f) ? (tiltX > 0 ? 1 : -1) : (now < ccLookUntil ? ccLook : 0);
+  if (!moving && !asleep && now > ccLookUntil && !random(0, 120)) { ccLook = random(0, 2) ? 1 : -1; ccLookUntil = now + 1200; }
+  if (now > ccNextBlink) { ccBlinkAt = now; ccNextBlink = now + 2400 + random(0, 3000); }
+  uint8_t eyes = asleep ? CE_SHUT : dizzy ? CE_DIZZY : happy ? CE_HAPPY : (now - ccBlinkAt < 130) ? CE_SHUT : bored ? CE_DOWN : CE_OPEN;
+  uint8_t arms = air ? 3 : happy ? 2 : moving ? 1 : 0;
+  uint8_t legs = air ? 3 : moving ? 1 + (now / 140) % 2 : 0;
+  ccCritter(x0 + wob, y0 + bob * s / 3, s, eyes, look, arms, legs, now);
+  if (asleep) for (int i = 0; i < 3; i++) { float p = fmodf(now / 1800.0f + i / 3.0f, 1.0f); textAt(i % 2 ? "z" : "Z", min(x0 + 11 * s + (int)(p * 10), 214), y0 - 8 - (int)(p * 40), 1 + i % 2, mix565(CC_ORANGE, c565(12, 12, 14), (uint8_t)(p * 255))); }
+
+  for (int i = 0; i < 8; i++) {                                    // hearts
+    CbHeart &h = cbHearts[i];
+    if (!h.life) continue;
+    h.y += h.vy; h.life--;
+    char ch[2] = {'\x03', 0};
+    textAt(ch, (int)h.x - 6, (int)h.y, 2, h.life > 15 ? c565(255, 110, 150) : mix565(c565(255, 110, 150), c565(12, 12, 14), (uint8_t)((15 - h.life) * 16)));
+  }
+  if (now < cbSayUntil && !asleep) {                               // speech, Claude Code style
+    int w = strlen(cbSay) * 12 + 24, bx = constrain(120 + (int)cbX - w / 2, 14, 226 - w), by = max(30, y0 - 40);
+    gfx->fillRoundRect(bx, by, w, 26, 6, c565(12, 12, 14));
+    gfx->drawRoundRect(bx, by, w, 26, 6, CC_ORANGE);
+    gfx->fillCircle(bx + 9, by + 13, 2, CC_TEXT);
+    textAt(cbSay, bx + 16, by + 6, 2, CC_TEXT);
+  } else if (bored && !asleep && (now / 4000) % 2) textAt("...", 120 + (int)cbX - 9, y0 - 16, 1, CC_DIM);
+
+  textAt("mood", 28, 232, 1, CC_DIM);
+  textAt(asciiBar(cbLove / 100.0f, 22, '#', '#', '.'), 58, 232, 1, cbLove > 30 ? CC_ORANGE : CC_RED);
+  textAt("tap: pet  2x: jump  swipe: walk", 27, 250, 1, mix565(CC_DIM, COL_BLACK, 90));
+}
+
+// growing out of (or back into) the welcome box
+void drawCcPop(float t) {
+  float e = t < 1 ? 1 - powf(1 - t, 3) : 1;
+  int bx = (int)(12 * (1 - e)), by = (int)(14 * (1 - e)), bw = (int)(216 + 24 * e), bh = (int)(58 + 222 * e);
+  gfx->fillRoundRect(bx, by, bw, bh, 6, c565(12, 12, 14));
+  gfx->drawRoundRect(bx, by, bw, bh, 6, CC_ORANGE);
+  float over = t < 1 ? sinf(t * 3.1416f) * 0.25f : 0;              // a little boing on the way
+  int s = max(3, (int)(3 + (CB_S - 3) * (e + over * e)));
+  int x0 = (int)(21 + (120 - 8 * CB_S - 21) * e), y0 = (int)(31 + (CB_GROUND - 10 * CB_S - 31) * e);
+  ccCritter(x0, y0, s, CE_HAPPY, 0, 3, 3, millis());
 }
 
 // the spinner star: grows from a dot to a six-armed star and back
@@ -2383,6 +2499,10 @@ void drawClaude() {
       if (now - ccAt > (idleEyesOn ? 9000UL : 5000UL)) ccPlan(-1);
       break;
   }
+
+  ccBigT += ((ccBig ? 1.0f : 0.0f) - ccBigT) * 0.22f;
+  if (fabsf(ccBigT - (ccBig ? 1.0f : 0.0f)) < 0.02f) ccBigT = ccBig ? 1.0f : 0.0f;
+  if (ccBig && ccBigT >= 1.0f) { drawCcBig(now); return; }
 
   gfx->fillScreen(c565(12, 12, 14));
   // welcome box
@@ -2443,6 +2563,7 @@ void drawClaude() {
     if ((now / 500) % 2) gfx->fillRect(32, 238, 1, 9, CC_TEXT);
   }
   textAt("? for shortcuts", 18, 260, 1, CC_DIM);
+  if (ccBigT > 0.01f) drawCcPop(ccBigT);
 }
 
 // ═════════════ v5: charging screen ═════════════
@@ -3719,6 +3840,7 @@ void setMode(int m, bool announce = true) {
   if (mode == M_EYES && old != M_EYES) { chromeUntil = millis() + 1500; tiltBaseX = tiltX; tiltBaseY = tiltY; nextIdleExpr = millis() + 4000; exprShown = 255; }
   if (mode == M_PHOTO) chromeUntil = millis() + 1500;
   if (mode == M_SING) singRestart();
+  if (mode != M_CLAUDE) { ccBig = false; ccBigT = 0; }
   if (mode == M_TEXT) typeStart = millis();
   glitchFrames = 3;
 }
@@ -4235,7 +4357,7 @@ void onSwipe(int dir) {
       break;
     case M_TORCH: torchCol = (torchCol + 4 + dir) % 4; break;
     case M_TERM:  ttySet((ttyFace + TF_COUNT + dir) % TF_COUNT, 6000); toast(TTY_MOOD[ttyFace], 700); sfx(4); break;
-    case M_CLAUDE: ccPlan(-1); sfx(1); break;
+    case M_CLAUDE: if (ccBig) cbSwipe(dir); else { ccPlan(-1); sfx(1); } break;
     case M_SING:  singSkip(dir); break;
     default: break;
   }
@@ -4243,6 +4365,7 @@ void onSwipe(int dir) {
 
 // Swipe down closes whatever is open. On the home screen, up and down change brightness.
 void onVSwipe(int up) {
+  if (mode == M_CLAUDE && ccBig) { if (up > 0) { cbJump(11); cbTouchAt = millis(); } else ccBigClose(); return; }
   if (up < 0 && mode != M_DECK) { closeModule(); return; }
   if (mode == M_TORCH) return;
   setBacklight(brightness + (up > 0 ? 40 : -40));
@@ -4303,7 +4426,11 @@ void onTap(bool dbl) {
     case M_SING:  singTap(); break;
     case M_CHARGE: closeModule(); break;
     case M_TERM:   ttyTap(dbl); sfx(4); break;
-    case M_CLAUDE: if (ccState == CS_REST) ccPoke(100); break;
+    case M_CLAUDE:
+      if (ccBig) cbTap(tch.x0, tch.y0, dbl);
+      else if (tch.x0 >= 14 && tch.x0 <= 74 && tch.y0 >= 22 && tch.y0 <= 68) ccBigOpen();   // the little critter: pop it out
+      else if (ccState == CS_REST) ccPoke(100);
+      break;
     default: break;
   }
 }
@@ -4332,7 +4459,7 @@ void onShake() {
       break;
     case M_EYES: setExpr(E_DIZZY, 3000); sfx(3); break;
     case M_TERM: ttySet(TF_DIZZY, 3000); sfx(3); break;
-    case M_CLAUDE: ccPoke(101); sfx(3); break;
+    case M_CLAUDE: if (ccBig) cbShake(); else ccPoke(101); sfx(3); break;
     case M_SING: singJumpAt = millis(); sfx(3); break;
     case M_JUKE: { int16_t all[48]; int n = allSongs(all, 48); jbSelId = all[random(0, n)]; jbStop(); jbStartSong(jbSelId); toast("shuffle", 800); break; }
     default: break;
@@ -4410,6 +4537,7 @@ void handleButton() {
   if (!down && wasDown && millis() - downAt < 600) {
     if (alarmUntil) { alarmUntil = 0; noTone(BUZZER); touchActivity(); }
     else if (sleeping) touchActivity();
+    else if (mode == M_CLAUDE && ccBig) { touchActivity(); ccBigClose(); }
     else if (mode != M_DECK) { touchActivity(); closeModule(); }
     else { sleeping = true; analogWrite(LCD_BL, 0); }             // on the deck: screen off
   }

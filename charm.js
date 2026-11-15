@@ -471,7 +471,25 @@
     if (a >= 2) for (let k = 1; k < a; k++) [[-k, -k], [k, k], [k, -k], [-k, k]].forEach(([dx, dy]) => R(cx + dx, cy + dy, 1, 1, col));
   }
 
-  // the mascot: a blocky orange critter on a 16x10 grid (same as the firmware's ccMascot)
+  // the critter itself, on a 16x10 grid of s-pixel cells (same as the firmware's ccCritter)
+  function critter(x0, y0, s, eyes, look, arms, legs, now) {
+    const B = CC.o, E = CC.bg, rect = (cx, cy, w, h, col) => R(x0 + cx * s, y0 + cy * s, w * s, h * s, col);
+    rect(2, 0, 12, 8, B);
+    const flap = arms === 1 && (now / 200 | 0) % 2;
+    rect(0, arms === 3 ? 1 : flap ? 3 : 4, 2, 2, B);
+    rect(14, arms === 3 ? 1 : arms === 2 ? ((now / 180 | 0) % 2 ? 1 : 2) : flap ? 5 : 4, 2, 2, B);
+    [3, 5, 10, 12].forEach((lx, k) => rect(lx, 8, 1, legs === 3 || (legs === 1 && k % 2) || (legs === 2 && !(k % 2)) ? 1 : 2, B));
+    [4, 11].forEach(ex => {
+      const x = ex + look;
+      if (eyes === 'shut') rect(x, 3, 1, 1, E);
+      else if (eyes === 'happy') { rect(ex - 1, 3, 1, 1, E); rect(ex, 2, 1, 1, E); rect(ex + 1, 3, 1, 1, E); }
+      else if (eyes === 'dizzy') [[-1, 2], [1, 2], [0, 3], [-1, 4], [1, 4]].forEach(([a, b]) => rect(ex + a, b, 1, 1, E));
+      else if (eyes === 'down') rect(ex, 3, 1, 2, E);
+      else if (eyes === 'up') rect(ex + 1, 1, 1, 2, E);
+      else rect(x, 2, 1, 2, E);
+    });
+  }
+  // the mascot in the welcome box (same as the firmware's ccMascot)
   const cm = { pose: 'idle', until: 0, at: 0, blink: 0, nextBlink: 0, look: 0, lookUntil: 0 };
   const ccPose = (p, ms) => { cm.pose = p; cm.at = performance.now(); cm.until = cm.at + ms; };
   function ccMascot(x0, y0, s) {
@@ -486,27 +504,69 @@
     else dy = (now / 1100 | 0) % 2;
     if (cm.pose === 'dizzy') dx = Math.round(Math.sin(now / 70) * 1.6);
     x0 += dx * s; y0 += dy * s;
-    const B = CC.o, E = CC.bg, rect = (cx, cy, w, h, col) => R(x0 + cx * s, y0 + cy * s, w * s, h * s, col);
-    rect(2, 0, 12, 8, B);
-    const flap = busy && (now / 200 | 0) % 2;
-    rect(0, flap ? 3 : 4, 2, 2, B);
-    if (cm.pose === 'wave') rect(14, (now / 180 | 0) % 2 ? 1 : 2, 2, 2, B); else rect(14, flap ? 5 : 4, 2, 2, B);
-    const step = busy && (now / 160 | 0) % 2;
-    [3, 5, 10, 12].forEach((lx, k) => rect(lx, 8, 1, step && k % 2 ? 1 : 2, B));
     const blink = now - cm.blink < 130;
-    [4, 11].forEach(ex => {
-      const x = ex + (now < cm.lookUntil ? cm.look : 0);
-      if (blink && cm.pose !== 'dizzy' && cm.pose !== 'happy') rect(x, 3, 1, 1, E);
-      else if (cm.pose === 'happy') { rect(ex - 1, 3, 1, 1, E); rect(ex, 2, 1, 1, E); rect(ex + 1, 3, 1, 1, E); }
-      else if (cm.pose === 'dizzy') [[-1, 2], [1, 2], [0, 3], [-1, 4], [1, 4]].forEach(([a, b]) => rect(ex + a, b, 1, 1, E));
-      else if (typing) rect(ex, 3, 1, 2, E);
-      else if (busy) rect(ex + 1, 1, 1, 2, E);
-      else rect(x, 2, 1, 2, E);
-    });
+    critter(x0, y0, s, cm.pose === 'happy' ? 'happy' : cm.pose === 'dizzy' ? 'dizzy' : blink ? 'shut' : typing ? 'down' : busy ? 'up' : 'open',
+      now < cm.lookUntil ? cm.look : 0, cm.pose === 'wave' ? 2 : busy ? 1 : 0, busy ? 1 + (now / 160 | 0) % 2 : 0, now);
   }
   const ccBox = (x, y, w, h, col) => { c.strokeStyle = col; c.lineWidth = 1; c.beginPath(); c.roundRect(x + .5, y + .5, w - 1, h - 1, 6); c.stroke(); };
+  // the critter, popped out to full screen: a pocket pet (same as the firmware's drawCcBig)
+  const cb = { big: false, t: 0, x: 0, vx: 0, y: 0, vy: 0, target: 0, walking: false, say: '', sayUntil: 0, happyUntil: 0, touchAt: 0, love: 50, decay: 0, hearts: [] };
+  const CB_S = 9, CB_G = 204;
+  const cbSpeak = (t, ms) => { cb.say = t; cb.sayUntil = performance.now() + ms; };
+  const cbJump = v => { if (cb.y < 1) cb.vy = v; };
+  function cbPet() {
+    const now = performance.now(); cb.happyUntil = now + 1400; cbSpeak(['hehe', '*boop*', '<3', 'again!', ':)', 'purr?', 'hi!', 'yay'][Math.random() * 8 | 0], 1300);
+    cb.love = Math.min(100, cb.love + 8);
+    for (let k = 0; k < 3; k++) cb.hearts.push({ x: 120 + cb.x + Math.random() * 80 - 40, y: CB_G - 10 * CB_S - cb.y - 22, vy: -1.2 - Math.random(), life: 50 });
+  }
+  window.cbOpen = () => { Object.assign(cb, { big: true, x: 0, vx: 0, y: 0, vy: 0, walking: false, touchAt: performance.now() }); cbSpeak('hi!', 1600); cb.happyUntil = performance.now() + 1200; };
+  window.cbClose = () => { cb.big = false; };
+  window.cbIsBig = () => cb.big;
+  window.cbTap = (x, y, dbl) => {
+    cb.touchAt = performance.now();
+    const cx = 120 + cb.x, top = CB_G - 10 * CB_S - cb.y;
+    if (dbl) { cbJump(9.5); cbSpeak('wheee', 900); return; }
+    if (Math.abs(x - cx) < 8 * CB_S + 6 && y > top - 10 && y < CB_G + 6) return cbPet();
+    cb.target = Math.max(-36, Math.min(36, x - 120)); cb.walking = true;
+  };
+  window.cbSwipe = dir => { cb.touchAt = performance.now(); if (dir === 'up') { cbJump(11); return; } cb.target = dir === 'left' ? -36 : 36; cb.walking = true; };
+  function drawCcBig() {
+    const now = performance.now(), bored = now - cb.touchAt > 9000, asleep = now - cb.touchAt > 20000;
+    if (cb.walking) { cb.vx = Math.max(-2.6, Math.min(2.6, (cb.target - cb.x) * 0.12)); if (Math.abs(cb.target - cb.x) < 1.5) { cb.walking = false; cb.vx = 0; } }
+    else { if (!asleep) cb.vx += tiltX * 0.55; cb.vx *= 0.86; }
+    cb.x = Math.max(-36, Math.min(36, cb.x + cb.vx));
+    if (cb.y > 0 || cb.vy > 0) { cb.y += cb.vy; cb.vy -= 0.85; if (cb.y <= 0) { cb.y = 0; cb.vy = 0; } }
+    if (now - cb.decay > 3000) { cb.decay = now; if (cb.love > 0) cb.love--; }
+    R(0, 0, W, H, CC.bg); G('swipe down to go back', 57, 16, 1, CC.dim);
+    for (let x = 14; x < 226; x += 6) R(x, CB_G + 10, 3, 1, '#45454b');
+    const s = CB_S, x0 = 120 - 8 * s + Math.round(cb.x), y0 = CB_G - 10 * s - Math.round(cb.y);
+    const moving = Math.abs(cb.vx) > 0.4, air = cb.y > 0.5, happy = now < cb.happyUntil;
+    c.fillStyle = '#281e1c'; c.beginPath(); c.ellipse(120 + cb.x, CB_G + 3, Math.max(20, 62 - cb.y * 0.6), 4, 0, 0, 7); c.fill();
+    const bob = asleep ? (now / 900 | 0) % 2 : (!moving && !air) ? (now / 1100 | 0) % 2 : 0;
+    if (now > cm.nextBlink) { cm.blink = now; cm.nextBlink = now + 2400 + Math.random() * 3000; }
+    const look = moving ? Math.sign(cb.vx) : Math.abs(tiltX) > 0.25 ? Math.sign(tiltX) : 0;
+    const eyes = asleep ? 'shut' : happy ? 'happy' : now - cm.blink < 130 ? 'shut' : bored ? 'down' : 'open';
+    critter(x0, y0 + Math.round(bob * s / 3), s, eyes, look, air ? 3 : happy ? 2 : moving ? 1 : 0, air ? 3 : moving ? 1 + (now / 140 | 0) % 2 : 0, now);
+    if (asleep) for (let i = 0; i < 3; i++) { const p = (now / 1800 + i / 3) % 1; G(i % 2 ? 'z' : 'Z', Math.min(x0 + 11 * s + p * 10 | 0, 214), y0 - 8 - p * 40 | 0, 1 + i % 2, CC.o); }
+    cb.hearts = cb.hearts.filter(h => (h.y += h.vy, --h.life) > 0); cb.hearts.forEach(h => G('\x03', h.x - 6 | 0, h.y | 0, 2, '#ff6e96'));
+    if (now < cb.sayUntil && !asleep) {
+      const w = cb.say.length * 12 + 24, bx = Math.max(14, Math.min(226 - w, 120 + cb.x - w / 2 | 0)), by = Math.max(30, y0 - 40);
+      R(bx, by, w, 26, CC.bg); ccBox(bx, by, w, 26, CC.o); circle(bx + 9.5, by + 13.5, 2, CC.text, true); G(cb.say, bx + 16, by + 6, 2, CC.text);
+    } else if (bored && !asleep && (now / 4000 | 0) % 2) G('...', 120 + cb.x - 9 | 0, y0 - 16, 1, CC.dim);
+    G('mood', 28, 232, 1, CC.dim); G(bar(cb.love / 100, 22, '#', '#', '.'), 58, 232, 1, cb.love > 30 ? CC.o : CC.red);
+    G('tap: pet  2x: jump  swipe: walk', 27, 250, 1, '#4c4c52');
+  }
+  function drawCcPop(t) {
+    const e = 1 - Math.pow(1 - t, 3), bx = 12 * (1 - e), by = 14 * (1 - e), bw = 216 + 24 * e, bh = 58 + 222 * e;
+    R(bx, by, bw, bh, CC.bg); ccBox(bx, by, bw, bh, CC.o);
+    const s = Math.max(3, Math.round(3 + (CB_S - 3) * (e + Math.sin(t * Math.PI) * 0.25 * e)));
+    critter(21 + (120 - 8 * CB_S - 21) * e | 0, 31 + (CB_G - 10 * CB_S - 31) * e | 0, s, 'happy', 0, 3, 3, performance.now());
+  }
+
   function claude() {
     const now = performance.now();
+    cb.t += ((cb.big ? 1 : 0) - cb.t) * 0.22; if (Math.abs(cb.t - (cb.big ? 1 : 0)) < 0.02) cb.t = cb.big ? 1 : 0;
+    if (cb.big && cb.t >= 1) return drawCcBig();
     if (!cc.script.length) ccPlan();
     const st = cc.script[cc.pos];
     if (cc.state === 'type') { if (!st || st.k !== 'user') { cc.state = 'think'; cc.at = now; } else if (now - cc.at > st.t.length * 55 + 500) { cc.log.push({ k: 'user', t: st.t }); cc.pos++; cc.state = 'think'; cc.at = now; } }
@@ -539,6 +599,7 @@
     if (cc.state === 'type' && cur && cur.k === 'user') { const n = Math.min(cur.t.length, (now - cc.at) / 55 | 0); G(cur.t.slice(0, n), 32, 239, 1, CC.text); R(32 + n * 6, 238, 6, 9, CC.text); }
     else { G('Try "make the charm cuter"', 32, 239, 1, '#4c4c52'); if ((now / 500 | 0) % 2) R(32, 238, 1, 9, CC.text); }
     G('? for shortcuts', 18, 260, 1, CC.dim);
+    if (cb.t > 0.01) drawCcPop(cb.t);
   }
   const scenes = { 0: clock, 1: text, 2: photo, 3: sing, 4: music, 5: pet, 6: toy, 7: card, 8: deck, 9: eyes, 10: jukeDeck, 11: torch, 12: chargeDeck, 13: tty, 14: claude };
   // Quest: frames rendered by the firmware itself (desktop simulator), packed in one sheet.
@@ -552,12 +613,22 @@
   cv.addEventListener('pointerup', e => {
     const d = drag; drag = null;
     if (d && !d.moved) tapAt(e);
+    else if (d && ui.mode === 14 && window.cbIsBig()) {                       // swipes for the popped-out critter
+      const dx = e.clientX - d.x0, dy = e.clientY - d.y0;
+      if (Math.abs(dy) > Math.abs(dx)) { if (dy > 24) window.cbClose(); else if (dy < -24) window.cbSwipe('up'); }
+      else if (Math.abs(dx) > 24) window.cbSwipe(dx < 0 ? 'left' : 'right');
+    }
   });
   cv.addEventListener('pointercancel', () => { drag = null; });
   function tapAt(e) {
     const r = cv.getBoundingClientRect(), x = (e.clientX - r.left) * W / r.width, y = (e.clientY - r.top) * H / r.height;
     if (ui.mode === 13) { const n = performance.now(); window.ttyPoke(n - (tapAt.last || 0) < 350); tapAt.last = n; return; }   // poke the face
-    if (ui.mode === 14) return window.ccPoke();
+    if (ui.mode === 14) {
+      const n = performance.now(), dbl = n - (tapAt.last || 0) < 350; tapAt.last = n;
+      if (window.cbIsBig()) return window.cbTap(x, y, dbl);
+      if (x >= 14 && x <= 74 && y >= 22 && y <= 68) return window.cbOpen();      // the little critter: pop it out
+      return window.ccPoke();
+    }
     if (ui.mode !== 8) return window.charmGoto(8);
     for (let i = 0; i < 12; i++) if (x >= TX[i] - 2 && x < TX[i] + TW[i] + 2 && y >= TY[i] - 2 && y < (i >= 5 ? H : TY[i] + TH[i] + 3)) return deckRun(i);
   }
