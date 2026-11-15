@@ -1,0 +1,7 @@
+[
+  { "name": "claude here", "cwd": "~/larpcharm", "prompt": "" },
+  { "name": "continue last", "cwd": "~/larpcharm", "args": ["--continue"] },
+  { "name": "run the tests", "cwd": "~/larpcharm", "prompt": "Run the tests and fix anything that fails." },
+  { "name": "review my diff", "cwd": "~/larpcharm", "prompt": "Review my uncommitted changes and point out bugs." },
+  { "name": "explain this repo", "cwd": "~/larpcharm", "prompt": "Give me a short tour of this repo." }
+]

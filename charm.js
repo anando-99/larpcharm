@@ -496,7 +496,8 @@
     const now = performance.now();
     if (now > cm.until) cm.pose = 'idle';
     if (now > cm.nextBlink) { cm.blink = now; cm.nextBlink = now + 2400 + Math.random() * 3000; }
-    const busy = (cc.state === 'think' || cc.state === 'stream') && cc.pos < cc.script.length, typing = cc.state === 'type';
+    const L = window.ccBridge && window.ccBridge();
+    const busy = L ? (L.state === 'thinking' || L.state === 'tool') : (cc.state === 'think' || cc.state === 'stream') && cc.pos < cc.script.length, typing = !L && cc.state === 'type';
     if (!busy && !typing && now > cm.lookUntil && Math.random() < 1 / 160) { cm.look = Math.random() < .5 ? 1 : -1; cm.lookUntil = now + 1200; }
     let dy = 0, dx = 0;
     if (busy) dy = -((now / 140 | 0) % 2);
@@ -563,44 +564,111 @@
     critter(21 + (120 - 8 * CB_S - 21) * e | 0, 31 + (CB_G - 10 * CB_S - 31) * e | 0, s, 'happy', 0, 3, 3, performance.now());
   }
 
+  // live: the real Claude Code session from larp-bridge (window.ccBridge), same pages as the charm
+  const CLN = { offline: 'offline', ready: 'ready', thinking: 'thinking', tool: 'running', perm: 'needs you', waiting: 'your turn', done: 'done' };
+  let ccPage = 0;
+  window.ccPageStep = d => { ccPage = (ccPage + 3 + d) % 3; };
+  window.ccPageNow = () => ccPage;
+  function ccTabs(live) {
+    ['session', 'status', 'launch'].forEach((t, i) => { const x = [51, 105, 153][i]; G(t, x, 3, 1, i === ccPage ? CC.o : '#4c4c52'); if (i === ccPage) R(x, 11, t.length * 6 - 1, 1, CC.o); });
+    circle(196.5, 6.5, 2, live ? CC.green : '#4c4c52', true);
+  }
+  function ccStatusPage(L) {
+    G('Status', 18, 22, 2, CC.o);
+    const s = L ? L.status : { ctx: 0, cost: 0, durationMs: 0, linesAdded: 0, linesRemoved: 0 }, se = L ? L.session : {};
+    const mins = Math.round((s.durationMs || 0) / 60000);
+    const rows = [['Version', se.version || '-'], ['Session', se.name || (se.id || '-').slice(0, 8)], ['cwd', se.cwd || '-'], ['Model', se.model || '-'],
+      ['Context', bar((s.ctx || 0) / 100, 12, '#', '#', '.') + ' ' + (s.ctx | 0) + '%'], ['Cost', '$' + (s.cost || 0).toFixed(2)], ['Time', mins >= 60 ? `${mins / 60 | 0}h ${pad(mins % 60)}m` : mins + 'm'], ['Lines', ''],
+      ['State', L ? (L.state === 'tool' && L.tool ? L.tool : CLN[L.state]) : '-']];
+    rows.forEach(([k, v], i) => {
+      const y = 46 + i * 17; G(k, 18, y, 1, CC.dim);
+      if (k === 'Lines') { const a = '+' + (s.linesAdded | 0); G(a, 84, y, 1, CC.green); G('-' + (s.linesRemoved | 0), 90 + a.length * 6, y, 1, CC.red); }
+      else G(String(v).slice(0, 24), 84, y, 1, k === 'Context' ? CC.o : CC.text);
+    });
+    if (L) G('bridge linked', 18, 204, 1, CC.green); else { G('not linked. on your computer run', 18, 200, 1, CC.dim); G('node larp-bridge/bridge.mjs', 18, 212, 1, CC.text); }
+    ccMascot(160, 224, 3);
+  }
+  let launchHit = -1, launchAt = 0;
+  function ccLaunchPage(L) {
+    G('Launch', 18, 22, 2, CC.o); G('starts in Terminal on your laptop', 18, 42, 1, CC.dim);
+    if (!L || !L.presets.length) { G('no bridge linked yet', 60, 120, 1, CC.text); G('node larp-bridge/bridge.mjs', 39, 136, 1, CC.dim); ccMascot(96, 180, 3); return; }
+    L.presets.slice(0, 6).forEach((n, i) => {
+      const y = 58 + i * 30, hit = launchHit === i && performance.now() - launchAt < 700;
+      if (hit) { c.fillStyle = CC.o; c.beginPath(); c.roundRect(14, y, 212, 25, 6); c.fill(); } else ccBox(14, y, 212, 25, '#3c3c44');
+      G('>', 24, y + 9, 1, hit ? CC.bg : CC.o); G(n.slice(0, 22), 36, y + 9, 1, hit ? CC.bg : CC.text);
+    });
+  }
+  window.ccPreviewTap = (x, y) => {
+    const L = window.ccBridge && window.ccBridge();
+    if (L && L.perm) { if (y >= 180 && y < 232) window.ccAnswerFromPreview(x >= 120); return true; }
+    if (ccPage === 2) { if (L) for (let i = 0; i < Math.min(6, L.presets.length); i++) if (y >= 58 + i * 30 && y < 83 + i * 30) { launchHit = i; launchAt = performance.now(); window.ccLaunchFromPreview(i); } return true; }
+    return ccPage === 1;
+  };
+  function ccPermCard(L) {
+    const p = L.perm;
+    R(0, 0, W, H, CC.bg); ccBox(8, 10, 224, 252, CC.o); R(20, 6, 74, 9, CC.bg); G('permission', 26, 7, 1, CC.o);
+    ccPose('wave', 500); ccMascot(88, 24, 4);
+    G('Claude wants to use', 63, 72, 1, CC.dim);
+    G(p.tool, 120 - p.tool.length * 6, 86, 2, '#fff');
+    let d = p.detail; for (let k = 0, y = 110; k < 4 && d; k++, y += 11) { let line = d.slice(0, 34); if (k === 3 && d.length > 34) line = line.slice(0, 31) + '...'; G(line, 120 - line.length * 3, y, 1, CC.text); d = d.slice(34); }
+    if (p.project) { const t = 'in ' + p.project; G(t, 120 - t.length * 3, 160, 1, CC.dim); }
+    ccBox(20, 186, 92, 40, CC.red); ccBox(128, 186, 92, 40, CC.green);
+    G('deny', 42, 199, 2, CC.red); G('allow', 144, 199, 2, CC.green);
+    G('or answer on your laptop', 48, 238, 1, CC.dim);
+  }
   function claude() {
-    const now = performance.now();
+    const now = performance.now(), L = window.ccBridge && window.ccBridge();
+    if (L && L.perm) return ccPermCard(L);
     cb.t += ((cb.big ? 1 : 0) - cb.t) * 0.22; if (Math.abs(cb.t - (cb.big ? 1 : 0)) < 0.02) cb.t = cb.big ? 1 : 0;
     if (cb.big && cb.t >= 1) return drawCcBig();
-    if (!cc.script.length) ccPlan();
-    const st = cc.script[cc.pos];
-    if (cc.state === 'type') { if (!st || st.k !== 'user') { cc.state = 'think'; cc.at = now; } else if (now - cc.at > st.t.length * 55 + 500) { cc.log.push({ k: 'user', t: st.t }); cc.pos++; cc.state = 'think'; cc.at = now; } }
-    else if (cc.state === 'think') { if (cc.pos >= cc.script.length) { cc.state = 'rest'; cc.at = now; ccPose('happy', 2200); } else if (now - cc.at > cc.script[cc.pos].think) { cc.state = 'stream'; cc.at = now; cc.log.push({ k: cc.script[cc.pos].k, t: '' }); } }
-    else if (cc.state === 'stream') { const cur = cc.script[cc.pos], n = Math.min(cur.t.length, (now - cc.at) / 14 | 0); cc.log[cc.log.length - 1].t = cur.t.slice(0, n); if (n >= cur.t.length) { cc.pos++; cc.state = 'think'; cc.at = now; if (cc.pos < cc.script.length && cc.script[cc.pos].k !== 'res') cc.verb = Math.random() * 12 | 0; } }
-    else if (now - cc.at > 5000) ccPlan();
-    while (cc.log.length > 13) cc.log.shift();
+    if (!L) {
+      if (!cc.script.length) ccPlan();
+      const st = cc.script[cc.pos];
+      if (cc.state === 'type') { if (!st || st.k !== 'user') { cc.state = 'think'; cc.at = now; } else if (now - cc.at > st.t.length * 55 + 500) { cc.log.push({ k: 'user', t: st.t }); cc.pos++; cc.state = 'think'; cc.at = now; } }
+      else if (cc.state === 'think') { if (cc.pos >= cc.script.length) { cc.state = 'rest'; cc.at = now; ccPose('happy', 2200); } else if (now - cc.at > cc.script[cc.pos].think) { cc.state = 'stream'; cc.at = now; cc.log.push({ k: cc.script[cc.pos].k, t: '' }); } }
+      else if (cc.state === 'stream') { const cur = cc.script[cc.pos], n = Math.min(cur.t.length, (now - cc.at) / 14 | 0); cc.log[cc.log.length - 1].t = cur.t.slice(0, n); if (n >= cur.t.length) { cc.pos++; cc.state = 'think'; cc.at = now; if (cc.pos < cc.script.length && cc.script[cc.pos].k !== 'res') cc.verb = Math.random() * 12 | 0; } }
+      else if (now - cc.at > 5000) ccPlan();
+      while (cc.log.length > 13) cc.log.shift();
+    } else if (now - (cc.verbAt || 0) > 5000) { cc.verbAt = now; cc.verb = Math.random() * 12 | 0; }
     R(0, 0, W, H, CC.bg);
+    ccTabs(!!L);
+    if (ccPage === 1) return ccStatusPage(L);
+    if (ccPage === 2) return ccLaunchPage(L);
     ccBox(12, 14, 216, 58, CC.o); ccMascot(21, 31, 3); ccStar(80, 25, 4, CC.o);
     G('Welcome to', 88, 22, 1, CC.text); G('Claude Code!', 88, 33, 1, '#fff');
-    G('/help for help', 80, 47, 1, CC.dim); G('cwd: /larp/charm', 80, 58, 1, CC.dim);
-    const thinking = cc.state === 'think' && cc.pos < cc.script.length, rows = thinking ? 12 : 13, lines = cc.log.slice(-rows);
+    if (L) { G((L.session.model || 'claude').slice(0, 22), 80, 47, 1, CC.dim); G(('cwd: ' + (L.session.project || '?')).slice(0, 22), 80, 58, 1, CC.dim); }
+    else { G('/help for help', 80, 47, 1, CC.dim); G('cwd: /larp/charm (demo)', 80, 58, 1, CC.dim); }
+    const log = L ? L.log : cc.log;
+    const thinking = L ? (L.state === 'thinking' || L.state === 'tool') : (cc.state === 'think' && cc.pos < cc.script.length);
+    const rows = thinking ? 12 : 13, lines = log.slice(-rows);
     let yy = 80 + (rows - lines.length) * 11;
     lines.forEach((l, i) => {
       if (l.k === 'user') { G('>', 16, yy, 1, CC.dim); G(l.t.slice(0, 33), 28, yy, 1, CC.dim); }
       else if (l.k === 'text') { circle(19.5, yy + 3.5, 2, CC.text, true); G(l.t.slice(0, 33), 28, yy, 1, CC.text); }
       else if (l.k === 'tool') {
-        const live = i === lines.length - 1 && (cc.state === 'stream' || (thinking && cc.script[cc.pos].k === 'res'));
-        circle(19.5, yy + 3.5, 2, live && (now / 300 | 0) % 2 ? CC.dim : CC.green, true);
-        const p = l.t.indexOf('('); if (p > 0) { G(l.t.slice(0, p), 28, yy, 1, '#fff'); G(l.t.slice(p), 28 + p * 6, yy, 1, CC.dim); } else G(l.t, 28, yy, 1, '#fff');
-      } else if (l.k === 'res') {
+        const running = i === lines.length - 1 && (L ? L.state === 'tool' : (cc.state === 'stream' || (thinking && cc.script[cc.pos].k === 'res')));
+        circle(19.5, yy + 3.5, 2, running && (now / 300 | 0) % 2 ? CC.dim : CC.green, true);
+        const p = l.t.indexOf('('); if (p > 0) { G(l.t.slice(0, p), 28, yy, 1, '#fff'); G(l.t.slice(p, 33), 28 + p * 6, yy, 1, CC.dim); } else G(l.t.slice(0, 33), 28, yy, 1, '#fff');
+      } else if (l.k === 'res' || l.k === 'err') {
         R(30, yy, 1, 4, CC.dim); R(30, yy + 4, 4, 1, CC.dim);
-        if (l.t[0] === '+') { const m = l.t.indexOf('-'); G(m > 0 ? l.t.slice(0, m) : l.t, 40, yy, 1, CC.green); if (m > 0) G(l.t.slice(m), 40 + m * 6, yy, 1, CC.red); } else G(l.t.slice(0, 31), 40, yy, 1, CC.dim);
+        if (l.k === 'err') G(l.t.slice(0, 31), 40, yy, 1, CC.red);
+        else if (l.t[0] === '+') { const m = l.t.indexOf('-'); G(m > 0 ? l.t.slice(0, m) : l.t, 40, yy, 1, CC.green); if (m > 0) G(l.t.slice(m), 40 + m * 6, yy, 1, CC.red); } else G(l.t.slice(0, 31), 40, yy, 1, CC.dim);
       }
       yy += 11;
     });
-    if (thinking) { ccStar(19, yy + 3, (now / 120 | 0) % 6, CC.o); G(`${VERBS[cc.verb]}... (${(now - cc.at) / 1000 + 1 | 0}s, esc to stop)`.slice(0, 33), 28, yy, 1, CC.o); }
-    ccBox(12, 232, 216, 22, CC.dim); G('>', 20, 239, 1, CC.text);
+    if (thinking) {
+      const secs = (L ? L.elapsed + (now - (L.at || now)) / 1000 : (now - cc.at) / 1000) + 1 | 0;
+      ccStar(19, yy + 3, (now / 120 | 0) % 6, CC.o);
+      G((L && L.state === 'tool' ? `Running... (${secs}s, esc to stop)` : `${VERBS[cc.verb]}... (${secs}s, esc to stop)`).slice(0, 33), 28, yy, 1, CC.o);
+    }
+    ccBox(12, 232, 216, 22, L && L.state === 'waiting' ? CC.o : CC.dim); G('>', 20, 239, 1, CC.text);
     const cur = cc.script[cc.pos];
-    if (cc.state === 'type' && cur && cur.k === 'user') { const n = Math.min(cur.t.length, (now - cc.at) / 55 | 0); G(cur.t.slice(0, n), 32, 239, 1, CC.text); R(32 + n * 6, 238, 6, 9, CC.text); }
-    else { G('Try "make the charm cuter"', 32, 239, 1, '#4c4c52'); if ((now / 500 | 0) % 2) R(32, 238, 1, 9, CC.text); }
-    G('? for shortcuts', 18, 260, 1, CC.dim);
+    if (!L && cc.state === 'type' && cur && cur.k === 'user') { const n = Math.min(cur.t.length, (now - cc.at) / 55 | 0); G(cur.t.slice(0, n), 32, 239, 1, CC.text); R(32 + n * 6, 238, 6, 9, CC.text); }
+    else { G(!L ? 'Try "make the charm cuter"' : L.state === 'waiting' || L.state === 'done' ? 'your turn, on the laptop' : L.state === 'offline' ? 'session ended' : 'Claude is working...', 32, 239, 1, '#4c4c52'); if ((now / 500 | 0) % 2) R(32, 238, 1, 9, CC.text); }
+    G(L ? CLN[L.state] : '? for shortcuts', 18, 260, 1, L && L.state === 'done' ? CC.green : CC.dim);
     if (cb.t > 0.01) drawCcPop(cb.t);
   }
+
   const scenes = { 0: clock, 1: text, 2: photo, 3: sing, 4: music, 5: pet, 6: toy, 7: card, 8: deck, 9: eyes, 10: jukeDeck, 11: torch, 12: chargeDeck, 13: tty, 14: claude };
   // Quest: frames rendered by the firmware itself (desktop simulator), packed in one sheet.
   // d00..d10 day village, n00..n10 night village, then the screens behind the doors.
@@ -613,6 +681,7 @@
   cv.addEventListener('pointerup', e => {
     const d = drag; drag = null;
     if (d && !d.moved) tapAt(e);
+    else if (d && ui.mode === 14 && !window.cbIsBig() && Math.abs(e.clientX - d.x0) > 24 && Math.abs(e.clientX - d.x0) > Math.abs(e.clientY - d.y0)) window.ccPageStep(e.clientX < d.x0 ? 1 : -1);
     else if (d && ui.mode === 14 && window.cbIsBig()) {                       // swipes for the popped-out critter
       const dx = e.clientX - d.x0, dy = e.clientY - d.y0;
       if (Math.abs(dy) > Math.abs(dx)) { if (dy > 24) window.cbClose(); else if (dy < -24) window.cbSwipe('up'); }
@@ -626,7 +695,8 @@
     if (ui.mode === 14) {
       const n = performance.now(), dbl = n - (tapAt.last || 0) < 350; tapAt.last = n;
       if (window.cbIsBig()) return window.cbTap(x, y, dbl);
-      if (x >= 14 && x <= 74 && y >= 22 && y <= 68) return window.cbOpen();      // the little critter: pop it out
+      if (window.ccPreviewTap(x, y)) return;
+      if (window.ccPageNow() === 0 && x >= 14 && x <= 74 && y >= 22 && y <= 68) return window.cbOpen();      // the little critter: pop it out
       return window.ccPoke();
     }
     if (ui.mode !== 8) return window.charmGoto(8);

@@ -1,8 +1,8 @@
-// ─────────── Protocol (must match firmware 8.x) ───────────
+// ─────────── Protocol (must match firmware 8.3+) ───────────
 const SVC = '6e400001-c4a7-4d2e-9b3c-c4a2d7c0ffee';
 const RX  = '6e400002-c4a7-4d2e-9b3c-c4a2d7c0ffee';
 const ST  = '6e400003-c4a7-4d2e-9b3c-c4a2d7c0ffee';
-const CMD = {MODE:1, TEXT:2, TIME:3, NOWPLAYING:4, XFER_BEGIN:5, XFER_DATA:6, XFER_END:7, BRIGHT:8, PET:9, CARD:10, SETTINGS:11, PING:12, BUZZ:13, FEED:14, LOOK:18, TIMER:19, TOY:20, THEME:21, SKIN:22, EYES:23, TUNE:24, TORCH:25, SONG_LIST:26, SONG_DELETE:27};
+const CMD = {MODE:1, TEXT:2, TIME:3, NOWPLAYING:4, XFER_BEGIN:5, XFER_DATA:6, XFER_END:7, BRIGHT:8, PET:9, CARD:10, SETTINGS:11, PING:12, BUZZ:13, FEED:14, LOOK:18, TIMER:19, TOY:20, THEME:21, SKIN:22, EYES:23, TUNE:24, TORCH:25, SONG_LIST:26, SONG_DELETE:27, CC:30};
 const MODE = {CLOCK:0, TEXT:1, PHOTO:2, SING:3, MUSIC:4, PET:5, TOY:6, CARD:7, DECK:8, EYES:9, JUKE:10, TORCH:11, CHARGE:12, TERM:13, CLAUDE:14};
 const THEMES = ['#00E5FF', '#FF2BD6', '#FFB000', '#39FF14', '#FF3B30', '#C8DCFF'];
 const klog = m => { if (window.charmLog) window.charmLog(m); };       // lines for the preview's dmesg pane
@@ -61,12 +61,14 @@ async function connectGatt(){
   await syncTime();
   await write(packet(CMD.PING));
   await refreshMySongs();
+  ccResync(); ccSetRemote();
   hud('Connected to ' + (device.name || 'Larp Charm'));
   klog('ble: link up');
   if (spotifyToken()) startSpotifyLoop();
 }
 
 async function onDisconnected(){
+  setTimeout(ccSetRemote, 0);
   klog('ble: link down');
   rxChar = stChar = null;
   document.body.classList.remove('connected');
@@ -93,6 +95,7 @@ function onStatus(s){
     return;
   }
   if (s.startsWith('media=')) { mediaControl(s.slice(6)); return; }
+  if (s.startsWith('cc=')) { ccFromCharm(s.slice(3)); return; }
   if (s.startsWith('song=')) { const p = s.slice(5).split(','); if (songCollect) songCollect.push({ id: +p[0], n: +p[1], name: p.slice(2).join(',') || 'Song' }); return; }
   const kv = Object.fromEntries(s.split(';').map(x => { const i = x.indexOf('='); return [x.slice(0, i), x.slice(i + 1)]; }));
   if (kv.b !== undefined) setBattery(+kv.b, kv.c === '1');
@@ -688,3 +691,158 @@ $('midiSend').onclick = act(async () => {
   catch (e) { pr.set(0, e.message); throw e; } finally { pr.hide(2500); }
 });
 
+
+// ─────────── Claude Code, through larp-bridge on this computer ───────────
+// The bridge streams Claude Code's state (from its hooks and status line); this page relays it to the charm,
+// and relays the charm's answers (allow / deny a permission, launch a preset) back to the bridge.
+const CC_STATE = { offline: 0, ready: 1, thinking: 2, tool: 3, perm: 4, waiting: 5, done: 6 };
+const CC_KIND = { user: 0, text: 1, tool: 2, res: 3, err: 4 };
+const ccB = { url: localStorage.getItem('o_bridge') || 'http://127.0.0.1:7337', es: null, up: false, client: 0, st: null, sent: {} };
+window.ccBridge = () => (ccB.up ? ccB.st : null);
+const u16 = v => [v & 255, (v >> 8) & 255];
+const cc1F = (...f) => f.map(x => ascii(String(x ?? '')).replace(/\x1F/g, ' ')).join('\x1F');
+async function ccCmd(body){
+  const r = await fetch(ccB.url + '/cmd', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+  return r.json();
+}
+function ccSetRemote(){ if (ccB.up && ccB.client) ccCmd({ op: 'remote', client: ccB.client, on: !!rxChar }).catch(() => {}); }
+function ccResync(){ ccB.sent = {}; if (ccB.st) ccRelay(ccB.st); }
+let ccRetry = 0, ccRetryT = 0;
+function ccConnectBridge(){
+  clearTimeout(ccRetryT);
+  if (ccB.es) ccB.es.close();
+  localStorage.setItem('o_bridgeOn', '1');
+  $('ccLinkBtn').classList.add('hidden');
+  ccB.es = new EventSource(ccB.url + '/events');
+  ccB.es.onopen = () => { ccB.up = true; ccRetry = 0; ccRender(); };
+  ccB.es.onerror = () => {                                   // back off instead of hammering a bridge that isn't running
+    if (ccB.up) klog('cc: bridge down');
+    ccB.up = false; ccRender();
+    ccB.es.close(); ccB.es = null;
+    ccRetryT = setTimeout(ccConnectBridge, Math.min(60000, 3000 * 2 ** ccRetry++));
+  };
+  ccB.es.onmessage = e => {
+    const m = JSON.parse(e.data);
+    if (m.type === 'hello') { ccB.client = m.client; ccB.up = true; klog('cc: bridge linked'); ccSetRemote(); }
+    else if (m.type === 'state') { m.at = performance.now(); ccB.st = m; ccRelay(m); ccRender(); }
+    else if (m.type === 'permEnd' && rxChar) write(packet(CMD.CC, [4, ...u16(m.id), m.how === 'answered' ? 1 : 0])).catch(() => {});
+  };
+}
+// send the charm what changed
+function ccRelay(st){
+  if (!rxChar) return;
+  const S = ccB.sent, send = bytes => write(bytes).catch(() => {});
+  const head = cc1F(st.session.project, st.session.model, st.tool, st.prompt), code = CC_STATE[st.state] ?? 0;
+  const stKey = code + head;
+  if (S.state !== stKey || Date.now() - (S.stateAt || 0) > 10000) { S.state = stKey; S.stateAt = Date.now(); send(packet(CMD.CC, [0, code, ...u16(Math.min(65535, st.elapsed | 0))], head)); }
+  const last = st.log.length ? st.log[st.log.length - 1].seq : 0;
+  if (S.seq === undefined || last < S.seq || (st.log.length && st.log[0].seq > S.seq + 1)) { send(packet(CMD.CC, [2])); S.seq = st.log.length ? st.log[0].seq - 1 : 0; }
+  for (const l of st.log) if (l.seq > S.seq) { send(packet(CMD.CC, [1, CC_KIND[l.k] ?? 1], ascii(l.t))); S.seq = l.seq; }
+  const s = st.status, statKey = JSON.stringify([s, st.session.version, st.session.model, st.session.name, st.session.cwd]);
+  if (S.status !== statKey) { S.status = statKey; send(packet(CMD.CC, [6, Math.min(100, s.ctx | 0), ...u16(Math.round((s.cost || 0) * 100)), ...u16(Math.round((s.durationMs || 0) / 60000)), ...u16(s.linesAdded | 0), ...u16(s.linesRemoved | 0)], cc1F(st.session.version, st.session.model, st.session.name || st.session.id.slice(0, 8), st.session.cwd))); }
+  const pre = cc1F(...st.presets);
+  if (S.presets !== pre) { S.presets = pre; send(packet(CMD.CC, [5], pre)); }
+  if (st.perm && S.perm !== st.perm.id) { S.perm = st.perm.id; send(packet(CMD.CC, [3, ...u16(st.perm.id)], cc1F(st.perm.tool, st.perm.detail, st.perm.project))); }
+  if (!st.perm) S.perm = null;
+}
+// the charm answered: "allow:7", "deny:7" or "launch:2"
+function ccFromCharm(v){
+  const [what, n] = v.split(':');
+  if (what === 'allow' || what === 'deny') ccCmd({ op: 'perm', id: +n, decision: what }).catch(() => hud('The bridge isn’t running.'));
+  else if (what === 'launch') ccCmd({ op: 'launch', index: +n }).then(() => hud('Launching on this computer')).catch(() => hud('The bridge isn’t running.'));
+}
+// the claude panel on this page
+function ccRender(){
+  const st = ccB.st, el = $('ccLink');
+  if (!el) return;
+  el.textContent = ccB.up ? 'linked' : 'not running'; el.className = ccB.up ? 'ok' : 'bad';
+  $('ccRemote').textContent = ccB.up ? (rxChar ? 'charm answers permission prompts' : 'connect the charm to answer prompts from it') : '';
+  const live = ccB.up && st;
+  $('ccSession').classList.toggle('hidden', !live);
+  if (!live) return;
+  const s = st.status, cost = '$' + (s.cost || 0).toFixed(2), mins = Math.round((s.durationMs || 0) / 60000);
+  $('ccStateLine').textContent = st.state === 'tool' && st.tool ? `running ${st.tool}` : st.state;
+  $('ccStateLine').dataset.state = st.state;
+  $('ccFacts').textContent = [st.session.project || '-', st.session.model || '-', `ctx ${s.ctx | 0}%`, cost, `${mins}m`, `+${s.linesAdded | 0} -${s.linesRemoved | 0}`].join('  ·  ');
+  const lines = st.log.slice(-14).map(l => (l.k === 'user' ? '> ' : l.k === 'tool' ? '● ' : l.k === 'res' ? '  ⎿ ' : l.k === 'err' ? '  ⎿ ! ' : '● ') + l.t);
+  $('ccLog').textContent = lines.join('\n') || '(nothing yet)';
+  $('ccPerm').classList.toggle('hidden', !st.perm);
+  if (st.perm) $('ccPermText').textContent = `${st.perm.tool}: ${st.perm.detail}`;
+  const box = $('ccPresets');
+  if (box.dataset.k !== st.presets.join('|')) {
+    box.dataset.k = st.presets.join('|'); box.innerHTML = '';
+    st.presets.forEach((n, i) => { const b = document.createElement('button'); b.className = 'btn plain sm'; b.textContent = n; b.onclick = act(async () => { await ccCmd({ op: 'launch', index: i }); hud('Launching ' + n); }); box.append(b); });
+  }
+}
+$('ccAllow').onclick = act(async () => { if (ccB.st && ccB.st.perm) await ccCmd({ op: 'perm', id: ccB.st.perm.id, decision: 'allow' }); });
+$('ccDeny').onclick = act(async () => { if (ccB.st && ccB.st.perm) await ccCmd({ op: 'perm', id: ccB.st.perm.id, decision: 'deny' }); });
+$('ccUrl').value = ccB.url;
+$('ccUrl').onchange = () => { ccB.url = $('ccUrl').value.trim().replace(/\/$/, ''); localStorage.setItem('o_bridge', ccB.url); ccConnectBridge(); };
+$('ccLinkBtn').onclick = () => { ccRetry = 0; ccConnectBridge(); };
+// link straight away when this page comes from the bridge itself, or after you've linked once
+if (/^(localhost|127\.0\.0\.1)$/.test(location.hostname) || localStorage.getItem('o_bridgeOn') === '1') ccConnectBridge();
+setInterval(() => { if (ccB.st && rxChar) ccRelay(ccB.st); }, 10000);
+
+// ─────────── the command line at the bottom of the page ───────────
+const SCREENS = { home: 8, deck: 8, clock: 0, msg: 1, message: 1, photo: 2, img: 2, sing: 3, music: 4, np: 4, pet: 5, dice: 6, rng: 6, id: 7, card: 7, eyes: 9, jukebox: 10, jbx: 10, torch: 11, tty: 13, term: 13, claude: 14, cc: 14 };
+const THEME_NAMES = ['ice', 'neon', 'amber', 'phosphor', 'redline', 'ghost'];
+const cmdIn = $('cmdIn'), cmdOut = $('cmdOut');
+const cmdHist = []; let cmdPos = 0, cmdClearT = 0;
+function say(...lines){
+  cmdOut.textContent = (cmdOut.textContent ? cmdOut.textContent + '\n' : '') + lines.join('\n');
+  cmdOut.textContent = cmdOut.textContent.split('\n').slice(-14).join('\n');
+  cmdOut.scrollTop = cmdOut.scrollHeight;
+  clearTimeout(cmdClearT); cmdClearT = setTimeout(() => { cmdOut.textContent = ''; }, 12000);
+}
+const need = () => { if (!rxChar) throw new Error('not connected. type: connect'); };
+const COMMANDS = {
+  help: ['list commands', () => say(...Object.entries(COMMANDS).map(([k, [d]]) => `  ${k.padEnd(10)} ${d}`), '  keys: / focuses here, 0-9 switch tabs')],
+  connect: ['pair with the charm (bluetooth)', () => $('connectBtn').click()],
+  open: ['open <screen>  e.g. open claude', a => { const m = SCREENS[a[0]]; if (m === undefined) return say(`screens: ${Object.keys(SCREENS).join(' ')}`); gotoMode(m); say(`opened ${a[0]}`); }],
+  theme: ['theme <ice|neon|amber|phosphor|redline|ghost>', a => { const t = isNaN(a[0]) ? THEME_NAMES.indexOf(a[0]) : +a[0]; if (t < 0) return say(`themes: ${THEME_NAMES.join(' ')}`); setTheme(t); say(`theme ${THEME_NAMES[t]}`); }],
+  msg: ['msg <text>  show a message', a => { if (!a.length) return say('usage: msg <text>'); need(); $('txt').value = a.join(' '); $('sendTxt').click(); say('sent'); }],
+  bright: ['bright <0-100>', a => { const v = Math.max(3, Math.min(100, +a[0] || 0)); $('bright').value = Math.round(v * 2.55); $('bright').dispatchEvent(new Event('input')); say(`brightness ${v}%`); }],
+  timer: ['timer <minutes|off>', a => { need(); if (a[0] === 'off') { $('cancelTimer').click(); return say('timer off'); } startTimer(+a[0]); say(`timer ${+a[0]}m`); }],
+  idle: ['idle <off|eyes|tty|claude>  what shows when idle', a => { const v = { off: 0, eyes: 1, tty: 2, term: 2, claude: 3 }[a[0]]; if (v === undefined) return say('usage: idle <off|eyes|tty|claude>'); $('idleKind').value = v; sendSettings(); say(`idle screen: ${a[0]}`); }],
+  beep: ['make the charm beep', () => { need(); $('findMe').click(); say('beep'); }],
+  sync: ['sync the clock', () => { need(); $('syncTime').click(); say('time synced'); }],
+  roll: ['roll the dice / ask the oracle', () => { need(); $('rollToy').click(); }],
+  torch: ['torch <on|off>', a => { need(); $(a[0] === 'off' ? 'torchOff' : 'torchOn').click(); }],
+  tab: ['tab <name>  switch panel', a => { const t = document.querySelector(`.tab[data-tab="${a[0]}"]`) || [...document.querySelectorAll('.tab')].find(x => x.textContent === a[0]); if (!t) return say('tabs: ' + [...document.querySelectorAll('.tab')].map(x => x.textContent).join(' ')); t.click(); }],
+  allow: ['allow the pending claude permission', async () => { if (!ccB.st || !ccB.st.perm) return say('nothing is waiting'); await ccCmd({ op: 'perm', id: ccB.st.perm.id, decision: 'allow' }); say('allowed'); }],
+  deny: ['deny the pending claude permission', async () => { if (!ccB.st || !ccB.st.perm) return say('nothing is waiting'); await ccCmd({ op: 'perm', id: ccB.st.perm.id, decision: 'deny' }); say('denied'); }],
+  launch: ['launch <n|name>  start a preset claude session', async a => {
+    const p = (ccB.st && ccB.st.presets) || []; if (!ccB.up) return say('bridge not running: node larp-bridge/bridge.mjs');
+    const i = isNaN(a[0]) ? p.findIndex(n => n.startsWith(a.join(' '))) : +a[0];
+    if (!(i >= 0 && i < p.length)) return say(...p.map((n, k) => `  ${k}  ${n}`));
+    await ccCmd({ op: 'launch', index: i }); say(`launching ${p[i]}`);
+  }],
+  status: ['charm and claude status', () => {
+    const st = ccB.st;
+    say(`charm   ${rxChar ? 'connected' : 'not connected'}${rxChar ? `, ${ui.bat}%` : ''}`, `bridge  ${ccB.up ? 'linked' : 'not running'}`,
+      ...(st && ccB.up ? [`claude  ${st.state}${st.tool ? ' ' + st.tool : ''} in ${st.session.project || '?'}`, `        ${st.session.model || ''}  ctx ${st.status.ctx | 0}%  $${(st.status.cost || 0).toFixed(2)}`] : []));
+  }],
+  clear: ['clear this output', () => { cmdOut.textContent = ''; }],
+};
+async function runCmd(line){
+  const [c, ...a] = line.trim().split(/\s+/);
+  if (!c) return;
+  say(`larp> ${line}`);
+  const f = COMMANDS[c.toLowerCase()];
+  if (!f) return say(`${c}: command not found. try help`);
+  try { await f[1](a.map((x, i) => (i === 0 && c !== 'msg' ? x.toLowerCase() : x))); } catch (e) { say(`error: ${e.message}`); }
+}
+cmdIn.addEventListener('keydown', e => {
+  if (e.key === 'Enter') { const v = cmdIn.value; cmdIn.value = ''; if (v.trim()) { cmdHist.push(v); cmdPos = cmdHist.length; runCmd(v); } }
+  else if (e.key === 'ArrowUp') { if (cmdPos > 0) cmdIn.value = cmdHist[--cmdPos]; e.preventDefault(); }
+  else if (e.key === 'ArrowDown') { cmdPos = Math.min(cmdHist.length, cmdPos + 1); cmdIn.value = cmdHist[cmdPos] || ''; e.preventDefault(); }
+  else if (e.key === 'Escape') { cmdIn.blur(); cmdOut.textContent = ''; }
+  else if (e.key === 'Tab') { const m = Object.keys(COMMANDS).find(k => k.startsWith(cmdIn.value.trim())); if (m) cmdIn.value = m + ' '; e.preventDefault(); }
+});
+addEventListener('keydown', e => { if (e.key === '/' && !e.target.closest('input,textarea,select')) { cmdIn.focus(); e.preventDefault(); } });
+setInterval(() => {
+  const d = new Date();
+  $('cmdRight').textContent = `ble ${rxChar ? 'up' : 'down'} | bridge ${ccB.up ? 'up' : 'down'}${rxChar ? ` | bat ${ui.bat}%` : ''} | ${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
+}, 1000);
+window.ccAnswerFromPreview = allow => { if (ccB.st && ccB.st.perm) ccCmd({ op: 'perm', id: ccB.st.perm.id, decision: allow ? 'allow' : 'deny' }).catch(() => {}); };
+window.ccLaunchFromPreview = i => ccCmd({ op: 'launch', index: i }).then(() => hud('Launching on this computer')).catch(() => {});

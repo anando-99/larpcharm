@@ -1,6 +1,6 @@
 # Larp Charm
 
-**A wearable bag charm with a touchscreen, plus a Web Bluetooth app that controls it from the browser.**
+**A wearable bag charm with a touchscreen, a Web Bluetooth control app that looks and works like a terminal, and a pocket remote for Claude Code.**
 
 Larp Charm runs on a Waveshare ESP32-S3-Touch-LCD-1.69 (240×280 IPS, capacitive touch, 6-axis IMU, buzzer, LiPo). The firmware is a small single-sketch "OS" with a cyberdeck interface and a dozen apps. The companion web app pairs over Bluetooth LE: no install, no backend, no native app. It also runs a live copy of the charm's screen in the page.
 
@@ -10,6 +10,8 @@ Larp Charm runs on a Waveshare ESP32-S3-Touch-LCD-1.69 (240×280 IPS, capacitive
 
 ## Highlights
 
+- **A remote for Claude Code.** `larp-bridge` (a dependency-free Node script) plugs into Claude Code's hooks and status line. The charm's `cc` screen then mirrors your real session on the laptop: the live transcript with tool calls and results, the spinner with Claude's actual state, and a `/status`-style page with model, context, cost, time and lines changed. When Claude needs permission, the charm buzzes and shows an **approve / deny** card, and your tap answers Claude on the laptop. A launcher page starts preset sessions in Terminal. The mascot reacts to all of it. It is fail-safe by design: if the bridge or the charm isn't there, Claude Code behaves exactly as normal, and unanswered prompts fall back to the terminal after 45 s.
+- **A control panel that is a terminal.** The web app is styled like a tmux session (panes, `0:claude 1:look …` windows, `[ buttons ]`, `--flags`), with a real command line pinned to the bottom: `open claude`, `theme phosphor`, `msg ship it`, `timer 25`, `allow`, `launch 2`, `status`, with history and tab completion.
 - **Custom BLE protocol.** A Nordic-UART-style GATT service with 23 binary commands, chunked file transfer (JPEG photos, album art, songs, sing-along shows) and a notify channel for battery, version and storage status.
 - **The deck: a live tmux session.** Home is a terminal drawn in the classic 5×7 bitmap font. Each pane is labelled with the command that would print it (`$ date`, `$ np`, `$ ps pet`, `$ imu --scope` with a live accelerometer oscilloscope, `$ cat motd`), and a tmux-style status bar holds the other screens as windows (`img sng id eye jbx tty cc`). Tap a pane and the prompt types `open <pane>` before zooming in.
 - **`dmesg -w` for a bag charm.** The firmware keeps its own kernel-style event log (`klog`) and tails it on the deck: Bluetooth link changes, charging and battery steps, shakes with their g-force, step milestones, time syncs, received messages and files, songs, timers. Every line is a real event, timestamped from boot.
@@ -26,13 +28,17 @@ Larp Charm runs on a Waveshare ESP32-S3-Touch-LCD-1.69 (240×280 IPS, capacitive
 
 ```
 ┌──────────────────────────── Browser (Chrome) ─────────────────────────────┐
-│ index.html   UI and styles                                                 │
+│ index.html   UI and styles, plus the larp> command line                    │
 │ app.js       BLE connection, command packets, file transfer, Spotify PKCE  │
 │ charm.js     live 240×280 simulator of the charm's screen                  │
 │ sing.js      sing-along renderer (port of the firmware's)                  │
 │ songs.js / sing-font.js   generated from the same sources as the firmware  │
-└───────────────────────────────────┬────────────────────────────────────────┘
-                                    │ Web Bluetooth (GATT write / notify)
+└──────────────┬────────────────────┬────────────────────────────────────────┘
+               │ SSE + JSON         │ Web Bluetooth (GATT write / notify)
+┌──────────────▼─────────────┐      │
+│ larp-bridge/bridge.mjs     │◀── Claude Code hooks (hook.mjs) + status line
+│ 127.0.0.1:7337, no deps    │      │
+└────────────────────────────┘      │
 ┌───────────────────────────────────▼────────────────────────────────────────┐
 │ firmware/LarpCharm/LarpCharm.ino   ESP32-S3, Arduino core 3.x              │
 │   ST7789V2 display (Arduino_GFX) · CST816T touch · QMI8658 IMU · buzzer    │
@@ -57,6 +63,7 @@ Commands cover mode switching, text, time sync, now playing, chunked transfer (`
 index.html, app.js, charm.js, sing.js   web app (served by GitHub Pages)
 songs.js, sing-font.js                  generated data shared with the firmware
 docs/                                   README media
+larp-bridge/                            Claude Code ⇄ charm bridge, hooks, installer, launcher presets
 firmware/LarpCharm/                     Arduino sketch and generated headers
 firmware/tools/                         generators: fonts and melodies
 scrapped/                               retired looks (Aero, Quest, Ronin, Cotton), kept for reference
@@ -69,6 +76,15 @@ scrapped/                               retired looks (Aero, Quest, Ronin, Cotto
 Open the [web app](https://anando-99.github.io/larpcharm/) (or serve the repo root locally with `python3 -m http.server`) in Chrome on Android, Windows, macOS or Linux, then press **Connect**. Web Bluetooth needs a secure context (HTTPS or `localhost`). The preview works without a charm.
 
 **Spotify (optional).** Create an app at [developer.spotify.com/dashboard](https://developer.spotify.com/dashboard), add the page's exact URL as a redirect URI, and paste the Client ID into the Music panel. Playback controls need Spotify Premium.
+
+### Claude Code remote (optional)
+
+```sh
+node larp-bridge/install.mjs      # once: adds the hooks and a status line to ~/.claude/settings.json (with a backup)
+node larp-bridge/bridge.mjs       # keep it running while you work
+```
+
+Open `http://localhost:7337` (the bridge serves this web app), connect the charm, and open its `cc` screen. Swipe sideways for session, status and launch. Edit `larp-bridge/presets.json` to change the launcher. `node larp-bridge/install.mjs --uninstall` takes the hooks back out. The bridge only listens on `127.0.0.1`, only accepts commands from this web app's origins, and the launcher can only start the presets you define.
 
 ### Firmware
 
@@ -89,7 +105,7 @@ arduino-cli compile --upload -p <port> \
   firmware/LarpCharm
 ```
 
-The web app and the firmware are versioned together; this app expects firmware **8.2** (shown on the charm's status screen and in the app once connected).
+The web app and the firmware are versioned together; this app expects firmware **8.3** (shown on the charm's status screen and in the app once connected).
 
 ## Using the charm
 

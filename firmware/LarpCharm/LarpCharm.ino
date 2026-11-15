@@ -1,5 +1,5 @@
 /*
-  LARP CHARM firmware v8.2
+  LARP CHARM firmware v8.3
   Board : Waveshare ESP32-S3-Touch-LCD-1.69 (240x280 ST7789V2, CST816T touch)
   Control: Bluetooth LE from the Larp Charm web app
 
@@ -8,7 +8,7 @@
   windows. Tap a pane and the prompt types `open <pane>` before it zooms in.
   Swipe down (or the side button) closes whatever is open.
 
-  Blocks: tty (a kaomoji in the terminal), cc (a Claude Code homage), clock, music, eyes, jukebox, pet, dice, message, photo, ID card, torch,
+  Blocks: tty (a kaomoji in the terminal), cc (Claude Code: a live remote through larp-bridge, or a demo), clock, music, eyes, jukebox, pet, dice, message, photo, ID card, torch,
           and a charging screen that appears when you plug it in.
 
   Touch:
@@ -77,7 +77,7 @@ struct EyeShape { float w, h, rad, lidT, slope, lidB; };
 #define SVC_UUID    "6e400001-c4a7-4d2e-9b3c-c4a2d7c0ffee"
 #define RX_UUID     "6e400002-c4a7-4d2e-9b3c-c4a2d7c0ffee"
 #define STATUS_UUID "6e400003-c4a7-4d2e-9b3c-c4a2d7c0ffee"
-#define FW_VERSION  "8.2"
+#define FW_VERSION  "8.3"
 #define DEVICE_NAME "Larp Charm"
 
 enum Cmd : uint8_t {
@@ -106,8 +106,11 @@ enum Cmd : uint8_t {
   CMD_TORCH       = 0x19, // [on 0/1][colour 0..3]
   CMD_SONG_LIST   = 0x1A, // -> "song=id,notes,name" ... "songs=end"
   CMD_SONG_DELETE = 0x1B, // [song id 100..107]
+  // 0x1C, 0x1D were the Cotton profile and mood (removed in 8.0)
+  CMD_CC          = 0x1E, // [op] the live link to Claude Code (larp-bridge): 0 state, 1 log, 2 clear, 3 permission, 4 permission over, 5 presets, 6 status
 };
 
+void setMode(int m, bool announce = true);
 enum Mode : uint8_t { M_CLOCK = 0, M_TEXT, M_PHOTO, M_SING /* was clips */, M_MUSIC, M_PET, M_TOY, M_CARD, M_DECK, M_EYES, M_JUKE, M_TORCH, M_CHARGE, M_TERM, M_CLAUDE, M_COUNT };
 
 // ───────────── Display ─────────────
@@ -2204,7 +2207,7 @@ void ttyTap(bool dbl) {
 // Little sessions loop on their own: a prompt is typed into the input box, then tool calls, results and
 // replies stream into the transcript, with the spinner between them. Answers use the charm's live data.
 const uint16_t CC_ORANGE = c565(217, 119, 87), CC_TEXT = c565(232, 232, 232), CC_DIM = c565(140, 140, 150), CC_GREEN = c565(80, 200, 120), CC_RED = c565(240, 90, 90);
-enum CcKind : uint8_t { CK_USER, CK_TEXT, CK_TOOL, CK_RESULT, CK_GAP };
+enum CcKind : uint8_t { CK_USER, CK_TEXT, CK_TOOL, CK_RESULT, CK_GAP, CK_ERR };
 struct CcLine { uint8_t kind; char s[38]; };
 #define CC_LINES 14
 CcLine   ccLog[CC_LINES];
@@ -2231,6 +2234,27 @@ void ccStep(uint8_t kind, uint16_t think, const char *fmt, ...) {
   st.kind = kind; st.think = think;
   va_list ap; va_start(ap, fmt); vsnprintf(st.s, sizeof(st.s), fmt, ap); va_end(ap);
 }
+enum CcLive : uint8_t { CL_OFFLINE, CL_READY, CL_THINKING, CL_TOOL, CL_PERM, CL_WAITING, CL_DONE };
+const char *CL_NAME[7] = {"offline", "ready", "thinking", "running", "needs you", "your turn", "done"};
+bool     ccLive = false;
+uint32_t ccLiveAt = 0, ccLiveSince = 0, ccVerbAt = 0;
+uint8_t  ccLState = CL_OFFLINE, ccPage = 0;
+String   ccLProject, ccLModel, ccLTool, ccLPrompt;
+uint8_t  ccSCtx = 0;
+uint16_t ccSCost = 0, ccSMin = 0, ccSAdd = 0, ccSDel = 0;
+String   ccSVersion, ccSSession, ccSCwd;
+bool     ccPermOn = false;
+uint16_t ccPermId = 0;
+String   ccPermTool, ccPermDetail, ccPermProj;
+uint32_t ccPermAt = 0, ccPermAnsweredAt = 0;
+int8_t   ccPermAnswer = -1;                 // what you answered, shown for a moment
+uint8_t  ccPermReturn = M_DECK;
+String   ccPreset[6];
+uint8_t  ccPresetN = 0;
+int8_t   ccPresetHit = -1;
+uint32_t ccPresetHitAt = 0;
+bool ccLinked() { return ccLive && millis() - ccLiveAt < 35000; }
+
 // the mascot's pose (drawn by ccMascot below)
 enum CcPose : uint8_t { CP_IDLE, CP_WAVE, CP_DIZZY, CP_HAPPY };
 uint8_t  ccPose = CP_IDLE;
@@ -2340,9 +2364,10 @@ void ccMascot(int x0, int y0, int s) {
   uint32_t now = millis();
   if (now > ccPoseUntil) ccPose = CP_IDLE;
   if (now > ccNextBlink) { ccBlinkAt = now; ccNextBlink = now + 2400 + random(0, 3000); }
-  bool sleepy = idleEyesOn && ccPose == CP_IDLE;
-  bool busy = !sleepy && (ccState == CS_THINK || ccState == CS_STREAM) && ccPos < ccLen;
-  bool typing = ccState == CS_TYPE;
+  bool live = ccLinked();
+  bool sleepy = ccPose == CP_IDLE && (live ? ccLState == CL_OFFLINE : idleEyesOn);
+  bool busy = !sleepy && (live ? (ccLState == CL_THINKING || ccLState == CL_TOOL) : ((ccState == CS_THINK || ccState == CS_STREAM) && ccPos < ccLen));
+  bool typing = !live && ccState == CS_TYPE;
   if (!busy && !typing && !sleepy && now > ccLookUntil && !random(0, 160)) { ccLook = random(0, 2) ? 1 : -1; ccLookUntil = now + 1200; }
   int dy = 0, dx = 0;
   if (sleepy) dy = (now / 900) % 2;
@@ -2474,49 +2499,260 @@ void ccStar(int cx, int cy, uint8_t phase, uint16_t col) {
 }
 void ccBox(int x, int y, int w, int h, uint16_t col) { gfx->drawRoundRect(x, y, w, h, 6, col); }
 
-void drawClaude() {
+// ───── live: the real Claude Code on your computer, through larp-bridge and the web app ─────
+// When the bridge is linked, the session page mirrors your real session, the status page shows what
+// /status would, the launcher starts preset sessions in Terminal, and permission prompts come to the charm.
+String ccField(const String &s, int k) {                       // k-th 0x1F-separated field
+  int st = 0;
+  for (int i = 0; i < k; i++) { st = s.indexOf('\x1F', st); if (st < 0) return ""; st++; }
+  int e = s.indexOf('\x1F', st);
+  return asciiOnly(e < 0 ? s.substring(st) : s.substring(st, e));
+}
+void ccAlert() {                                               // a little pager chirp
+  if (!soundsOn) return;
+  for (int i = 0; i < 3; i++) { tone(BUZZER, 1800 + i * 300, 60); delay(90); }
+  noTone(BUZZER);
+}
+// [op] ... from the web app, which relays larp-bridge
+void ccPacket(const uint8_t *p, uint16_t len) {
+  if (len < 1) return;
   uint32_t now = millis();
-  if (!ccLen) ccPlan(-1);
-  // advance the session
-  CcStep &st = ccScript[min((int)ccPos, CC_STEPS - 1)];
-  switch (ccState) {
-    case CS_TYPE:
-      if (st.kind != CK_USER) { ccState = CS_THINK; ccAt = now; break; }
-      if (now - ccAt > strlen(st.s) * 55 + 500) { ccAdd(CK_USER, st.s); ccPos++; ccState = CS_THINK; ccAt = now; }
-      break;
-    case CS_THINK:
-      if (ccPos >= ccLen) { ccState = CS_REST; ccAt = now; if (ccPose != CP_DIZZY) ccSetPose(CP_HAPPY, 2200); break; }
-      if (now - ccAt > ccScript[ccPos].think) { ccState = CS_STREAM; ccAt = now; ccAdd(ccScript[ccPos].kind, ""); }
-      break;
-    case CS_STREAM: {
-      CcStep &cur = ccScript[ccPos];
-      int n = min((int)strlen(cur.s), (int)((now - ccAt) / 14));
-      snprintf(ccLog[ccLogN - 1].s, sizeof(ccLog[0].s), "%.*s", n, cur.s);
-      if (n >= (int)strlen(cur.s)) { ccPos++; ccState = CS_THINK; ccAt = now; if (ccPos < ccLen && ccScript[ccPos].kind != CK_RESULT) ccVerb = random(0, 12); }
+  String s = len > 1 ? String((const char *)(p + 1), len - 1) : String();
+  switch (p[0]) {
+    case 0: {                                                    // state: [state][elapsed u16] project 1F model 1F tool 1F prompt
+      if (len < 4) return;
+      if (!ccLinked()) { ccLogN = 0; ccLen = 0; ccState = CS_REST; klog("cc: bridge linked"); }
+      uint8_t was = ccLState;
+      ccLState = min((int)p[1], (int)CL_DONE);
+      ccLiveSince = now - (uint32_t)(p[2] | (p[3] << 8)) * 1000UL;
+      String f = String((const char *)(p + 4), len - 4);
+      ccLProject = ccField(f, 0); ccLModel = ccField(f, 1); ccLTool = ccField(f, 2); ccLPrompt = ccField(f, 3);
+      ccLive = true; ccLiveAt = now;
+      if (was != ccLState) {
+        if (ccLState == CL_DONE) { ccSetPose(CP_HAPPY, 2400); klog("cc: claude is done"); }
+        if (ccLState == CL_WAITING) klog("cc: your turn");
+        if (ccLState == CL_THINKING || ccLState == CL_TOOL) ccVerb = random(0, 12);
+      }
       break;
     }
-    default:
-      if (now - ccAt > (idleEyesOn ? 9000UL : 5000UL)) ccPlan(-1);
+    case 1:                                                      // log line: [kind] text
+      if (len >= 2) { static const uint8_t K[5] = {CK_USER, CK_TEXT, CK_TOOL, CK_RESULT, CK_ERR}; ccAdd(K[min((int)p[1], 4)], asciiOnly(String((const char *)(p + 2), len - 2)).c_str()); }
+      ccLiveAt = now;
+      break;
+    case 2: ccLogN = 0; break;                                   // clear
+    case 3:                                                      // permission: [id u16] tool 1F detail 1F project
+      if (len < 3) return;
+      ccPermId = p[1] | (p[2] << 8);
+      { String f = String((const char *)(p + 3), len - 3); ccPermTool = ccField(f, 0); ccPermDetail = ccField(f, 1); ccPermProj = ccField(f, 2); }
+      ccPermOn = true; ccPermAt = now; ccPermAnswer = -1;
+      touchActivity();
+      if (mode != M_CLAUDE) { ccPermReturn = mode; setMode(M_CLAUDE); } else ccPermReturn = M_CLAUDE;
+      ccBig = false; ccBigT = 0; ccSetPose(CP_WAVE, 60000);
+      klog("cc: wants to use %s", ccPermTool.c_str());
+      ccAlert();
+      break;
+    case 4:                                                      // permission over: [id u16][how 0 elsewhere 1 answered]
+      if (len >= 3 && (p[1] | (p[2] << 8)) == ccPermId && ccPermOn) {
+        ccPermOn = false; ccPose = CP_IDLE;
+        if (ccPermAnswer < 0) toast("answered on laptop", 1200);
+        if (ccPermReturn != M_CLAUDE && mode == M_CLAUDE) setMode(ccPermReturn);
+      }
+      break;
+    case 5:                                                      // launcher presets: name 1F name ...
+      ccPresetN = 0;
+      for (int k = 0; k < 6; k++) { String n = ccField(s, k); if (!n.length()) break; ccPreset[ccPresetN++] = n.substring(0, 22); }
+      break;
+    case 6:                                                      // status: [ctx][cost c u16][min u16][+ u16][- u16] version 1F model 1F session 1F cwd
+      if (len < 10) return;
+      ccSCtx = p[1]; ccSCost = p[2] | (p[3] << 8); ccSMin = p[4] | (p[5] << 8); ccSAdd = p[6] | (p[7] << 8); ccSDel = p[8] | (p[9] << 8);
+      { String f = String((const char *)(p + 10), len - 10); ccSVersion = ccField(f, 0); String m = ccField(f, 1); if (m.length()) ccLModel = m; ccSSession = ccField(f, 2); ccSCwd = ccField(f, 3); }
+      ccLiveAt = now;
       break;
   }
+}
+void ccAnswer(bool allow) {
+  if (!ccPermOn || ccPermAnswer >= 0) return;
+  char b[24]; snprintf(b, sizeof(b), "cc=%s:%u", allow ? "allow" : "deny", ccPermId);
+  notifyText(b);
+  ccPermAnswer = allow; ccPermAnsweredAt = millis();
+  ccSetPose(allow ? CP_HAPPY : CP_IDLE, 2000);
+  klog("cc: %s from the charm", allow ? "allowed" : "denied");
+  sfx(allow ? 2 : 1);
+}
+void ccLaunch(int i) {
+  if (i < 0 || i >= ccPresetN) return;
+  char b[16]; snprintf(b, sizeof(b), "cc=launch:%d", i);
+  notifyText(b);
+  ccPresetHit = i; ccPresetHitAt = millis();
+  toast(String("launching ") + ccPreset[i], 1400);
+  klog("cc: launch %s", ccPreset[i].c_str());
+  sfx(2);
+}
+
+// the permission card: Claude is asking, the charm answers
+void drawCcPerm(uint32_t now) {
+  gfx->fillScreen(c565(12, 12, 14));
+  ccBox(8, 10, 224, 252, CC_ORANGE);
+  gfx->fillRect(20, 6, 74, 9, c565(12, 12, 14));
+  textAt("permission", 26, 7, 1, CC_ORANGE);
+  ccMascot(88, 24, 4);
+  textAt("Claude wants to use", 63, 72, 1, CC_DIM);
+  int tw = ccPermTool.length() * 12;
+  textAt(ccPermTool, 120 - tw / 2, 86, 2, COL_WHITE);
+  String d = ccPermDetail;                                     // the command or file, wrapped
+  for (int k = 0, y = 110; k < 4 && d.length(); k++, y += 11) {
+    String line = d.substring(0, 34);
+    if (k == 3 && d.length() > 34) line = line.substring(0, 31) + "...";
+    textAt(line, 120 - line.length() * 3, y, 1, CC_TEXT);
+    d = d.substring(min((int)d.length(), 34));
+  }
+  if (ccPermProj.length()) { String in = String("in ") + ccPermProj; textAt(in, 120 - in.length() * 3, 160, 1, CC_DIM); }
+  uint32_t left = (now - ccPermAt) < 45000 ? (45000 - (now - ccPermAt)) / 1000 : 0;
+  if (ccPermAnswer < 0) {
+    gfx->drawRoundRect(20, 186, 92, 40, 8, CC_RED);
+    gfx->drawRoundRect(128, 186, 92, 40, 8, CC_GREEN);
+    textAt("deny", 66 - 24, 199, 2, CC_RED);
+    textAt("allow", 174 - 30, 199, 2, CC_GREEN);
+    char b[40]; snprintf(b, sizeof(b), "or answer on your laptop  %lus", (unsigned long)left);
+    textAt(b, 120 - strlen(b) * 3, 238, 1, CC_DIM);
+  } else {
+    const char *m = ccPermAnswer ? "allowed" : "denied";
+    gfx->fillRoundRect(20, 186, 200, 40, 8, ccPermAnswer ? CC_GREEN : CC_RED);
+    textAt(m, 120 - strlen(m) * 6, 199, 2, c565(12, 12, 14));
+    textAt("sent to Claude Code", 63, 238, 1, CC_DIM);
+    if (now - ccPermAnsweredAt > 1600) { ccPermOn = false; if (ccPermReturn != M_CLAUDE && mode == M_CLAUDE) setMode(ccPermReturn); }
+  }
+}
+
+// the page tabs along the top: session, status, launch
+void ccTabs() {
+  static const char *T[3] = {"session", "status", "launch"};
+  static const int X[3] = {51, 105, 153};
+  for (int i = 0; i < 3; i++) textAt(T[i], X[i], 3, 1, i == ccPage ? CC_ORANGE : mix565(CC_DIM, COL_BLACK, 110));
+  gfx->drawFastHLine(X[ccPage], 11, strlen(T[ccPage]) * 6 - 1, CC_ORANGE);
+  gfx->fillCircle(196, 6, 2, ccLinked() ? CC_GREEN : mix565(CC_DIM, COL_BLACK, 110));
+}
+
+// what /status shows, from the bridge
+void drawCcStatus(uint32_t now) {
+  bool live = ccLinked();
+  textAt("Status", 18, 22, 2, CC_ORANGE);
+  char b[48];
+  struct Row { const char *k; String v; uint16_t c; };
+  String ctx = asciiBar(ccSCtx / 100.0f, 12, '#', '#', '.') + " " + String(ccSCtx) + "%";
+  snprintf(b, sizeof(b), "$%u.%02u", ccSCost / 100, ccSCost % 100); String cost = b;
+  snprintf(b, sizeof(b), "%uh %02um", ccSMin / 60, ccSMin % 60); String tim = ccSMin >= 60 ? String(b) : String(ccSMin) + "m";
+  String state = ccLState == CL_TOOL && ccLTool.length() ? ccLTool : String(CL_NAME[ccLState]);
+  Row rows[9] = {
+    {"Version", ccSVersion.length() ? ccSVersion : String("-"), CC_TEXT},
+    {"Session", ccSSession.length() ? ccSSession : String("-"), CC_TEXT},
+    {"cwd", ccSCwd.length() ? ccSCwd : ccLProject.length() ? ccLProject : String("-"), CC_TEXT},
+    {"Model", ccLModel.length() ? ccLModel : String("-"), CC_TEXT},
+    {"Context", ctx, ccSCtx > 80 ? CC_RED : CC_ORANGE},
+    {"Cost", cost, CC_TEXT},
+    {"Time", tim, CC_TEXT},
+    {"Lines", "", CC_TEXT},
+    {"State", state, ccLState == CL_PERM ? CC_ORANGE : ccLState == CL_DONE ? CC_GREEN : CC_TEXT},
+  };
+  for (int i = 0; i < 9; i++) {
+    int y = 46 + i * 17;
+    textAt(rows[i].k, 18, y, 1, CC_DIM);
+    if (i == 7) {
+      snprintf(b, sizeof(b), "+%u", ccSAdd); textAt(b, 84, y, 1, CC_GREEN);
+      int w = strlen(b) * 6; snprintf(b, sizeof(b), "-%u", ccSDel); textAt(b, 90 + w, y, 1, CC_RED);
+    } else textAt(rows[i].v.substring(0, 24), 84, y, 1, live || i < 4 ? rows[i].c : CC_DIM);
+  }
+  if (live) { textAt("bridge linked", 18, 204, 1, CC_GREEN); }
+  else {
+    textAt("not linked. on your computer run", 18, 200, 1, CC_DIM);
+    textAt("node larp-bridge/bridge.mjs", 18, 212, 1, CC_TEXT);
+  }
+  ccMascot(160, 224, 3);
+}
+
+// start a preset session on your computer
+void drawCcLaunch(uint32_t now) {
+  textAt("Launch", 18, 22, 2, CC_ORANGE);
+  textAt("starts in Terminal on your laptop", 18, 42, 1, CC_DIM);
+  if (!ccLinked() || !ccPresetN) {
+    textAt("no bridge linked yet", 60, 120, 1, CC_TEXT);
+    textAt("node larp-bridge/bridge.mjs", 39, 136, 1, CC_DIM);
+    ccMascot(96, 180, 3);
+    return;
+  }
+  for (int i = 0; i < ccPresetN; i++) {
+    int y = 58 + i * 30;
+    bool hit = ccPresetHit == i && now - ccPresetHitAt < 700;
+    if (hit) gfx->fillRoundRect(14, y, 212, 25, 6, CC_ORANGE);
+    else gfx->drawRoundRect(14, y, 212, 25, 6, mix565(CC_DIM, COL_BLACK, 90));
+    textAt(">", 24, y + 9, 1, hit ? c565(12, 12, 14) : CC_ORANGE);
+    textAt(ccPreset[i], 36, y + 9, 1, hit ? c565(12, 12, 14) : CC_TEXT);
+  }
+}
+void ccTapPage(int x, int y) {
+  if (ccPage == 2) { if (ccLinked()) for (int i = 0; i < ccPresetN; i++) if (y >= 58 + i * 30 && y < 83 + i * 30) { ccLaunch(i); return; } return; }
+  if (ccPage == 1) return;
+  if (x >= 14 && x <= 74 && y >= 22 && y <= 68) { ccBigOpen(); return; }    // the little critter: pop it out
+  if (ccLinked()) { ccSetPose(CP_WAVE, 1500); return; }
+  if (ccState == CS_REST) ccPoke(100);
+}
+
+void drawClaude() {
+  uint32_t now = millis();
+  bool live = ccLinked();
+  if (!live) {                                                   // nothing linked: the little demo plays
+    if (!ccLen) ccPlan(-1);
+    CcStep &st = ccScript[min((int)ccPos, CC_STEPS - 1)];
+    switch (ccState) {
+      case CS_TYPE:
+        if (st.kind != CK_USER) { ccState = CS_THINK; ccAt = now; break; }
+        if (now - ccAt > strlen(st.s) * 55 + 500) { ccAdd(CK_USER, st.s); ccPos++; ccState = CS_THINK; ccAt = now; }
+        break;
+      case CS_THINK:
+        if (ccPos >= ccLen) { ccState = CS_REST; ccAt = now; if (ccPose != CP_DIZZY) ccSetPose(CP_HAPPY, 2200); break; }
+        if (now - ccAt > ccScript[ccPos].think) { ccState = CS_STREAM; ccAt = now; ccAdd(ccScript[ccPos].kind, ""); }
+        break;
+      case CS_STREAM: {
+        CcStep &cur = ccScript[ccPos];
+        int n = min((int)strlen(cur.s), (int)((now - ccAt) / 14));
+        snprintf(ccLog[ccLogN - 1].s, sizeof(ccLog[0].s), "%.*s", n, cur.s);
+        if (n >= (int)strlen(cur.s)) { ccPos++; ccState = CS_THINK; ccAt = now; if (ccPos < ccLen && ccScript[ccPos].kind != CK_RESULT) ccVerb = random(0, 12); }
+        break;
+      }
+      default:
+        if (now - ccAt > (idleEyesOn ? 9000UL : 5000UL)) ccPlan(-1);
+        break;
+    }
+  } else if (now - ccVerbAt > 5000) { ccVerbAt = now; ccVerb = random(0, 12); }
+
+  if (ccPermOn) { drawCcPerm(now); return; }
 
   ccBigT += ((ccBig ? 1.0f : 0.0f) - ccBigT) * 0.22f;
   if (fabsf(ccBigT - (ccBig ? 1.0f : 0.0f)) < 0.02f) ccBigT = ccBig ? 1.0f : 0.0f;
   if (ccBig && ccBigT >= 1.0f) { drawCcBig(now); return; }
 
   gfx->fillScreen(c565(12, 12, 14));
+  ccTabs();
+  if (ccPage == 1) { drawCcStatus(now); return; }
+  if (ccPage == 2) { drawCcLaunch(now); return; }
+
   // welcome box
   ccBox(12, 14, 216, 58, CC_ORANGE);
   ccMascot(21, 31, 3);
   ccStar(80, 25, 4, CC_ORANGE);
   textAt("Welcome to", 88, 22, 1, CC_TEXT);
   textAt("Claude Code!", 88, 33, 1, COL_WHITE);
-  textAt("/help for help", 80, 47, 1, CC_DIM);
-  textAt("cwd: /larp/charm", 80, 58, 1, CC_DIM);
+  if (live) {
+    textAt((ccLModel.length() ? ccLModel : String("claude")).substring(0, 22), 80, 47, 1, CC_DIM);
+    textAt((String("cwd: ") + (ccLProject.length() ? ccLProject : String("?"))).substring(0, 22), 80, 58, 1, CC_DIM);
+  } else {
+    textAt("/help for help", 80, 47, 1, CC_DIM);
+    textAt("cwd: /larp/charm (demo)", 80, 58, 1, CC_DIM);
+  }
 
   // transcript, newest at the bottom
   const int top = 80, lh = 11;
-  bool thinking = ccState == CS_THINK && ccPos < ccLen;
+  bool thinking = live ? (ccLState == CL_THINKING || ccLState == CL_TOOL) : (ccState == CS_THINK && ccPos < ccLen);
   int rows = (thinking ? 12 : 13), first = max(0, (int)ccLogN - rows);
   int yy = top + (rows - (ccLogN - first)) * lh;
   if (yy < top) yy = top;
@@ -2526,18 +2762,18 @@ void drawClaude() {
       case CK_USER:   textAt(">", 16, yy, 1, CC_DIM); textAt(String(l.s).substring(0, 33), 28, yy, 1, CC_DIM); break;
       case CK_TEXT:   gfx->fillCircle(19, yy + 3, 2, CC_TEXT); textAt(String(l.s).substring(0, 33), 28, yy, 1, CC_TEXT); break;
       case CK_TOOL: {
-        bool live = i == ccLogN - 1 && (ccState == CS_STREAM || (thinking && ccScript[ccPos].kind == CK_RESULT));
-        gfx->fillCircle(19, yy + 3, 2, live && (now / 300) % 2 ? CC_DIM : CC_GREEN);
+        bool running = i == ccLogN - 1 && (live ? ccLState == CL_TOOL : (ccState == CS_STREAM || (thinking && ccScript[ccPos].kind == CK_RESULT)));
+        gfx->fillCircle(19, yy + 3, 2, running && (now / 300) % 2 ? CC_DIM : CC_GREEN);
         String s = l.s; int p = s.indexOf('(');
-        if (p > 0) { textAt(s.substring(0, p), 28, yy, 1, COL_WHITE); textAt(s.substring(p), 28 + p * 6, yy, 1, CC_DIM); }
-        else textAt(s, 28, yy, 1, COL_WHITE);
+        if (p > 0) { textAt(s.substring(0, p), 28, yy, 1, COL_WHITE); textAt(s.substring(p, 33), 28 + p * 6, yy, 1, CC_DIM); }
+        else textAt(s.substring(0, 33), 28, yy, 1, COL_WHITE);
         break;
       }
-      case CK_RESULT: {
+      case CK_RESULT: case CK_ERR: {
         gfx->drawFastVLine(30, yy, 4, CC_DIM); gfx->drawFastHLine(30, yy + 4, 4, CC_DIM);
-        uint16_t c = l.s[0] == '+' ? CC_GREEN : CC_DIM;
+        uint16_t c = l.kind == CK_ERR ? CC_RED : l.s[0] == '+' ? CC_GREEN : CC_DIM;
         textAt(String(l.s).substring(0, 31), 40, yy, 1, c);
-        if (l.s[0] == '+') { const char *m = strchr(l.s, '-'); if (m) textAt(m, 40 + (m - l.s) * 6, yy, 1, CC_RED); }
+        if (l.kind == CK_RESULT && l.s[0] == '+') { const char *m = strchr(l.s, '-'); if (m) textAt(m, 40 + (m - l.s) * 6, yy, 1, CC_RED); }
         break;
       }
       default: break;
@@ -2545,24 +2781,27 @@ void drawClaude() {
   }
   if (thinking) {                                                  // the spinner and its whimsical verb
     char b[64];
-    snprintf(b, sizeof(b), "%s... (%lus, esc to stop)", idleEyesOn ? "Dreaming" : CC_VERBS[ccVerb], (unsigned long)((now - ccAt) / 1000 + 1));
+    uint32_t secs = (now - (live ? ccLiveSince : ccAt)) / 1000 + 1;
+    if (live && ccLState == CL_TOOL) snprintf(b, sizeof(b), "Running... (%lus, esc to stop)", (unsigned long)secs);
+    else snprintf(b, sizeof(b), "%s... (%lus, esc to stop)", idleEyesOn && !live ? "Dreaming" : CC_VERBS[ccVerb], (unsigned long)secs);
     ccStar(19, yy + 3, (now / 120) % 6, CC_ORANGE);
     textAt(String(b).substring(0, 33), 28, yy, 1, CC_ORANGE);
   }
 
   // input box
-  ccBox(12, 232, 216, 22, CC_DIM);
+  ccBox(12, 232, 216, 22, ccLState == CL_WAITING && live ? CC_ORANGE : CC_DIM);
   textAt(">", 20, 239, 1, CC_TEXT);
-  if (ccState == CS_TYPE && ccScript[ccPos].kind == CK_USER) {
+  if (!live && ccState == CS_TYPE && ccScript[ccPos].kind == CK_USER) {
     int n = min((int)strlen(ccScript[ccPos].s), (int)((now - ccAt) / 55));
     String s = String(ccScript[ccPos].s).substring(0, n);
     textAt(s, 32, 239, 1, CC_TEXT);
     gfx->fillRect(32 + n * 6, 238, 6, 9, CC_TEXT);
   } else {
-    textAt("Try \"make the charm cuter\"", 32, 239, 1, mix565(CC_DIM, COL_BLACK, 90));
+    const char *hint = !live ? "Try \"make the charm cuter\"" : ccLState == CL_WAITING || ccLState == CL_DONE ? "your turn, on the laptop" : ccLState == CL_OFFLINE ? "session ended" : "Claude is working...";
+    textAt(hint, 32, 239, 1, mix565(CC_DIM, COL_BLACK, 90));
     if ((now / 500) % 2) gfx->fillRect(32, 238, 1, 9, CC_TEXT);
   }
-  textAt("? for shortcuts", 18, 260, 1, CC_DIM);
+  textAt(live ? CL_NAME[ccLState] : "? for shortcuts", 18, 260, 1, live && ccLState == CL_DONE ? CC_GREEN : CC_DIM);
   if (ccBigT > 0.01f) drawCcPop(ccBigT);
 }
 
@@ -3830,7 +4069,7 @@ void render() {
   frameNo++;
 }
 
-void setMode(int m, bool announce = true) {
+void setMode(int m, bool announce) {
   (void)announce;
   uint8_t old = mode;
   mode = ((m % M_COUNT) + M_COUNT) % M_COUNT;
@@ -4177,6 +4416,8 @@ void handlePacket(const uint8_t *d, uint16_t n) {
       }
       break;
 
+    case CMD_CC: ccPacket(p, len); break;
+
     case CMD_EYES:
       if (len >= 1) {
         if (p[0] >= EXPR_COUNT) exprAuto = true; else setExpr(p[0], 10000);
@@ -4357,7 +4598,7 @@ void onSwipe(int dir) {
       break;
     case M_TORCH: torchCol = (torchCol + 4 + dir) % 4; break;
     case M_TERM:  ttySet((ttyFace + TF_COUNT + dir) % TF_COUNT, 6000); toast(TTY_MOOD[ttyFace], 700); sfx(4); break;
-    case M_CLAUDE: if (ccBig) cbSwipe(dir); else { ccPlan(-1); sfx(1); } break;
+    case M_CLAUDE: if (ccPermOn) break; if (ccBig) cbSwipe(dir); else { ccPage = (ccPage + 3 + dir) % 3; sfx(1); } break;
     case M_SING:  singSkip(dir); break;
     default: break;
   }
@@ -4427,9 +4668,9 @@ void onTap(bool dbl) {
     case M_CHARGE: closeModule(); break;
     case M_TERM:   ttyTap(dbl); sfx(4); break;
     case M_CLAUDE:
-      if (ccBig) cbTap(tch.x0, tch.y0, dbl);
-      else if (tch.x0 >= 14 && tch.x0 <= 74 && tch.y0 >= 22 && tch.y0 <= 68) ccBigOpen();   // the little critter: pop it out
-      else if (ccState == CS_REST) ccPoke(100);
+      if (ccPermOn) { if (tch.y0 >= 180 && tch.y0 < 232) ccAnswer(tch.x0 >= 120); }
+      else if (ccBig) cbTap(tch.x0, tch.y0, dbl);
+      else ccTapPage(tch.x0, tch.y0);
       break;
     default: break;
   }
@@ -4459,7 +4700,7 @@ void onShake() {
       break;
     case M_EYES: setExpr(E_DIZZY, 3000); sfx(3); break;
     case M_TERM: ttySet(TF_DIZZY, 3000); sfx(3); break;
-    case M_CLAUDE: if (ccBig) cbShake(); else ccPoke(101); sfx(3); break;
+    case M_CLAUDE: if (ccPermOn) break; if (ccBig) cbShake(); else if (ccLinked()) ccSetPose(CP_DIZZY, 2400); else ccPoke(101); sfx(3); break;
     case M_SING: singJumpAt = millis(); sfx(3); break;
     case M_JUKE: { int16_t all[48]; int n = allSongs(all, 48); jbSelId = all[random(0, n)]; jbStop(); jbStartSong(jbSelId); toast("shuffle", 800); break; }
     default: break;
