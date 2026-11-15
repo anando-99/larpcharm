@@ -1,4 +1,4 @@
-// A working copy of the charm's screen. It draws the same deck and blocks as firmware 8.1,
+// A working copy of the charm's screen. It draws the same deck and blocks as firmware 8.2,
 // follows the controls on this page, and opens a block when you tap it.
 (() => {
   const $ = id => document.getElementById(id);
@@ -133,10 +133,10 @@
     const a = glyphs(col, size); s = String(s);
     for (let i = 0; i < s.length; i++) { const ch = s.charCodeAt(i) & 255; c.drawImage(a, ch * 6 * size, 0, 6 * size, 8 * size, x + i * 6 * size, y, 6 * size, 8 * size); }
   }
-  const TX = [2, 2, 152, 2, 92, 10, 54, 98, 142, 186], TY = [15, 81, 81, 141, 141, 258, 258, 258, 258, 258], TW = [236, 146, 86, 86, 146, 44, 44, 44, 44, 44], TH = [62, 56, 56, 54, 54, 22, 22, 22, 22, 22];
-  const TMODE = [0, 4, 5, 6, 1, 2, 3, 7, 9, 10];
-  const TCMD = ['date', 'np', 'ps pet', 'imu --scope', 'cat motd', 'img', 'sng', 'id', 'eye', 'jbx'];
-  const TOPEN = ['clock', 'audio', 'pet', 'rng', 'motd', 'img', 'sing', 'id', 'eyes', 'jukebox'];
+  const TX = [2, 2, 152, 2, 92, 10, 41, 72, 104, 135, 167, 198], TY = [15, 81, 81, 141, 141, 258, 258, 258, 258, 258, 258, 258], TW = [236, 146, 86, 86, 146, 31, 31, 32, 31, 32, 31, 32], TH = [62, 56, 56, 54, 54, 22, 22, 22, 22, 22, 22, 22];
+  const TMODE = [0, 4, 5, 6, 1, 2, 3, 7, 9, 10, 13, 14];
+  const TCMD = ['date', 'np', 'ps pet', 'imu --scope', 'cat motd', 'img', 'sng', 'id', 'eye', 'jbx', 'tty', 'cc'];
+  const TOPEN = ['clock', 'audio', 'pet', 'rng', 'motd', 'img', 'sing', 'id', 'eyes', 'jukebox', 'tty', 'claude'];
   const DAYS = ['SUN', 'MON', 'TUE', 'WED', 'THU', 'FRI', 'SAT'], MON = ['JAN', 'FEB', 'MAR', 'APR', 'MAY', 'JUN', 'JUL', 'AUG', 'SEP', 'OCT', 'NOV', 'DEC'];
   const SPR = [
     ['K..........K', 'KK........KK', 'KBK......KBK', 'KBBKKKKKKBBK', 'KBBBBBBBBBBK', 'KBBKBBBBKBBK', 'KBBKBBBBKBBK', 'KBPBBKKBBPBK', 'KBBBBBBBBBBK', '.KBBBBBBBBK.', '..KBBBBBBK..', '...KKKKKK...'],
@@ -150,7 +150,7 @@
   const boot = performance.now();
   const klog = [];
   const charmLog = window.charmLog = msg => { klog.push({ t: performance.now() - boot, s: String(msg).replace(/[^\x20-\x7e]/g, '?').slice(0, 31) }); if (klog.length > 8) klog.shift(); };
-  ['kernel: larp-os 8.0 up', 'imu: qmi8658 online', 'fs: ffat mounted', 'rtc: clock ok'].forEach(charmLog);
+  ['kernel: larp-os 8.2 up', 'imu: qmi8658 online', 'fs: ffat mounted', 'rtc: clock ok'].forEach(charmLog);
   const typing = { cmd: '', at: 0, tile: -1 };
   const scope = new Array(74).fill(0); let scopeHead = 0, lastTilt = 0;
   const bar = (f, n, fill, head, empty) => { const k = Math.round(Math.max(0, Math.min(1, f)) * (n - 2)); let s = '['; for (let i = 0; i < n - 2; i++) s += i < k - 1 ? fill : i === k - 1 ? head : empty; return s + ']'; };
@@ -224,11 +224,11 @@
     });
     // tmux status bar
     R(0, 258, W, 22, ACC);
-    for (let i = 0; i < 5; i++) {
+    for (let i = 0; i < 7; i++) {
       const k = 5 + i, wx = TX[k], a = act === k;
       if (a) R(wx, 258, TW[k], 22, TTY_BG);
       if (i) R(wx, 261, 1, 16, a ? ACC : TTY_BG);
-      G(TCMD[k], wx + ((TW[k] - TCMD[k].length * 12) / 2 | 0) + 1, 262, 2, a ? ACC : TTY_BG);
+      G(TCMD[k], wx + ((TW[k] - TCMD[k].length * 6) / 2 | 0) + 1, 265, 1, a ? ACC : TTY_BG);
     }
   }
 
@@ -399,7 +399,114 @@
     TC('CHARGING  4.05V', 244, 1, '#fff');
   }
   const sing = () => window.Sing && window.singShow && window.singShow.lines.length ? Sing.draw(c, window.singShow, window.singClock()) : deck();
-  const scenes = { 0: clock, 1: text, 2: photo, 3: sing, 4: music, 5: pet, 6: toy, 7: card, 8: deck, 9: eyes, 10: jukeDeck, 11: torch, 12: chargeDeck };
+
+  // ── tty: a kaomoji that lives in the terminal (same as the firmware's drawTty) ──
+  const TFACE = ['(o_o)', '(^_^)', '(^o^)', '(\x03_\x03)', '(T_T)', '(>_<)', '(O_O)', '(-_-)', '(-.-)', '(\xAA_\xAA)', '(^_-)', '(@_@)', '(^_^)'];
+  const TMOOD = ['idle', 'happy', 'giggling', 'in love', 'sad', 'grumpy', 'surprised', 'sleepy', 'bored', 'suspicious', 'cheeky', 'dizzy', 'vibing'];
+  const tt = { face: 0, until: 0, next: 0, blink: 0, nextBlink: 0, look: 0, lookUntil: 0, thought: 'booting feelings... ok', at: 0, nextThought: 0,
+    rain: Array.from({ length: 40 }, () => ({ y: -Math.random() * 280, spd: 1 + Math.random() * 3 | 0, len: 4 + Math.random() * 8 | 0 })) };
+  function ttyThink(now) {
+    const steps = (($('stepCount') || {}).textContent || '0').replace(/[^0-9]/g, '') || '0', s = song(), h = new Date().getHours(), pick = Math.random() * 9 | 0;
+    const pool = [`${steps} steps today. legs: noted`, `uptime ${uptime(now - boot)}. still here`, 'compiling dreams... 0 errors',
+      document.body.classList.contains('connected') ? 'your phone is close. nice' : 'no phone nearby. just us', "grep -r 'meaning' /life", 'sudo make me a sandwich',
+      (val('petName') || 'pet') + ' says hi', 'rm -rf /worries ... done', 'waiting for a ping'];
+    tt.thought = h < 5 && Math.random() < .5 ? `it's ${pad(h)}:${pad(new Date().getMinutes())}. why are we awake` : s.title && ui.playing && pick < 3 ? 'now playing: ' + s.title : pool[pick];
+    tt.at = now; tt.nextThought = now + 7000 + Math.random() * 5000;
+  }
+  window.ttyPoke = dbl => { const now = performance.now(); tt.face = dbl ? 3 : [1, 2, 6, 10][Math.random() * 4 | 0]; tt.until = now + (dbl ? 3500 : 2500); };
+  function tty() {
+    const now = performance.now(), h = new Date().getHours(), night = h >= 23 || h < 6;
+    if (now > tt.until) {
+      if (night) tt.face = 7; else if (ui.playing && song().title) tt.face = 12;
+      else if (now > tt.next) { tt.face = [0, 0, 1, 8, 9, 10, 0, 1][Math.random() * 8 | 0]; tt.next = now + 4000 + Math.random() * 5000; if (Math.random() < .33) { tt.look = Math.random() < .5 ? 1 : -1; tt.lookUntil = now + 1400; } }
+    }
+    if (now > tt.nextBlink) { tt.blink = now; tt.nextBlink = now + 2200 + Math.random() * 3500; }
+    if (now > tt.nextThought) ttyThink(now);
+    R(0, 0, W, H, TTY_BG);
+    const LOW = mixk(ACC, .2), DIMA = mixk(ACC, .45);
+    tt.rain.forEach((d, c) => {
+      d.y += d.spd; if (d.y - d.len * 8 > H) { d.y = -Math.random() * 120; d.spd = 1 + Math.random() * 3 | 0; d.len = 4 + Math.random() * 8 | 0; }
+      for (let k = 0; k < d.len; k++) { const yy = d.y - k * 8 | 0; if (yy < 0 || yy > H) continue; G(String.fromCharCode(33 + ((c * 7 + (yy >> 3) + (now / 300 | 0)) % 90)), c * 6, yy, 1, k ? LOW : DIMA); }
+    });
+    R(12, 14, 216, 14, TTY_BG); G('larp@charm', 16, 18, 1, ACC); G(':~$', 76, 18, 1, TTY_TEXT); G('./tty --face', 100, 18, 1, '#fff');
+    let face = TFACE[tt.face]; const blink = now - tt.blink < 140 && tt.face !== 7 && tt.face !== 11;
+    if (blink) face = face[0] + '-' + face[2] + '-' + face[4];
+    if (tt.face === 11 && (now / 160 | 0) % 2) face = '(%_%)';
+    const bob = Math.round(Math.sin(now / (tt.face === 7 ? 700 : 380)) * 3), lx = (now < tt.lookUntil ? tt.look * 10 : 0) + (tt.face === 11 ? Math.round(Math.sin(now / 90) * 6) : 0);
+    R(30, 82, 180, 50, TTY_BG); G(face, 45 + lx, 90 + bob, 5, tt.face === 3 ? '#ff5a96' : '#fff');
+    if (tt.face === 7) for (let i = 0; i < 3; i++) { const p = (now / 1800 + i / 3) % 1; G(i % 2 ? 'Z' : 'z', 196 + p * 14 | 0, 86 - p * 34 | 0, 1 + i % 2, ACC); }
+    if (tt.face === 12) { G('\x0E', 200, 84 + Math.round(Math.sin(now / 300) * 5), 2, ACC); G('\x0E', 22, 112 - Math.round(Math.sin(now / 260) * 5), 2, ACC); }
+    R(10, 148, 220, 44, TTY_BG); G('mood:', 16, 152, 1, TTY_DIM); G(TMOOD[tt.face], 52, 152, 1, ACC);
+    const sh = tt.thought.slice(0, (now - tt.at) / 35 | 0);
+    G('>', 16, 166, 1, ACC); G(sh.slice(0, 33), 28, 166, 1, TTY_TEXT); if (sh.length > 33) G(sh.slice(33, 66), 28, 177, 1, TTY_TEXT);
+    const cl = sh.length > 33 ? 1 : 0; if ((now / 450 | 0) % 2) R(28 + (sh.length - cl * 33) * 6, 165 + cl * 11, 6, 9, ACC);
+    R(10, 236, 220, 12, TTY_BG); G('tap: poke  2x: love  shake: @_@', 28, 238, 1, TTY_DIM);
+  }
+
+  // ── cc: an homage to Claude Code, working away on the charm (same as the firmware's drawClaude) ──
+  const CC = { o: '#d97757', text: '#e8e8e8', dim: '#8c8c96', green: '#50c878', red: '#f05a5a', bg: '#0c0c0e' };
+  const VERBS = ['Noodling', 'Pondering', 'Percolating', 'Tinkering', 'Musing', 'Brewing', 'Cogitating', 'Spelunking', 'Whirring', 'Simmering', 'Untangling', 'Booping'];
+  const cc = { log: [], script: [], pos: 0, state: 'rest', at: 0, session: 0, verb: 0 };
+  function ccPlan(which) {
+    const steps = (($('stepCount') || {}).textContent || '0').replace(/[^0-9]/g, '') || '0', s = song(), bat = ui.bat || 76, up = uptime(performance.now() - boot);
+    const S = (k, think, t) => ({ k, think, t: String(t) });
+    let sc;
+    if (which === 'hi') sc = [S('user', 0, 'hi claude'), S('text', 900, 'Hi! I\'m keeping an eye on the'), S('text', 0, `charm. Uptime ${up}.`)];
+    else {
+      const n = cc.session++ % 5;
+      sc = n === 0 ? [S('user', 0, 'make the deck more cli'), S('tool', 1600, 'Read(LarpCharm.ino)'), S('res', 300, 'Read 4180 lines'), S('tool', 2400, 'Update(drawDeck)'), S('res', 300, '+212 -98'), S('text', 1200, 'Done. Home is a tmux session.')]
+        : n === 1 ? [S('user', 0, `why is my battery at ${bat}%?`), S('tool', 1400, 'Bash(cat /sys/pwr)'), S('res', 300, `3.98v, ${ui.charging ? 'charging' : 'on battery'}`), S('text', 1300, ui.charging ? 'It\'s charging. Full soon.' : bat < 30 ? `Up ${up}. Plug me in soon.` : `Up ${up}. Plenty left.`)]
+        : n === 2 ? [S('user', 0, 'how many steps today?'), S('tool', 1200, 'Read(/dev/imu)'), S('res', 300, steps + ' steps'), S('text', 1100, +steps > 6000 ? 'Big day. Your legs earned it.' : 'Short walk later? I\'ll count.')]
+        : n === 3 && s.title ? [S('user', 0, 'what\'s playing?'), S('tool', 1100, 'Read(/dev/np)'), S('res', 300, s.title), S('text', 900, 'Good pick.')]
+        : n === 3 ? [S('user', 0, 'fix the flaky timer'), S('tool', 1500, 'Grep("timerEndAt")'), S('res', 300, 'Found 9 matches'), S('tool', 2000, 'Bash(pio test)'), S('res', 300, '12 passed'), S('text', 900, 'Fixed an overflow at 49 days.')]
+        : [S('user', 0, 'commit and push'), S('tool', 1300, 'Bash(git commit -am ...)'), S('res', 300, '1 file changed'), S('tool', 1400, 'Bash(git push)'), S('res', 300, 'main -> main'), S('text', 800, 'Pushed.')];
+    }
+    if (cc.log.length) cc.log.push({ k: 'gap', t: '' });
+    cc.script = sc; cc.pos = 0; cc.state = 'type'; cc.at = performance.now(); cc.verb = Math.random() * 12 | 0;
+  }
+  window.ccPoke = () => { if (cc.state === 'rest') ccPlan('hi'); };
+  function ccStar(cx, cy, ph, col) {
+    const a = [0, 1, 2, 3, 3, 2][ph % 6]; R(cx, cy, 1, 1, col);
+    if (a >= 1) { R(cx - a, cy, 2 * a + 1, 1, col); R(cx, cy - a, 1, 2 * a + 1, col); }
+    if (a >= 2) for (let k = 1; k < a; k++) [[-k, -k], [k, k], [k, -k], [-k, k]].forEach(([dx, dy]) => R(cx + dx, cy + dy, 1, 1, col));
+  }
+  const ccBox = (x, y, w, h, col) => { c.strokeStyle = col; c.lineWidth = 1; c.beginPath(); c.roundRect(x + .5, y + .5, w - 1, h - 1, 6); c.stroke(); };
+  function claude() {
+    const now = performance.now();
+    if (!cc.script.length) ccPlan();
+    const st = cc.script[cc.pos];
+    if (cc.state === 'type') { if (!st || st.k !== 'user') { cc.state = 'think'; cc.at = now; } else if (now - cc.at > st.t.length * 55 + 500) { cc.log.push({ k: 'user', t: st.t }); cc.pos++; cc.state = 'think'; cc.at = now; } }
+    else if (cc.state === 'think') { if (cc.pos >= cc.script.length) { cc.state = 'rest'; cc.at = now; } else if (now - cc.at > cc.script[cc.pos].think) { cc.state = 'stream'; cc.at = now; cc.log.push({ k: cc.script[cc.pos].k, t: '' }); } }
+    else if (cc.state === 'stream') { const cur = cc.script[cc.pos], n = Math.min(cur.t.length, (now - cc.at) / 14 | 0); cc.log[cc.log.length - 1].t = cur.t.slice(0, n); if (n >= cur.t.length) { cc.pos++; cc.state = 'think'; cc.at = now; if (cc.pos < cc.script.length && cc.script[cc.pos].k !== 'res') cc.verb = Math.random() * 12 | 0; } }
+    else if (now - cc.at > 5000) ccPlan();
+    while (cc.log.length > 14) cc.log.shift();
+    R(0, 0, W, H, CC.bg);
+    ccBox(12, 14, 216, 44, CC.o); ccStar(24, 25, 4, CC.o);
+    G('Welcome to', 34, 22, 1, CC.text); G('Claude Code', 100, 22, 1, '#fff'); G('!', 166, 22, 1, CC.text);
+    G('/help for help', 34, 34, 1, CC.dim); G('cwd: /larp/charm', 34, 45, 1, CC.dim);
+    const thinking = cc.state === 'think' && cc.pos < cc.script.length, rows = thinking ? 14 : 15, lines = cc.log.slice(-rows);
+    let yy = 66 + (rows - lines.length) * 11;
+    lines.forEach((l, i) => {
+      if (l.k === 'user') { G('>', 16, yy, 1, CC.dim); G(l.t.slice(0, 33), 28, yy, 1, CC.dim); }
+      else if (l.k === 'text') { circle(19.5, yy + 3.5, 2, CC.text, true); G(l.t.slice(0, 33), 28, yy, 1, CC.text); }
+      else if (l.k === 'tool') {
+        const live = i === lines.length - 1 && (cc.state === 'stream' || (thinking && cc.script[cc.pos].k === 'res'));
+        circle(19.5, yy + 3.5, 2, live && (now / 300 | 0) % 2 ? CC.dim : CC.green, true);
+        const p = l.t.indexOf('('); if (p > 0) { G(l.t.slice(0, p), 28, yy, 1, '#fff'); G(l.t.slice(p), 28 + p * 6, yy, 1, CC.dim); } else G(l.t, 28, yy, 1, '#fff');
+      } else if (l.k === 'res') {
+        R(30, yy, 1, 4, CC.dim); R(30, yy + 4, 4, 1, CC.dim);
+        if (l.t[0] === '+') { const m = l.t.indexOf('-'); G(m > 0 ? l.t.slice(0, m) : l.t, 40, yy, 1, CC.green); if (m > 0) G(l.t.slice(m), 40 + m * 6, yy, 1, CC.red); } else G(l.t.slice(0, 31), 40, yy, 1, CC.dim);
+      }
+      yy += 11;
+    });
+    if (thinking) { ccStar(19, yy + 3, (now / 120 | 0) % 6, CC.o); G(`${VERBS[cc.verb]}... (${(now - cc.at) / 1000 + 1 | 0}s, esc to stop)`.slice(0, 33), 28, yy, 1, CC.o); }
+    ccBox(12, 232, 216, 22, CC.dim); G('>', 20, 239, 1, CC.text);
+    const cur = cc.script[cc.pos];
+    if (cc.state === 'type' && cur && cur.k === 'user') { const n = Math.min(cur.t.length, (now - cc.at) / 55 | 0); G(cur.t.slice(0, n), 32, 239, 1, CC.text); R(32 + n * 6, 238, 6, 9, CC.text); }
+    else { G('Try "make the charm cuter"', 32, 239, 1, '#4c4c52'); if ((now / 500 | 0) % 2) R(32, 238, 1, 9, CC.text); }
+    G('? for shortcuts', 18, 260, 1, CC.dim);
+  }
+  const scenes = { 0: clock, 1: text, 2: photo, 3: sing, 4: music, 5: pet, 6: toy, 7: card, 8: deck, 9: eyes, 10: jukeDeck, 11: torch, 12: chargeDeck, 13: tty, 14: claude };
   // Quest: frames rendered by the firmware itself (desktop simulator), packed in one sheet.
   // d00..d10 day village, n00..n10 night village, then the screens behind the doors.
   // ── tap a block to open it, tap again to go back ──
@@ -415,8 +522,10 @@
   cv.addEventListener('pointercancel', () => { drag = null; });
   function tapAt(e) {
     const r = cv.getBoundingClientRect(), x = (e.clientX - r.left) * W / r.width, y = (e.clientY - r.top) * H / r.height;
+    if (ui.mode === 13) { const n = performance.now(); window.ttyPoke(n - (tapAt.last || 0) < 350); tapAt.last = n; return; }   // poke the face
+    if (ui.mode === 14) return window.ccPoke();
     if (ui.mode !== 8) return window.charmGoto(8);
-    for (let i = 0; i < 10; i++) if (x >= TX[i] - 2 && x < TX[i] + TW[i] + 2 && y >= TY[i] - 2 && y < (i >= 5 ? H : TY[i] + TH[i] + 3)) return deckRun(i);
+    for (let i = 0; i < 12; i++) if (x >= TX[i] - 2 && x < TX[i] + TW[i] + 2 && y >= TY[i] - 2 && y < (i >= 5 ? H : TY[i] + TH[i] + 3)) return deckRun(i);
   }
 
   let shownMode = ui.mode, zoom = null;       // zoom: { ti, s, opening }

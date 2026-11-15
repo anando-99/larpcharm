@@ -3,7 +3,7 @@ const SVC = '6e400001-c4a7-4d2e-9b3c-c4a2d7c0ffee';
 const RX  = '6e400002-c4a7-4d2e-9b3c-c4a2d7c0ffee';
 const ST  = '6e400003-c4a7-4d2e-9b3c-c4a2d7c0ffee';
 const CMD = {MODE:1, TEXT:2, TIME:3, NOWPLAYING:4, XFER_BEGIN:5, XFER_DATA:6, XFER_END:7, BRIGHT:8, PET:9, CARD:10, SETTINGS:11, PING:12, BUZZ:13, FEED:14, LOOK:18, TIMER:19, TOY:20, THEME:21, SKIN:22, EYES:23, TUNE:24, TORCH:25, SONG_LIST:26, SONG_DELETE:27};
-const MODE = {CLOCK:0, TEXT:1, PHOTO:2, SING:3, MUSIC:4, PET:5, TOY:6, CARD:7, DECK:8, EYES:9, JUKE:10, TORCH:11, CHARGE:12};
+const MODE = {CLOCK:0, TEXT:1, PHOTO:2, SING:3, MUSIC:4, PET:5, TOY:6, CARD:7, DECK:8, EYES:9, JUKE:10, TORCH:11, CHARGE:12, TERM:13, CLAUDE:14};
 const THEMES = ['#00E5FF', '#FF2BD6', '#FFB000', '#39FF14', '#FF3B30', '#C8DCFF'];
 const klog = m => { if (window.charmLog) window.charmLog(m); };       // lines for the preview's dmesg pane
 const ui = window.ui = { mode: 8, bg: 9, face: 0, toy: 0, theme: 0, playing: false, artReady: false, expr: 255, torch: 0, jbSong: -1, jbQueue: 0, charging: false, bat: 76 };
@@ -467,18 +467,19 @@ let brightT;
 function brightLabel(){ $('brightVal').textContent = Math.round($('bright').value / 255 * 100) + '%'; }
 brightLabel();
 $('bright').addEventListener('input', () => { brightLabel(); clearTimeout(brightT); brightT = setTimeout(() => write(packet(CMD.BRIGHT, [+$('bright').value])).catch(() => {}), 120); });
-const OPT_IDS = ['swap', 'optSound', 'optShake', 'optChime', 'optFx', 'optEyesIdle', 'tiltX', 'tiltY', 'tiltSwap'];
+const OPT_IDS = ['swap', 'optSound', 'optShake', 'optChime', 'optFx', 'tiltX', 'tiltY', 'tiltSwap'];
 OPT_IDS.forEach(id => { const v = localStorage.getItem('o_' + id); if (v !== null) $(id).checked = v === '1'; });
 { const v = localStorage.getItem('o_sleep'); if (v !== null) $('sleep').value = v; }
+{ const v = localStorage.getItem('o_idle') ?? (localStorage.getItem('o_optEyesIdle') === '1' ? '1' : null); if (v !== null) $('idleKind').value = v; }
 const sendSettings = act(async () => {
   OPT_IDS.forEach(id => localStorage.setItem('o_' + id, $(id).checked ? '1' : '0'));
-  localStorage.setItem('o_sleep', $('sleep').value);
-  const flags = ($('optSound').checked ? 1 : 0) | ($('optShake').checked ? 2 : 0) | ($('optChime').checked ? 4 : 0) | ($('optFx').checked ? 8 : 0) | ($('optEyesIdle').checked ? 16 : 0);
+  localStorage.setItem('o_sleep', $('sleep').value); localStorage.setItem('o_idle', $('idleKind').value);
+  const flags = ($('optSound').checked ? 1 : 0) | ($('optShake').checked ? 2 : 0) | ($('optChime').checked ? 4 : 0) | ($('optFx').checked ? 8 : 0) | ($('idleKind').value === '1' ? 16 : 0);
   const tilt = ($('tiltX').checked ? 1 : 0) | ($('tiltY').checked ? 2 : 0) | ($('tiltSwap').checked ? 4 : 0);
-  await write(packet(CMD.SETTINGS, [...i16(+$('sleep').value), $('swap').checked ? 1 : 0, flags, tilt]));
+  await write(packet(CMD.SETTINGS, [...i16(+$('sleep').value), $('swap').checked ? 1 : 0, flags, tilt, +$('idleKind').value]));
   hud('Saved');
 });
-$('sleep').onchange = sendSettings; OPT_IDS.forEach(id => $(id).onchange = sendSettings);
+$('sleep').onchange = sendSettings; $('idleKind').onchange = sendSettings; OPT_IDS.forEach(id => $(id).onchange = sendSettings);
 $('syncTime').onclick = act(async () => { await syncTime(); hud('Time synced'); });
 $('findMe').onclick = act(() => write(packet(CMD.BUZZ, [5])));
 

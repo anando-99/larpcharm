@@ -11,8 +11,11 @@ Larp Charm runs on a Waveshare ESP32-S3-Touch-LCD-1.69 (240×280 IPS, capacitive
 ## Highlights
 
 - **Custom BLE protocol.** A Nordic-UART-style GATT service with 23 binary commands, chunked file transfer (JPEG photos, album art, songs, sing-along shows) and a notify channel for battery, version and storage status.
-- **The deck: a live tmux session.** Home is a terminal drawn in the classic 5×7 bitmap font. Each pane is labelled with the command that would print it (`$ date`, `$ np`, `$ ps pet`, `$ imu --scope` with a live accelerometer oscilloscope, `$ cat motd`), and a tmux-style status bar holds the other screens as windows. Tap a pane and the prompt types `open <pane>` before zooming in.
+- **The deck: a live tmux session.** Home is a terminal drawn in the classic 5×7 bitmap font. Each pane is labelled with the command that would print it (`$ date`, `$ np`, `$ ps pet`, `$ imu --scope` with a live accelerometer oscilloscope, `$ cat motd`), and a tmux-style status bar holds the other screens as windows (`img sng id eye jbx tty cc`). Tap a pane and the prompt types `open <pane>` before zooming in.
 - **`dmesg -w` for a bag charm.** The firmware keeps its own kernel-style event log (`klog`) and tails it on the deck: Bluetooth link changes, charging and battery steps, shakes with their g-force, step milestones, time syncs, received messages and files, songs, timers. Every line is a real event, timestamped from boot.
+- **Two terminal companions.** Like the animated eyes, they can take over when the charm is idle:
+  - **`tty`**: a big kaomoji living in the terminal (`(o_o)`, `(^_^)`, `(♥_♥)`, `(@_@)`, `(-_-) zZ`) over a faint cmatrix rain. It blinks, glances around and changes mood by itself, reacts to taps and shakes, and thinks out loud at a typed prompt using real data: battery, steps, the song playing, the time of night.
+  - **`cc`**: an homage to the Claude Code terminal UI, with the welcome box, the `✻` spinner and its whimsical verbs, tool calls with `⎿` results, and the input box. It loops through little sessions about the charm and answers with live data ("why is my battery at 76%?" reads the real voltage). Tap to say hi; shake it and it notices the g-force.
 - **Spotify integration.** OAuth 2.0 PKCE runs entirely in the browser (no client secret, no server). The charm shows the album art full screen, takes its accent colour from the cover, and gives you tap zones for previous, play/pause and next.
 - **Sing-along.** Type lyrics and a pencil-doodle kitten acts each line out with faces, props and scenes. The browser preview (`sing.js`) is a line-by-line port of the firmware renderer, drawing into the same 240×280 RGB565 frame with the same glyph bitmaps.
 - **Motion and sound.** Shake to wake, roll dice, ask the oracle or shuffle backdrops. There's a buzzer jukebox of public-domain melodies, and you can upload your own songs from MIDI files.
@@ -86,7 +89,7 @@ arduino-cli compile --upload -p <port> \
   firmware/LarpCharm
 ```
 
-The web app and the firmware are versioned together; this app expects firmware **8.1** (shown on the charm's status screen and in the app once connected).
+The web app and the firmware are versioned together; this app expects firmware **8.2** (shown on the charm's status screen and in the app once connected).
 
 ## Using the charm
 

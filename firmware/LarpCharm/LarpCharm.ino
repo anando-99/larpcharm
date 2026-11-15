@@ -1,5 +1,5 @@
 /*
-  LARP CHARM firmware v8.1
+  LARP CHARM firmware v8.2
   Board : Waveshare ESP32-S3-Touch-LCD-1.69 (240x280 ST7789V2, CST816T touch)
   Control: Bluetooth LE from the Larp Charm web app
 
@@ -8,7 +8,7 @@
   windows. Tap a pane and the prompt types `open <pane>` before it zooms in.
   Swipe down (or the side button) closes whatever is open.
 
-  Blocks: clock, music, eyes, jukebox, pet, dice, message, photo, ID card, torch,
+  Blocks: tty (a kaomoji in the terminal), cc (a Claude Code homage), clock, music, eyes, jukebox, pet, dice, message, photo, ID card, torch,
           and a charging screen that appears when you plug it in.
 
   Touch:
@@ -77,7 +77,7 @@ struct EyeShape { float w, h, rad, lidT, slope, lidB; };
 #define SVC_UUID    "6e400001-c4a7-4d2e-9b3c-c4a2d7c0ffee"
 #define RX_UUID     "6e400002-c4a7-4d2e-9b3c-c4a2d7c0ffee"
 #define STATUS_UUID "6e400003-c4a7-4d2e-9b3c-c4a2d7c0ffee"
-#define FW_VERSION  "8.1"
+#define FW_VERSION  "8.2"
 #define DEVICE_NAME "Larp Charm"
 
 enum Cmd : uint8_t {
@@ -108,7 +108,7 @@ enum Cmd : uint8_t {
   CMD_SONG_DELETE = 0x1B, // [song id 100..107]
 };
 
-enum Mode : uint8_t { M_CLOCK = 0, M_TEXT, M_PHOTO, M_SING /* was clips */, M_MUSIC, M_PET, M_TOY, M_CARD, M_DECK, M_EYES, M_JUKE, M_TORCH, M_CHARGE, M_COUNT };
+enum Mode : uint8_t { M_CLOCK = 0, M_TEXT, M_PHOTO, M_SING /* was clips */, M_MUSIC, M_PET, M_TOY, M_CARD, M_DECK, M_EYES, M_JUKE, M_TORCH, M_CHARGE, M_TERM, M_CLAUDE, M_COUNT };
 
 // ───────────── Display ─────────────
 Arduino_DataBus *bus   = new Arduino_ESP32SPI(LCD_DC, LCD_CS, LCD_SCK, LCD_MOSI);
@@ -163,7 +163,8 @@ Preferences prefs;
 
 uint8_t  mode = M_DECK;
 uint8_t  theme = 0;
-bool     eyesIdle = false, idleEyesOn = false;
+bool     idleEyesOn = false;                         // a companion has taken over because nobody touched the charm
+uint8_t  idleKind = 0;                               // what shows when idle: 0 nothing (screen off), 1 eyes, 2 tty, 3 cc
 uint8_t  idleReturn = 8;
 uint32_t stepsToday = 0, lastStepAt = 0, stepsSaved = 0;
 int      stepDay = -1;
@@ -373,7 +374,8 @@ void loadPrefs() {
     mode = M_DECK; bgStyle = 9; fl |= 8;
     prefs.putUChar("mode", mode); prefs.putUChar("bg", bgStyle); prefs.putUChar("flags", fl);
   }
-  soundsOn = fl & 1; shakeWake = fl & 2; hourChime = fl & 4; fxOn = fl & 8; eyesIdle = fl & 16;
+  soundsOn = fl & 1; shakeWake = fl & 2; hourChime = fl & 4; fxOn = fl & 8;
+  idleKind = prefs.getUChar("idlek", (fl & 16) ? 1 : 0) % 4;
   stepsToday = stepsSaved = prefs.getULong("steps", 0);
   stepDay    = prefs.getShort("sday", -1);
   if (mode == 11 || mode == 12) mode = M_DECK;
@@ -1100,14 +1102,14 @@ void drawSprite(const char *const *spr, int ox, int oy, int scale, uint16_t body
 // ───────────── The deck: a live tmux session ─────────────
 // Every pane is labelled with the command that would print it. Tap a pane and the prompt types
 // "open <pane>" before it zooms in. The bottom pane tails the charm's own event log (klog).
-#define TILE_COUNT 10
-const int16_t TILE_X[TILE_COUNT] = {2, 2, 152, 2, 92, 10, 54, 98, 142, 186};
-const int16_t TILE_Y[TILE_COUNT] = {15, 81, 81, 141, 141, 258, 258, 258, 258, 258};
-const int16_t TILE_W[TILE_COUNT] = {236, 146, 86, 86, 146, 44, 44, 44, 44, 44};
-const int16_t TILE_H[TILE_COUNT] = {62, 56, 56, 54, 54, 22, 22, 22, 22, 22};
-const uint8_t TILE_MODE[TILE_COUNT] = {M_CLOCK, M_MUSIC, M_PET, M_TOY, M_TEXT, M_PHOTO, M_SING, M_CARD, M_EYES, M_JUKE};
-const char *TILE_CMD[TILE_COUNT]   = {"date", "np", "ps pet", "imu --scope", "cat motd", "img", "sng", "id", "eye", "jbx"};
-const char *TILE_OPEN[TILE_COUNT]  = {"clock", "audio", "pet", "rng", "motd", "img", "sing", "id", "eyes", "jukebox"};
+#define TILE_COUNT 12
+const int16_t TILE_X[TILE_COUNT] = {2, 2, 152, 2, 92, 10, 41, 72, 104, 135, 167, 198};
+const int16_t TILE_Y[TILE_COUNT] = {15, 81, 81, 141, 141, 258, 258, 258, 258, 258, 258, 258};
+const int16_t TILE_W[TILE_COUNT] = {236, 146, 86, 86, 146, 31, 31, 32, 31, 32, 31, 32};
+const int16_t TILE_H[TILE_COUNT] = {62, 56, 56, 54, 54, 22, 22, 22, 22, 22, 22, 22};
+const uint8_t TILE_MODE[TILE_COUNT] = {M_CLOCK, M_MUSIC, M_PET, M_TOY, M_TEXT, M_PHOTO, M_SING, M_CARD, M_EYES, M_JUKE, M_TERM, M_CLAUDE};
+const char *TILE_CMD[TILE_COUNT]   = {"date", "np", "ps pet", "imu --scope", "cat motd", "img", "sng", "id", "eye", "jbx", "tty", "cc"};
+const char *TILE_OPEN[TILE_COUNT]  = {"clock", "audio", "pet", "rng", "motd", "img", "sing", "id", "eyes", "jukebox", "tty", "claude"};
 #define LOG_X 2
 #define LOG_Y 199
 #define LOG_W 236
@@ -1320,12 +1322,12 @@ void drawDeck() {
 
   // tmux status bar: the other screens, as windows
   gfx->fillRect(0, 258, SCR_W, 22, ACC);
-  for (int i = 0; i < 5; i++) {
+  for (int i = 0; i < 7; i++) {
     int k = 5 + i, wx = TILE_X[k];
     bool act = activeTile == k;
     if (act) gfx->fillRect(wx, 258, TILE_W[k], 22, TTY_BG);
     if (i) gfx->drawFastVLine(wx, 261, 16, act ? ACC : TTY_BG);
-    textAt(TILE_CMD[k], wx + (TILE_W[k] - (int)strlen(TILE_CMD[k]) * 12) / 2 + 1, 262, 2, act ? ACC : TTY_BG);
+    textAt(TILE_CMD[k], wx + (TILE_W[k] - (int)strlen(TILE_CMD[k]) * 6) / 2 + 1, 265, 1, act ? ACC : TTY_BG);
   }
 }
 
@@ -2085,6 +2087,311 @@ void drawJukeDeck() {
 
 
 void drawJuke() { drawJukeDeck(); }
+
+// ═════════════ v8.2: two more companions for when you're not looking ═════════════
+
+// ───── tty: a kaomoji that lives in the terminal ─────
+// It blinks, glances around, changes mood by itself, and thinks out loud about what the charm knows.
+enum TtyFace : uint8_t { TF_NEUTRAL, TF_HAPPY, TF_LAUGH, TF_LOVE, TF_SAD, TF_ANGRY, TF_SURPRISED, TF_SLEEPY, TF_BORED, TF_SUSPICIOUS, TF_WINK, TF_DIZZY, TF_MUSIC, TF_COUNT };
+const char *TTY_FACE[TF_COUNT] = {"(o_o)", "(^_^)", "(^o^)", "(\x03_\x03)", "(T_T)", "(>_<)", "(O_O)", "(-_-)", "(-.-)", "(\xAA_\xAA)", "(^_-)", "(@_@)", "(^_^)"};
+const char *TTY_MOOD[TF_COUNT] = {"idle", "happy", "giggling", "in love", "sad", "grumpy", "surprised", "sleepy", "bored", "suspicious", "cheeky", "dizzy", "vibing"};
+uint8_t  ttyFace = TF_NEUTRAL;
+uint32_t ttyFaceUntil = 0, ttyNextFace = 0, ttyBlinkAt = 0, ttyNextBlink = 0, ttyThoughtAt = 0, ttyNextThought = 0, ttyLookUntil = 0;
+int8_t   ttyLook = 0;
+char     ttyThought[64] = "booting feelings... ok";
+struct TtyDrop { int16_t y; uint8_t spd, len; };
+TtyDrop  ttyRain[40];
+bool     ttyRainInit = false;
+
+void ttySet(uint8_t f, uint32_t ms) { ttyFace = f % TF_COUNT; ttyFaceUntil = millis() + ms; }
+void ttyThink() {
+  struct tm t;
+  bool haveTime = localNow(t);
+  int pick = random(0, 9);
+  if (haveTime && (t.tm_hour >= 0 && t.tm_hour < 5) && random(0, 2)) snprintf(ttyThought, sizeof(ttyThought), "it's %02d:%02d. why are we awake", t.tm_hour, t.tm_min);
+  else if (npPlaying && npTitle.length() && pick < 3) snprintf(ttyThought, sizeof(ttyThought), "now playing: %s", asciiOnly(npTitle).c_str());
+  else if (!charging && batPct < 30 && pick < 5) snprintf(ttyThought, sizeof(ttyThought), "battery at %d%%... snack time?", batPct);
+  else if (charging && pick < 3) snprintf(ttyThought, sizeof(ttyThought), "charging. %d%% and climbing", batPct);
+  else switch (pick) {
+    case 0: snprintf(ttyThought, sizeof(ttyThought), "%lu steps today. legs: noted", (unsigned long)stepsToday); break;
+    case 1: snprintf(ttyThought, sizeof(ttyThought), "uptime %s. still here", fmtUptime(millis()).c_str()); break;
+    case 2: snprintf(ttyThought, sizeof(ttyThought), "compiling dreams... 0 errors"); break;
+    case 3: snprintf(ttyThought, sizeof(ttyThought), "%s", bleConnected ? "your phone is close. nice" : "no phone nearby. just us"); break;
+    case 4: snprintf(ttyThought, sizeof(ttyThought), "grep -r 'meaning' /life"); break;
+    case 5: snprintf(ttyThought, sizeof(ttyThought), "sudo make me a sandwich"); break;
+    case 6: snprintf(ttyThought, sizeof(ttyThought), "%s", petName.length() ? (asciiOnly(petName) + " says hi").c_str() : "pet says hi"); break;
+    case 7: snprintf(ttyThought, sizeof(ttyThought), "rm -rf /worries ... done"); break;
+    default: snprintf(ttyThought, sizeof(ttyThought), "%s", bleConnected ? "listening on ble..." : "waiting for a ping"); break;
+  }
+  ttyThoughtAt = millis();
+  ttyNextThought = millis() + 7000 + random(0, 5000);
+}
+
+void drawTty() {
+  uint32_t now = millis();
+  struct tm t;
+  bool night = localNow(t) && (t.tm_hour >= 23 || t.tm_hour < 6);
+  if (!ttyRainInit) { for (int i = 0; i < 40; i++) ttyRain[i] = { (int16_t)random(-280, 0), (uint8_t)random(1, 4), (uint8_t)random(4, 12) }; ttyRainInit = true; }
+
+  // the face picks its own mood when nobody pokes it
+  if (now > ttyFaceUntil) {
+    if (idleEyesOn || night) ttyFace = TF_SLEEPY;
+    else if (npPlaying && npTitle.length()) ttyFace = TF_MUSIC;
+    else if (now > ttyNextFace) {
+      static const uint8_t CALM[8] = {TF_NEUTRAL, TF_NEUTRAL, TF_HAPPY, TF_BORED, TF_SUSPICIOUS, TF_WINK, TF_NEUTRAL, TF_HAPPY};
+      ttyFace = CALM[random(0, 8)];
+      ttyNextFace = now + 4000 + random(0, 5000);
+      if (!random(0, 3)) { ttyLook = random(0, 2) ? 1 : -1; ttyLookUntil = now + 1400; }
+    }
+  }
+  if (now > ttyNextBlink) { ttyBlinkAt = now; ttyNextBlink = now + 2200 + random(0, 3500); }
+  if (now > ttyNextThought) ttyThink();
+
+  gfx->fillScreen(TTY_BG);
+  for (int c = 0; c < 40; c++) {                                   // faint cmatrix rain
+    TtyDrop &d = ttyRain[c];
+    d.y += d.spd;
+    if (d.y - d.len * 8 > SCR_H) d = { (int16_t)random(-120, 0), (uint8_t)random(1, 4), (uint8_t)random(4, 12) };
+    for (int k = 0; k < d.len; k++) {
+      int yy = d.y - k * 8;
+      if (yy < 0 || yy > SCR_H) continue;
+      char ch[2] = { (char)('!' + ((c * 7 + yy / 8 + (int)(now / 300)) % 90)), 0 };
+      textAt(ch, c * 6, yy, 1, k == 0 ? ACC_DIM : mix565(ACC_LOW, TTY_BG, 80 + k * 14));
+    }
+  }
+
+  gfx->fillRect(12, 14, 216, 14, TTY_BG);
+  textAt("larp@charm", 16, 18, 1, ACC); textAt(":~$", 76, 18, 1, TTY_TEXT); textAt("./tty --face", 100, 18, 1, COL_WHITE);
+
+  // the face
+  char face[8];
+  bool blink = now - ttyBlinkAt < 140 && ttyFace != TF_SLEEPY && ttyFace != TF_DIZZY;
+  strncpy(face, TTY_FACE[ttyFace], sizeof(face));
+  if (blink) { face[1] = '-'; face[3] = '-'; }
+  if (ttyFace == TF_DIZZY && (now / 160) % 2) { face[1] = '%'; face[3] = '%'; }
+  int bob = (int)(sinf(now / (ttyFace == TF_SLEEPY ? 700.0f : 380.0f)) * 3);
+  int lx = (now < ttyLookUntil ? ttyLook * 10 : 0) + (ttyFace == TF_DIZZY ? (int)(sinf(now / 90.0f) * 6) : 0);
+  gfx->fillRect(30, 82, 180, 50, TTY_BG);
+  textAt(face, 45 + lx, 90 + bob, 5, ttyFace == TF_LOVE ? c565(255, 90, 150) : COL_WHITE);
+  if (ttyFace == TF_SLEEPY) {
+    for (int i = 0; i < 3; i++) { float p = fmodf(now / 1800.0f + i / 3.0f, 1.0f); textAt(i % 2 ? "Z" : "z", 196 + (int)(p * 14), 86 - (int)(p * 34), 1 + i % 2, mix565(ACC, TTY_BG, (uint8_t)(p * 255))); }
+  }
+  if (ttyFace == TF_MUSIC) { char n[2] = {'\x0E', 0}; textAt(n, 200, 84 + (int)(sinf(now / 300.0f) * 5), 2, ACC); textAt(n, 22, 112 - (int)(sinf(now / 260.0f) * 5), 2, ACC); }
+
+  // mood and the thought, typed out
+  gfx->fillRect(10, 148, 220, 44, TTY_BG);
+  textAt("mood:", 16, 152, 1, TTY_DIM); textAt(TTY_MOOD[ttyFace], 52, 152, 1, ACC);
+  String th = ttyThought;
+  int shown = min((int)th.length(), (int)((now - ttyThoughtAt) / 35));
+  String s = th.substring(0, shown);
+  textAt(">", 16, 166, 1, ACC);
+  textAt(s.substring(0, 33), 28, 166, 1, TTY_TEXT);
+  if (s.length() > 33) textAt(s.substring(33, 66), 28, 177, 1, TTY_TEXT);
+  int cl = (int)s.length() > 33 ? 1 : 0, cxp = 28 + ((int)s.length() - cl * 33) * 6;
+  if ((now / 450) % 2) gfx->fillRect(cxp, 165 + cl * 11, 6, 9, ACC);
+
+  gfx->fillRect(10, 236, 220, 12, TTY_BG);
+  textAt("tap: poke  2x: love  shake: @_@", 28, 238, 1, TTY_DIM);
+}
+void ttyWake() { ttySet(TF_SURPRISED, 1200); snprintf(ttyThought, sizeof(ttyThought), "oh! you're back"); ttyThoughtAt = millis(); ttyNextThought = millis() + 6000; }
+void ttyTap(bool dbl) {
+  if (dbl) ttySet(TF_LOVE, 3500);
+  else { static const uint8_t R[4] = {TF_HAPPY, TF_LAUGH, TF_SURPRISED, TF_WINK}; ttySet(R[random(0, 4)], 2500); }
+  ttyBlinkAt = millis();
+}
+
+// ───── cc: an homage to Claude Code, working away on the charm ─────
+// Little sessions loop on their own: a prompt is typed into the input box, then tool calls, results and
+// replies stream into the transcript, with the spinner between them. Answers use the charm's live data.
+const uint16_t CC_ORANGE = c565(217, 119, 87), CC_TEXT = c565(232, 232, 232), CC_DIM = c565(140, 140, 150), CC_GREEN = c565(80, 200, 120), CC_RED = c565(240, 90, 90);
+enum CcKind : uint8_t { CK_USER, CK_TEXT, CK_TOOL, CK_RESULT, CK_GAP };
+struct CcLine { uint8_t kind; char s[38]; };
+#define CC_LINES 14
+CcLine   ccLog[CC_LINES];
+uint8_t  ccLogN = 0;
+#define CC_STEPS 10
+struct CcStep { uint8_t kind; uint16_t think; char s[38]; };
+CcStep   ccScript[CC_STEPS];
+uint8_t  ccLen = 0, ccPos = 0, ccSession = 0;
+enum CcState : uint8_t { CS_REST, CS_TYPE, CS_THINK, CS_STREAM };
+uint8_t  ccState = CS_REST;
+uint32_t ccAt = 0;
+const char *CC_VERBS[12] = {"Noodling", "Pondering", "Percolating", "Tinkering", "Musing", "Brewing", "Cogitating", "Spelunking", "Whirring", "Simmering", "Untangling", "Booping"};
+uint8_t  ccVerb = 0;
+
+void ccAdd(uint8_t kind, const char *s) {
+  if (ccLogN == CC_LINES) { memmove(ccLog, ccLog + 1, sizeof(CcLine) * (CC_LINES - 1)); ccLogN--; }
+  ccLog[ccLogN].kind = kind;
+  snprintf(ccLog[ccLogN].s, sizeof(ccLog[0].s), "%s", s);
+  ccLogN++;
+}
+void ccStep(uint8_t kind, uint16_t think, const char *fmt, ...) {
+  if (ccLen >= CC_STEPS) return;
+  CcStep &st = ccScript[ccLen++];
+  st.kind = kind; st.think = think;
+  va_list ap; va_start(ap, fmt); vsnprintf(st.s, sizeof(st.s), fmt, ap); va_end(ap);
+}
+// write the next little session, using what the charm knows right now
+void ccPlan(int which) {
+  ccLen = 0; ccPos = 0;
+  switch (which) {
+    case 100:                                                    // you tapped
+      ccStep(CK_USER, 0, "hi claude");
+      ccStep(CK_TEXT, 900, "Hi! I'm keeping an eye on the");
+      ccStep(CK_TEXT, 0, "charm. Uptime %s.", fmtUptime(millis()).c_str());
+      break;
+    case 101:                                                    // you shook it
+      ccStep(CK_USER, 0, "what was that?");
+      ccStep(CK_TOOL, 700, "Read(/dev/imu)");
+      ccStep(CK_RESULT, 300, "peak |a| = %.1fg", sqrtf(accX * accX + accY * accY + accZ * accZ) + 1.2f);
+      ccStep(CK_TEXT, 800, "Whoa, quite a shake. All good?");
+      break;
+    default:
+      switch (ccSession++ % 5) {
+        case 0:
+          ccStep(CK_USER, 0, "make the deck more cli");
+          ccStep(CK_TOOL, 1600, "Read(LarpCharm.ino)");
+          ccStep(CK_RESULT, 300, "Read 4180 lines");
+          ccStep(CK_TOOL, 2400, "Update(drawDeck)");
+          ccStep(CK_RESULT, 300, "+212 -98");
+          ccStep(CK_TEXT, 1200, "Done. Home is a tmux session.");
+          break;
+        case 1:
+          ccStep(CK_USER, 0, "why is my battery at %d%%?", batPct);
+          ccStep(CK_TOOL, 1400, "Bash(cat /sys/pwr)");
+          ccStep(CK_RESULT, 300, "%.2fv, %s", batVolts, charging ? "charging" : "on battery");
+          ccStep(CK_TEXT, 1300, charging ? "It's charging. Full soon." : batPct < 30 ? "Up %s. Plug me in soon." : "Up %s. Plenty left.", fmtUptime(millis()).c_str());
+          break;
+        case 2:
+          ccStep(CK_USER, 0, "how many steps today?");
+          ccStep(CK_TOOL, 1200, "Read(/dev/imu)");
+          ccStep(CK_RESULT, 300, "%lu steps", (unsigned long)stepsToday);
+          ccStep(CK_TEXT, 1100, stepsToday > 6000 ? "Big day. Your legs earned it." : "Short walk later? I'll count.");
+          break;
+        case 3:
+          if (npTitle.length()) {
+            ccStep(CK_USER, 0, "what's playing?");
+            ccStep(CK_TOOL, 1100, "Read(/dev/np)");
+            ccStep(CK_RESULT, 300, "%s", asciiOnly(npTitle).c_str());
+            ccStep(CK_TEXT, 900, "Good pick.");
+          } else {
+            ccStep(CK_USER, 0, "fix the flaky timer");
+            ccStep(CK_TOOL, 1500, "Grep(\"timerEndAt\")");
+            ccStep(CK_RESULT, 300, "Found 9 matches");
+            ccStep(CK_TOOL, 2000, "Bash(pio test)");
+            ccStep(CK_RESULT, 300, "12 passed");
+            ccStep(CK_TEXT, 900, "Fixed an overflow at 49 days.");
+          }
+          break;
+        default:
+          ccStep(CK_USER, 0, "commit and push");
+          ccStep(CK_TOOL, 1300, "Bash(git commit -am ...)");
+          ccStep(CK_RESULT, 300, "1 file changed");
+          ccStep(CK_TOOL, 1400, "Bash(git push)");
+          ccStep(CK_RESULT, 300, "main -> main");
+          ccStep(CK_TEXT, 800, "Pushed.");
+          break;
+      }
+  }
+  if (ccLogN) ccAdd(CK_GAP, "");
+  ccState = CS_TYPE; ccAt = millis(); ccVerb = random(0, 12);
+}
+void ccPoke(int which) { ccPlan(which); }
+
+// the spinner star: grows from a dot to a six-armed star and back
+void ccStar(int cx, int cy, uint8_t phase, uint16_t col) {
+  static const uint8_t ARM[6] = {0, 1, 2, 3, 3, 2};
+  int a = ARM[phase % 6];
+  gfx->fillRect(cx, cy, 1, 1, col);
+  if (a >= 1) { gfx->drawFastHLine(cx - a, cy, 2 * a + 1, col); gfx->drawFastVLine(cx, cy - a, 2 * a + 1, col); }
+  if (a >= 2) for (int k = 1; k < a; k++) { gfx->drawPixel(cx - k, cy - k, col); gfx->drawPixel(cx + k, cy + k, col); gfx->drawPixel(cx + k, cy - k, col); gfx->drawPixel(cx - k, cy + k, col); }
+}
+void ccBox(int x, int y, int w, int h, uint16_t col) { gfx->drawRoundRect(x, y, w, h, 6, col); }
+
+void drawClaude() {
+  uint32_t now = millis();
+  if (!ccLen) ccPlan(-1);
+  // advance the session
+  CcStep &st = ccScript[min((int)ccPos, CC_STEPS - 1)];
+  switch (ccState) {
+    case CS_TYPE:
+      if (st.kind != CK_USER) { ccState = CS_THINK; ccAt = now; break; }
+      if (now - ccAt > strlen(st.s) * 55 + 500) { ccAdd(CK_USER, st.s); ccPos++; ccState = CS_THINK; ccAt = now; }
+      break;
+    case CS_THINK:
+      if (ccPos >= ccLen) { ccState = CS_REST; ccAt = now; break; }
+      if (now - ccAt > ccScript[ccPos].think) { ccState = CS_STREAM; ccAt = now; ccAdd(ccScript[ccPos].kind, ""); }
+      break;
+    case CS_STREAM: {
+      CcStep &cur = ccScript[ccPos];
+      int n = min((int)strlen(cur.s), (int)((now - ccAt) / 14));
+      snprintf(ccLog[ccLogN - 1].s, sizeof(ccLog[0].s), "%.*s", n, cur.s);
+      if (n >= (int)strlen(cur.s)) { ccPos++; ccState = CS_THINK; ccAt = now; if (ccPos < ccLen && ccScript[ccPos].kind != CK_RESULT) ccVerb = random(0, 12); }
+      break;
+    }
+    default:
+      if (now - ccAt > (idleEyesOn ? 9000UL : 5000UL)) ccPlan(-1);
+      break;
+  }
+
+  gfx->fillScreen(c565(12, 12, 14));
+  // welcome box
+  ccBox(12, 14, 216, 44, CC_ORANGE);
+  ccStar(24, 25, 4, CC_ORANGE);
+  textAt("Welcome to", 34, 22, 1, CC_TEXT); textAt("Claude Code", 100, 22, 1, COL_WHITE); textAt("!", 166, 22, 1, CC_TEXT);
+  textAt("/help for help", 34, 34, 1, CC_DIM);
+  textAt("cwd: /larp/charm", 34, 45, 1, CC_DIM);
+
+  // transcript, newest at the bottom
+  const int top = 66, lh = 11;
+  bool thinking = ccState == CS_THINK && ccPos < ccLen;
+  int rows = (thinking ? 14 : 15), first = max(0, (int)ccLogN - rows);
+  int yy = top + (rows - (ccLogN - first)) * lh;
+  if (yy < top) yy = top;
+  for (int i = first; i < ccLogN; i++, yy += lh) {
+    const CcLine &l = ccLog[i];
+    switch (l.kind) {
+      case CK_USER:   textAt(">", 16, yy, 1, CC_DIM); textAt(String(l.s).substring(0, 33), 28, yy, 1, CC_DIM); break;
+      case CK_TEXT:   gfx->fillCircle(19, yy + 3, 2, CC_TEXT); textAt(String(l.s).substring(0, 33), 28, yy, 1, CC_TEXT); break;
+      case CK_TOOL: {
+        bool live = i == ccLogN - 1 && (ccState == CS_STREAM || (thinking && ccScript[ccPos].kind == CK_RESULT));
+        gfx->fillCircle(19, yy + 3, 2, live && (now / 300) % 2 ? CC_DIM : CC_GREEN);
+        String s = l.s; int p = s.indexOf('(');
+        if (p > 0) { textAt(s.substring(0, p), 28, yy, 1, COL_WHITE); textAt(s.substring(p), 28 + p * 6, yy, 1, CC_DIM); }
+        else textAt(s, 28, yy, 1, COL_WHITE);
+        break;
+      }
+      case CK_RESULT: {
+        gfx->drawFastVLine(30, yy, 4, CC_DIM); gfx->drawFastHLine(30, yy + 4, 4, CC_DIM);
+        uint16_t c = l.s[0] == '+' ? CC_GREEN : CC_DIM;
+        textAt(String(l.s).substring(0, 31), 40, yy, 1, c);
+        if (l.s[0] == '+') { const char *m = strchr(l.s, '-'); if (m) textAt(m, 40 + (m - l.s) * 6, yy, 1, CC_RED); }
+        break;
+      }
+      default: break;
+    }
+  }
+  if (thinking) {                                                  // the spinner and its whimsical verb
+    char b[64];
+    snprintf(b, sizeof(b), "%s... (%lus, esc to stop)", idleEyesOn ? "Dreaming" : CC_VERBS[ccVerb], (unsigned long)((now - ccAt) / 1000 + 1));
+    ccStar(19, yy + 3, (now / 120) % 6, CC_ORANGE);
+    textAt(String(b).substring(0, 33), 28, yy, 1, CC_ORANGE);
+  }
+
+  // input box
+  ccBox(12, 232, 216, 22, CC_DIM);
+  textAt(">", 20, 239, 1, CC_TEXT);
+  if (ccState == CS_TYPE && ccScript[ccPos].kind == CK_USER) {
+    int n = min((int)strlen(ccScript[ccPos].s), (int)((now - ccAt) / 55));
+    String s = String(ccScript[ccPos].s).substring(0, n);
+    textAt(s, 32, 239, 1, CC_TEXT);
+    gfx->fillRect(32 + n * 6, 238, 6, 9, CC_TEXT);
+  } else {
+    textAt("Try \"make the charm cuter\"", 32, 239, 1, mix565(CC_DIM, COL_BLACK, 90));
+    if ((now / 500) % 2) gfx->fillRect(32, 238, 1, 9, CC_TEXT);
+  }
+  textAt("? for shortcuts", 18, 260, 1, CC_DIM);
+}
 
 // ═════════════ v5: charging screen ═════════════
 uint8_t chargeReturn = M_DECK;
@@ -3325,6 +3632,8 @@ void drawScene() {
     case M_TOY:   drawToy();   break;
     case M_CARD:  drawCard();  break;
     case M_EYES:  drawEyes();  break;
+    case M_TERM:  drawTty();   break;
+    case M_CLAUDE: drawClaude(); break;
     case M_JUKE:  drawJuke();  break;
     case M_TORCH: drawTorch(); break;
     case M_CHARGE: drawCharge(); break;
@@ -3405,6 +3714,7 @@ void idleEyesEnd() {
   if (!idleEyesOn) return;
   idleEyesOn = false;
   exprAuto = true;
+  ttyFaceUntil = 0; ttyWake();
   setMode(idleReturn);
   if (!sleeping) analogWrite(LCD_BL, mode == M_TORCH ? 255 : brightness);
   lastFrame = 0;
@@ -3647,8 +3957,10 @@ void handlePacket(const uint8_t *d, uint16_t n) {
         sleepSec = p[0] | (p[1] << 8);
         swapSwipe = p[2];
         prefs.putUShort("sleep", sleepSec); prefs.putBool("swap", swapSwipe);
-        if (len >= 4) { soundsOn = p[3] & 1; shakeWake = p[3] & 2; hourChime = p[3] & 4; fxOn = p[3] & 8; eyesIdle = p[3] & 16; prefs.putUChar("flags", p[3] & 63); }
+        if (len >= 4) { soundsOn = p[3] & 1; shakeWake = p[3] & 2; hourChime = p[3] & 4; fxOn = p[3] & 8; if (len < 6) idleKind = (p[3] & 16) ? 1 : 0; prefs.putUChar("flags", p[3] & 63); }
         if (len >= 5) { tiltBits = p[4] & 7; prefs.putUChar("tilt", tiltBits); }
+        if (len >= 6) idleKind = p[5] % 4;
+        prefs.putUChar("idlek", idleKind);
       }
       break;
 
@@ -3870,6 +4182,8 @@ void onSwipe(int dir) {
       jbCat = (jbCat + catCount() + dir) % catCount(); sfx(1);
       break;
     case M_TORCH: torchCol = (torchCol + 4 + dir) % 4; break;
+    case M_TERM:  ttySet((ttyFace + TF_COUNT + dir) % TF_COUNT, 6000); toast(TTY_MOOD[ttyFace], 700); sfx(4); break;
+    case M_CLAUDE: ccPlan(-1); sfx(1); break;
     case M_SING:  singSkip(dir); break;
     default: break;
   }
@@ -3936,6 +4250,8 @@ void onTap(bool dbl) {
     case M_TORCH: torchCol = (torchCol + 1) % 4; chromeUntil = 0; break;
     case M_SING:  singTap(); break;
     case M_CHARGE: closeModule(); break;
+    case M_TERM:   ttyTap(dbl); sfx(4); break;
+    case M_CLAUDE: if (ccState == CS_REST) ccPoke(100); break;
     default: break;
   }
 }
@@ -3963,6 +4279,8 @@ void onShake() {
       marqueeX = SCR_W; typeStart = millis();
       break;
     case M_EYES: setExpr(E_DIZZY, 3000); sfx(3); break;
+    case M_TERM: ttySet(TF_DIZZY, 3000); sfx(3); break;
+    case M_CLAUDE: ccPoke(101); sfx(3); break;
     case M_SING: singJumpAt = millis(); sfx(3); break;
     case M_JUKE: { int16_t all[48]; int n = allSongs(all, 48); jbSelId = all[random(0, n)]; jbStop(); jbStartSong(jbSelId); toast("shuffle", 800); break; }
     default: break;
@@ -4290,11 +4608,12 @@ void loop() {
   jbService();
   uint32_t idleLimit = mode == M_TORCH ? 300000UL : sleepSec * 1000UL;   // the torch stays on for 5 minutes
   if (!sleeping && sleepSec > 0 && !xferActive && !alarmUntil && millis() - lastInteraction > idleLimit) {
-    if (eyesIdle && !idleEyesOn && mode != M_TORCH && mode != M_EYES && mode != M_CHARGE) {
+    uint8_t idleMode = idleKind == 1 ? M_EYES : idleKind == 2 ? M_TERM : M_CLAUDE;
+    if (idleKind && !idleEyesOn && mode != M_TORCH && mode != idleMode && mode != M_CHARGE) {
       idleReturn = mode;
-      setMode(M_EYES);
+      setMode(idleMode);
       idleEyesOn = true;
-      setExpr(E_SLEEPY, 600000);
+      if (idleMode == M_EYES) setExpr(E_SLEEPY, 600000);
       chromeUntil = 0;
       analogWrite(LCD_BL, max(10, brightness / 3));
       lastInteraction = millis();
