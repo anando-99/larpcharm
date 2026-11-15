@@ -515,13 +515,15 @@ document.querySelectorAll('#bgs .bgt').forEach(b => b.onclick = () => setLook(+b
 document.querySelectorAll('#faceSeg button').forEach(b => b.onclick = () => { setActiveMode(MODE.CLOCK); setLook(ui.bg, +b.dataset.v); if (rxChar) write(packet(CMD.MODE, [MODE.CLOCK])).catch(() => {}); });
 
 // ─────────── Toys ───────────
+window.charmSetToy = k => setToy(k);
 function setToy(k, send = true){
+  if (k !== ui.toy && k >= 3 && window.toyPreviewNew) window.toyPreviewNew(k);
   ui.toy = k;
   document.querySelectorAll('#toySeg button').forEach(b => b.classList.toggle('on', +b.dataset.v === k));
   if (send) { setActiveMode(MODE.TOY); if (rxChar) write(packet(CMD.TOY, [k, 0])).catch(() => {}); }
 }
 document.querySelectorAll('#toySeg button').forEach(b => b.onclick = () => setToy(+b.dataset.v));
-$('rollToy').onclick = act(async () => { await write(packet(CMD.TOY, [ui.toy, 1])); setActiveMode(MODE.TOY); hud(['Asking the oracle…', 'Rolling…', 'Flipping…'][ui.toy]); });
+$('rollToy').onclick = act(async () => { if (ui.toy >= 3 && window.toyPreviewNew) window.toyPreviewNew(ui.toy); setActiveMode(MODE.TOY); await write(packet(CMD.TOY, [ui.toy, 1])); setActiveMode(MODE.TOY); hud(['Asking the oracle…', 'Rolling…', 'Flipping…', 'New game', 'Rock, paper, scissors…', 'Get ready…'][ui.toy] || 'Go'); });
 
 // ─────────── Timer ───────────
 const startTimer = act(async min => {
@@ -806,7 +808,8 @@ const COMMANDS = {
   idle: ['idle <off|eyes|tty|claude>  what shows when idle', a => { const v = { off: 0, eyes: 1, tty: 2, term: 2, claude: 3 }[a[0]]; if (v === undefined) return say('usage: idle <off|eyes|tty|claude>'); $('idleKind').value = v; sendSettings(); say(`idle screen: ${a[0]}`); }],
   beep: ['make the charm beep', () => { need(); $('findMe').click(); say('beep'); }],
   sync: ['sync the clock', () => { need(); $('syncTime').click(); say('time synced'); }],
-  roll: ['roll the dice / ask the oracle', () => { need(); $('rollToy').click(); }],
+  roll: ['roll the dice / ask the oracle / new game', () => { need(); $('rollToy').click(); }],
+  game: ['game <oracle|dice|coin|ttt|rps|reflex>', a => { const k = ['oracle', 'dice', 'coin', 'ttt', 'rps', 'reflex'].indexOf(a[0]); if (k < 0) return say('games: oracle dice coin ttt rps reflex'); setToy(k); gotoMode(MODE.TOY); say(`game: ${a[0]}`); }],
   torch: ['torch <on|off>', a => { need(); $(a[0] === 'off' ? 'torchOff' : 'torchOn').click(); }],
   tab: ['tab <name>  switch panel', a => { const t = document.querySelector(`.tab[data-tab="${a[0]}"]`) || [...document.querySelectorAll('.tab')].find(x => x.textContent === a[0]); if (!t) return say('tabs: ' + [...document.querySelectorAll('.tab')].map(x => x.textContent).join(' ')); t.click(); }],
   allow: ['allow the pending claude permission', async () => { if (!ccB.st || !ccB.st.perm) return say('nothing is waiting'); await ccCmd({ op: 'perm', id: ccB.st.perm.id, decision: 'allow' }); say('allowed'); }],

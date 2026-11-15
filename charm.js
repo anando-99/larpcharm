@@ -316,14 +316,106 @@
     for (let i = 0; i < 10; i++) R(51 + i * 14, 226, 11, 8, i < 7 ? ACC : mixk(ACC, .2));
     TC('STATE: HAPPY', 242, 1, '#fff');
   }
+
+  // ── minigames (same rules as the firmware): tic-tac-toe, rock-paper-scissors, reflex ──
+  const TOYT = ['< ORACLE >', '< DICE >', '< COIN >', '< TIC-TAC-TOE >', '< R-P-S >', '< REFLEX >'];
+  const LINES = [[0, 1, 2], [3, 4, 5], [6, 7, 8], [0, 3, 6], [1, 4, 7], [2, 5, 8], [0, 4, 8], [2, 4, 6]];
+  const ttt = { b: Array(9).fill(0), win: 0, line: -1, charm: false, youStart: false, at: 0, score: [0, 0, 0] };
+  const ttCheck = b => { for (let i = 0; i < 8; i++) { const [a, c, d] = LINES[i]; if (b[a] && b[a] === b[c] && b[a] === b[d]) return [b[a], i]; } return [b.includes(0) ? 0 : 3, -1]; };
+  function mm(b, charm, depth) {
+    const [r] = ttCheck(b); if (r === 2) return 10 - depth; if (r === 1) return depth - 10; if (r === 3) return 0;
+    let best = charm ? -100 : 100;
+    for (let i = 0; i < 9; i++) if (!b[i]) { b[i] = charm ? 2 : 1; const v = mm(b, !charm, depth + 1); b[i] = 0; best = charm ? Math.max(best, v) : Math.min(best, v); }
+    return best;
+  }
+  function ttPick() {
+    const e = ttt.b.map((v, i) => v ? -1 : i).filter(i => i >= 0);
+    if (e.length === 9) return [4, 0, 2, 6, 8][Math.random() * 5 | 0];
+    if (Math.random() < 0.22) return e[Math.random() * e.length | 0];
+    let best = -1e9, at = e[0];
+    for (const i of e) { ttt.b[i] = 2; const v = mm(ttt.b, false, 1) * 10 + Math.random() * 3; ttt.b[i] = 0; if (v > best) { best = v; at = i; } }
+    return at;
+  }
+  const ttNew = () => { ttt.b.fill(0); ttt.win = 0; ttt.line = -1; ttt.youStart = !ttt.youStart; ttt.charm = !ttt.youStart; ttt.at = performance.now() + 600; };
+  const ttEnd = w => { ttt.win = w; ttt.charm = false; ttt.score[w === 1 ? 0 : w === 2 ? 1 : 2]++; charmLogGame(`game: ttt, ${w === 1 ? 'you win' : w === 2 ? 'charm wins' : 'draw'}`); };
+  function ttTap(x, y) {
+    if (ttt.win || ttt.b.every(v => !v) && ttt.charm) { if (ttt.win) ttNew(); return; }
+    if (ttt.charm || x < 30 || x >= 210 || y < 58 || y >= 238) return;
+    const c = ((y - 58) / 60 | 0) * 3 + ((x - 30) / 60 | 0); if (ttt.b[c]) return;
+    ttt.b[c] = 1; const [r, l] = ttCheck(ttt.b); ttt.line = l;
+    if (r) ttEnd(r); else { ttt.charm = true; ttt.at = performance.now() + 380 + Math.random() * 420; }
+  }
+  function drawTtt(now) {
+    if (ttt.charm && !ttt.win && now >= ttt.at) { ttt.b[ttPick()] = 2; ttt.charm = false; const [r, l] = ttCheck(ttt.b); ttt.line = l; if (r) ttEnd(r); }
+    const DIM = mixk(ACC, .45);
+    for (let k = 1; k < 3; k++) { R(30 + k * 60 - 1, 62, 2, 172, DIM); R(34, 58 + k * 60 - 1, 172, 2, DIM); }
+    ttt.b.forEach((v, i) => {
+      const cx = 60 + (i % 3) * 60, cy = 88 + (i / 3 | 0) * 60, lit = ttt.line >= 0 && LINES[ttt.line].includes(i) && (now / 250 | 0) % 2;
+      if (v === 1) { c.strokeStyle = lit ? ACC : '#fff'; c.lineWidth = 5; c.lineCap = 'butt'; c.beginPath(); c.moveTo(cx - 17, cy - 17); c.lineTo(cx + 17, cy + 17); c.moveTo(cx + 17, cy - 17); c.lineTo(cx - 17, cy + 17); c.stroke(); }
+      else if (v === 2) { c.strokeStyle = lit ? '#fff' : ACC; c.lineWidth = 5; c.beginPath(); c.arc(cx, cy, 17, 0, 7); c.stroke(); }
+    });
+    const msg = ttt.win === 1 ? 'you win!' : ttt.win === 2 ? 'i win :)' : ttt.win === 3 ? 'draw' : ttt.charm ? 'thinking..' : 'your move';
+    G(msg, 120 - msg.length * 3, 244, 1, ttt.win === 1 ? '#34c759' : ttt.win ? ACC : '#fff');
+    const sc = `you ${ttt.score[0]}  me ${ttt.score[1]}  draw ${ttt.score[2]}`; G(sc, 120 - sc.length * 3, 256, 1, DIM);
+  }
+  const RPSN = ['rock', 'paper', 'scissors'];
+  const rps = { you: -1, me: -1, at: 0, scored: 0, score: [0, 0, 0] };
+  const rpsPlay = k => { if (rps.you >= 0 && performance.now() - rps.at < 1000) return; rps.you = k; rps.me = Math.random() * 3 | 0; rps.at = performance.now(); };
+  function rpsIcon(k, cx, cy, col) {
+    if (k === 0) { circle(cx, cy, 24, col, true); }
+    else if (k === 1) { R(cx - 20, cy - 26, 40, 52, col); for (let i = 0; i < 4; i++) R(cx - 14, cy - 16 + i * 10, 28, 1, VOID); }
+    else { c.strokeStyle = col; c.lineWidth = 5; c.beginPath(); c.moveTo(cx - 18, cy - 24); c.lineTo(cx + 10, cy + 10); c.moveTo(cx + 18, cy - 24); c.lineTo(cx - 10, cy + 10); c.stroke(); c.lineWidth = 3; c.beginPath(); c.arc(cx - 12, cy + 18, 7, 0, 7); c.moveTo(cx + 19, cy + 18); c.arc(cx + 12, cy + 18, 7, 0, 7); c.stroke(); }
+  }
+  function drawRps(now) {
+    G('you', 51, 58, 2, '#fff'); G('me', 168, 58, 2, ACC);
+    const el = now - rps.at, counting = rps.you >= 0 && el < 900;
+    if (rps.you < 0) { rpsIcon(0, 60, 116, mixk(ACC, .2)); rpsIcon(0, 180, 116, mixk(ACC, .2)); TC('pick one', 166, 2, '#fff'); }
+    else if (counting) { const bob = Math.abs(Math.sin(el * 0.021)) * 14 | 0; rpsIcon(0, 60, 112 - bob, '#fff'); rpsIcon(0, 180, 112 - bob, ACC); TC(['rock..', 'paper..', 'scissors..'][Math.min(2, el / 300 | 0)], 166, 2, '#fff'); }
+    else {
+      rpsIcon(rps.you, 60, 116, '#fff'); rpsIcon(rps.me, 180, 116, ACC);
+      const r = (rps.you - rps.me + 3) % 3;
+      if (rps.scored !== rps.at) { rps.scored = rps.at; rps.score[r === 1 ? 0 : r === 2 ? 1 : 2]++; charmLogGame(`game: rps, ${r === 1 ? 'you win' : r === 2 ? 'charm wins' : 'draw'}`); }
+      const vs = `${RPSN[rps.you]} vs ${RPSN[rps.me]}`; G(vs, 120 - vs.length * 3, 152, 1, mixk(ACC, .45));
+      TC(r === 1 ? 'YOU WIN' : r === 2 ? 'I WIN' : 'DRAW', 168, 2, r === 1 ? '#34c759' : r === 2 ? ACC : '#fff');
+    }
+    RPSN.forEach((n, k) => { const x = 14 + k * 74, sel = rps.you === k && !counting; if (sel) R(x, 200, 64, 32, ACC); else hudPanel(x, 200, 64, 32, ACC, .75); G(n, x + (64 - n.length * 6) / 2, 212, 1, sel ? '#000' : '#fff'); });
+    const sc = `you ${rps.score[0]}  me ${rps.score[1]}  draw ${rps.score[2]}`; G(sc, 120 - sc.length * 3, 248, 1, mixk(ACC, .45));
+  }
+  const rf = { st: 'idle', goAt: 0, shown: 0, ms: 0, best: +(localStorage.getItem('o_rfbest') || 0) };
+  const rfStart = () => { rf.st = 'wait'; rf.goAt = performance.now() + 1400 + Math.random() * 2600; rf.shown = 0; };
+  function rfTap(t) {
+    if (rf.st === 'wait') rf.st = 'early';
+    else if (rf.st === 'go') { if (!rf.shown || t < rf.shown) { rf.st = 'early'; return; } rf.ms = Math.round(t - rf.shown); rf.st = 'done'; if (!rf.best || rf.ms < rf.best) { rf.best = rf.ms; try { localStorage.setItem('o_rfbest', rf.best); } catch (_) {} } }
+    else rfStart();
+  }
+  function drawReflex(now) {
+    if (rf.st === 'wait' && now >= rf.goAt) rf.st = 'go';
+    const DIM = mixk(ACC, .45);
+    if (rf.st === 'wait') { TC('wait for it...', 140, 2, '#fff'); for (let i = 0; i < 3; i++) R(108 + i * 10, 172, 6, 6, (now / 300 | 0) % 3 === i ? ACC : mixk(ACC, .2)); }
+    else if (rf.st === 'go') { R(0, 50, W, 200, ACC); TC('TAP!', 130, 5, '#000'); if (!rf.shown) rf.shown = now; }
+    else if (rf.st === 'done') { TC(rf.ms + 'ms', 112, 4, '#fff'); TC(rf.ms < 220 ? 'lightning' : rf.ms < 280 ? 'quick' : rf.ms < 380 ? 'not bad' : 'sleepy?', 156, 2, ACC); TC('tap to go again', 188, 1, DIM); }
+    else if (rf.st === 'early') { TC('too soon!', 128, 3, '#ef4444'); TC('tap to try again', 168, 1, DIM); }
+    else { TC('tap when the', 116, 2, '#fff'); TC('screen lights up', 138, 2, '#fff'); TC('tap to start', 178, 1, DIM); }
+    if (rf.best) TC(`best ${rf.best}ms`, 252, 1, rf.st === 'go' ? '#000' : DIM);
+  }
+  const charmLogGame = m => { if (window.charmLog) window.charmLog(m); };
+  window.toyPreviewTap = (x, y, t) => {
+    const k = ui.toy;
+    if (y < 54) { window.charmSetToy && window.charmSetToy((k + 1) % 6); return; }
+    if (k === 3) ttTap(x, y); else if (k === 4) { if (y >= 196 && y < 236) rpsPlay(Math.min(2, Math.max(0, (x - 14) / 74 | 0))); } else if (k === 5) rfTap(t);
+    else window.charmGoto(8);
+  };
+  window.toyPreviewNew = k => { if (k === 3) ttNew(); else if (k === 4) rpsPlay(Math.random() * 3 | 0); else if (k === 5) rfStart(); };
   function toy() {
     const k = ui.toy; R(0, 0, W, H, VOID); for (let y = 50; y < H; y += 20) for (let x = 10; x < W; x += 20) R(x, y, 1, 1, mixk(ACC, .45));
-    if (k === 0) { circle(120, 160, 92, '#000', true); circle(120, 160, 92, ACC); circle(120, 160, 86, mixk(ACC, .2)); circle(120, 164, 60, mixk(ACC, .22), true); circle(120, 164, 60, ACC); TC('shake', 146, 2, '#fff'); TC('me', 166, 2, '#fff'); }
+    const now = performance.now();
+    if (k === 3) drawTtt(now); else if (k === 4) drawRps(now); else if (k === 5) drawReflex(now);
+    else if (k === 0) { circle(120, 160, 92, '#000', true); circle(120, 160, 92, ACC); circle(120, 160, 86, mixk(ACC, .2)); circle(120, 164, 60, mixk(ACC, .22), true); circle(120, 164, 60, ACC); TC('shake', 146, 2, '#fff'); TC('me', 166, 2, '#fff'); }
     else if (k === 1) {
       [[26, [0, 2, 4, 6, 8]], [126, [0, 8]]].forEach(([x, pips]) => { c.strokeStyle = ACC; c.strokeRect(x + 5.5, 105.5, 88, 88); R(x, 100, 88, 88, '#fff'); pips.forEach(i => R(x + 22 * (1 + i % 3) - 8, 100 + 22 * (1 + (i / 3 | 0)) - 8, 16, 16, '#000')); });
       TC('= 7', 208, 4, ACC);
     } else { circle(120, 150, 72, '#be8214', true); c.fillStyle = '#ffc83c'; c.beginPath(); c.ellipse(120, 150, 66 * Math.abs(Math.cos(frame * 0.03)), 66, 0, 0, 7); c.fill(); TC('shake to flip', 234, 2, '#fff'); }
-    topBar('//RNG', true); TC(['< ORACLE >', '< DICE >', '< COIN >'][k], 30, 2, ACC);
+    topBar('//RNG', true); if (!(k === 5 && rf.st === 'go')) TC(TOYT[k] || TOYT[0], 30, 2, ACC);
   }
   function card() {
     const a = val('cAcc'), name = (val('cName') || '').slice(0, 20), sub = (val('cSub') || '').slice(0, 24);
@@ -691,6 +783,7 @@
   cv.addEventListener('pointercancel', () => { drag = null; });
   function tapAt(e) {
     const r = cv.getBoundingClientRect(), x = (e.clientX - r.left) * W / r.width, y = (e.clientY - r.top) * H / r.height;
+    if (ui.mode === 6 && ui.toy >= 3) return window.toyPreviewTap(x, y, performance.now());
     if (ui.mode === 13) { const n = performance.now(); window.ttyPoke(n - (tapAt.last || 0) < 350); tapAt.last = n; return; }   // poke the face
     if (ui.mode === 14) {
       const n = performance.now(), dbl = n - (tapAt.last || 0) < 350; tapAt.last = n;

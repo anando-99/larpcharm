@@ -1,5 +1,5 @@
 /*
-  LARP CHARM firmware v8.3
+  LARP CHARM firmware v8.4
   Board : Waveshare ESP32-S3-Touch-LCD-1.69 (240x280 ST7789V2, CST816T touch)
   Control: Bluetooth LE from the Larp Charm web app
 
@@ -77,7 +77,7 @@ struct EyeShape { float w, h, rad, lidT, slope, lidB; };
 #define SVC_UUID    "6e400001-c4a7-4d2e-9b3c-c4a2d7c0ffee"
 #define RX_UUID     "6e400002-c4a7-4d2e-9b3c-c4a2d7c0ffee"
 #define STATUS_UUID "6e400003-c4a7-4d2e-9b3c-c4a2d7c0ffee"
-#define FW_VERSION  "8.3"
+#define FW_VERSION  "8.4"
 #define DEVICE_NAME "Larp Charm"
 
 enum Cmd : uint8_t {
@@ -98,7 +98,7 @@ enum Cmd : uint8_t {
   // 0x0F..0x11 were the video clip commands (removed in 6.0)
   CMD_LOOK        = 0x12, // [background][clock face]([theme])
   CMD_TIMER       = 0x13, // [seconds u16]  (0 = cancel)
-  CMD_TOY         = 0x14, // [toy 0=8-ball 1=dice 2=coin][roll 0/1]
+  CMD_TOY         = 0x14, // [toy 0=8-ball 1=dice 2=coin 3=tic-tac-toe 4=rock-paper-scissors 5=reflex][roll/new game 0/1]
   CMD_THEME       = 0x15, // [theme 0..5]
   // 0x16 was the look switch (removed in 8.0: the deck is the only look)
   CMD_EYES        = 0x17, // [expression 0..11, 255 = automatic]
@@ -368,7 +368,7 @@ void loadPrefs() {
   cardAccent = prefs.getUShort("cacc", COL_ICE);
   bgStyle    = prefs.getUChar("bg", 0) % BG_COUNT;
   faceStyle  = prefs.getUChar("face", 0) % FACE_COUNT;
-  toyKind    = prefs.getUChar("toy", 0) % 3;
+  toyKind    = prefs.getUChar("toy", 0) % 6;
   theme      = prefs.getUChar("theme", 0) % THEME_COUNT;
   uint8_t fl = prefs.getUChar("flags", 0x2B);
   if (prefs.getUChar("uiv", 0) == 4) { prefs.putUChar("uiv", 5); fl |= 0x20; prefs.putUChar("flags", fl); }
@@ -1641,8 +1641,226 @@ void textBlock(const char *s, int cy, uint8_t size, uint16_t color) {
   }
 }
 
+// ═════════════ v8.4: minigames, next to the oracle, dice and coin ═════════════
+// tic-tac-toe against the charm, rock-paper-scissors, and a reflex test. Swipe sideways (or tap the title) to switch.
+#define TOY_COUNT 6
+enum ToyKind : uint8_t { TOY_ORACLE, TOY_DICE, TOY_COIN, TOY_TTT, TOY_RPS, TOY_REFLEX };
+const char *TOY_TITLE[TOY_COUNT] = {"< ORACLE >", "< DICE >", "< COIN >", "< TIC-TAC-TOE >", "< R-P-S >", "< REFLEX >"};
+uint16_t ttScore[3] = {0, 0, 0}, rpsScore[3] = {0, 0, 0};      // you, charm, draws
+
+// ── tic-tac-toe: you are X, the charm is O and plays well but not perfectly ──
+int8_t   ttB[9];
+uint8_t  ttWinner = 0;                // 0 playing, 1 you, 2 charm, 3 draw
+int8_t   ttLine = -1;
+bool     ttCharmTurn = false, ttYouStart = false, ttStarted = false;
+uint32_t ttMoveAt = 0, ttEndAt = 0;
+const uint8_t TT_LINES[8][3] = {{0, 1, 2}, {3, 4, 5}, {6, 7, 8}, {0, 3, 6}, {1, 4, 7}, {2, 5, 8}, {0, 4, 8}, {2, 4, 6}};
+int ttCheck(const int8_t *b, int8_t *line) {
+  for (int i = 0; i < 8; i++) {
+    int8_t v = b[TT_LINES[i][0]];
+    if (v && v == b[TT_LINES[i][1]] && v == b[TT_LINES[i][2]]) { if (line) *line = i; return v; }
+  }
+  for (int i = 0; i < 9; i++) if (!b[i]) return 0;
+  return 3;
+}
+int ttMinimax(int8_t *b, bool charm, int depth) {
+  int r = ttCheck(b, nullptr);
+  if (r == 2) return 10 - depth;
+  if (r == 1) return depth - 10;
+  if (r == 3) return 0;
+  int best = charm ? -100 : 100;
+  for (int i = 0; i < 9; i++) if (!b[i]) {
+    b[i] = charm ? 2 : 1;
+    int v = ttMinimax(b, !charm, depth + 1);
+    b[i] = 0;
+    best = charm ? max(best, v) : min(best, v);
+  }
+  return best;
+}
+int ttPick() {
+  int empty[9], n = 0;
+  for (int i = 0; i < 9; i++) if (!ttB[i]) empty[n++] = i;
+  if (n == 9) { static const uint8_t OPEN[5] = {4, 0, 2, 6, 8}; return OPEN[random(0, 5)]; }
+  if (random(0, 100) < 22) return empty[random(0, n)];             // a slip now and then, so you can win
+  int best = -1000, at = empty[0];
+  for (int k = 0; k < n; k++) {
+    int i = empty[k];
+    ttB[i] = 2;
+    int v = ttMinimax(ttB, false, 1) * 10 + random(0, 3);
+    ttB[i] = 0;
+    if (v > best) { best = v; at = i; }
+  }
+  return at;
+}
+void ttNew() {
+  memset(ttB, 0, sizeof(ttB));
+  ttWinner = 0; ttLine = -1; ttStarted = true;
+  ttYouStart = !ttYouStart;
+  ttCharmTurn = !ttYouStart;
+  ttMoveAt = millis() + 600;
+}
+void ttEnd(int w) {
+  ttWinner = w; ttEndAt = millis(); ttCharmTurn = false;
+  ttScore[w == 1 ? 0 : w == 2 ? 1 : 2]++;
+  sfx(w == 1 ? 2 : w == 2 ? 3 : 1);
+  klog("game: ttt, %s", w == 1 ? "you win" : w == 2 ? "charm wins" : "draw");
+}
+void ttTap(int x, int y) {
+  if (!ttStarted || ttWinner) { ttNew(); return; }
+  if (ttCharmTurn || x < 30 || x >= 210 || y < 58 || y >= 238) return;
+  int c = ((y - 58) / 60) * 3 + (x - 30) / 60;
+  if (ttB[c]) return;
+  ttB[c] = 1; sfx(0);
+  int r = ttCheck(ttB, &ttLine);
+  if (r) { ttEnd(r); return; }
+  ttCharmTurn = true; ttMoveAt = millis() + 380 + random(0, 420);
+}
+void drawTtt(uint32_t now) {
+  if (!ttStarted) ttNew();
+  if (ttCharmTurn && !ttWinner && now >= ttMoveAt) {
+    ttB[ttPick()] = 2; ttCharmTurn = false; sfx(4);
+    int r = ttCheck(ttB, &ttLine);
+    if (r) ttEnd(r);
+  }
+  for (int k = 1; k < 3; k++) {
+    gfx->fillRect(30 + k * 60 - 1, 62, 2, 172, ACC_DIM);
+    gfx->fillRect(34, 58 + k * 60 - 1, 172, 2, ACC_DIM);
+  }
+  for (int i = 0; i < 9; i++) {
+    int cx = 60 + (i % 3) * 60, cy = 88 + (i / 3) * 60;
+    bool lit = ttLine >= 0 && (TT_LINES[ttLine][0] == i || TT_LINES[ttLine][1] == i || TT_LINES[ttLine][2] == i) && (now / 250) % 2;
+    if (ttB[i] == 1) for (int t = -2; t <= 2; t++) {
+      uint16_t c = lit ? ACC : COL_WHITE;
+      gfx->drawLine(cx - 17 + t, cy - 17, cx + 17 + t, cy + 17, c);
+      gfx->drawLine(cx + 17 + t, cy - 17, cx - 17 + t, cy + 17, c);
+    } else if (ttB[i] == 2) for (int r = 15; r <= 19; r++) gfx->drawCircle(cx, cy, r, lit ? COL_WHITE : ACC);
+  }
+  char b[40];
+  const char *msg = ttWinner == 1 ? "you win!" : ttWinner == 2 ? "i win :)" : ttWinner == 3 ? "draw" : ttCharmTurn ? ((now / 300) % 2 ? "thinking.." : "thinking. ") : "your move";
+  textCentered(msg, 244, 1, ttWinner == 1 ? COL_LIME : ttWinner ? ACC : COL_WHITE);
+  snprintf(b, sizeof(b), "you %u  me %u  draw %u", ttScore[0], ttScore[1], ttScore[2]);
+  textCentered(b, 256, 1, ACC_DIM);
+}
+
+// ── rock-paper-scissors ──
+int8_t   rpsYou = -1, rpsMe = -1;
+uint32_t rpsAt = 0;
+const char *RPS_NAME[3] = {"rock", "paper", "scissors"};
+void rpsPlay(int k) {
+  if (rpsYou >= 0 && millis() - rpsAt < 1000) return;
+  rpsYou = k % 3; rpsMe = random(0, 3); rpsAt = millis(); sfx(3);
+}
+void rpsIcon(int k, int cx, int cy, uint16_t c) {
+  if (k == 0) { gfx->fillCircle(cx, cy, 24, c); gfx->drawLine(cx - 10, cy - 6, cx + 2, cy + 2, COL_VOID); gfx->drawLine(cx + 6, cy - 12, cx + 12, cy - 2, COL_VOID); }
+  else if (k == 1) { gfx->fillRect(cx - 20, cy - 26, 40, 52, c); for (int i = 0; i < 4; i++) gfx->drawFastHLine(cx - 14, cy - 16 + i * 10, 28, COL_VOID); }
+  else {
+    for (int t = -2; t <= 2; t++) { gfx->drawLine(cx - 18 + t, cy - 24, cx + 10 + t, cy + 10, c); gfx->drawLine(cx + 18 + t, cy - 24, cx - 10 + t, cy + 10, c); }
+    for (int r = 6; r <= 8; r++) { gfx->drawCircle(cx - 12, cy + 18, r, c); gfx->drawCircle(cx + 12, cy + 18, r, c); }
+  }
+}
+void drawRps(uint32_t now) {
+  textAt("you", 51, 58, 2, COL_WHITE); textAt("me", 168, 58, 2, ACC);
+  uint32_t el = now - rpsAt;
+  bool counting = rpsYou >= 0 && el < 900;
+  if (rpsYou < 0) {
+    rpsIcon(0, 60, 116, ACC_LOW); rpsIcon(0, 180, 116, ACC_LOW);
+    textCentered("pick one", 166, 2, COL_WHITE);
+  } else if (counting) {
+    int bob = (int)(fabsf(sinf(el * 0.021f)) * 14);
+    rpsIcon(0, 60, 112 - bob, COL_WHITE); rpsIcon(0, 180, 112 - bob, ACC);
+    static const char *CD[3] = {"rock..", "paper..", "scissors.."};
+    textCentered(CD[min(2, (int)(el / 300))], 166, 2, COL_WHITE);
+  } else {
+    if (el < 960) sfx(0);
+    rpsIcon(rpsYou, 60, 116, COL_WHITE); rpsIcon(rpsMe, 180, 116, ACC);
+    textCentered(String(RPS_NAME[rpsYou]) + " vs " + RPS_NAME[rpsMe], 152, 1, ACC_DIM);
+    int r = (rpsYou - rpsMe + 3) % 3;
+    static uint32_t scored = 0;
+    if (scored != rpsAt) { scored = rpsAt; rpsScore[r == 1 ? 0 : r == 2 ? 1 : 2]++; klog("game: rps, %s", r == 1 ? "you win" : r == 2 ? "charm wins" : "draw"); }
+    textCentered(r == 1 ? "YOU WIN" : r == 2 ? "I WIN" : "DRAW", 168, 2, r == 1 ? COL_LIME : r == 2 ? ACC : COL_WHITE);
+  }
+  for (int k = 0; k < 3; k++) {
+    int x = 14 + k * 74;
+    bool sel = rpsYou == k && !counting;
+    if (sel) gfx->fillRect(x, 200, 64, 32, ACC); else hudPanel(x, 200, 64, 32, ACC, 2);
+    textAt(RPS_NAME[k], x + (64 - strlen(RPS_NAME[k]) * 6) / 2, 212, 1, sel ? COL_BLACK : COL_WHITE);
+  }
+  char b[40]; snprintf(b, sizeof(b), "you %u  me %u  draw %u", rpsScore[0], rpsScore[1], rpsScore[2]);
+  textCentered(b, 248, 1, ACC_DIM);
+}
+
+// ── reflex: wait for it, then tap as fast as you can ──
+enum RfState : uint8_t { RF_IDLE, RF_WAIT, RF_GO, RF_DONE, RF_EARLY };
+uint8_t  rfState = RF_IDLE;
+uint32_t rfGoAt = 0, rfShownAt = 0, rfMs = 0;
+uint16_t rfBest = 0;
+bool     rfBestLoaded = false;
+void rfStart() { rfState = RF_WAIT; rfGoAt = millis() + 1400 + random(0, 2600); rfShownAt = 0; sfx(0); }
+void rfTap(uint32_t downAt) {
+  switch (rfState) {
+    case RF_WAIT: rfState = RF_EARLY; sfx(1); break;
+    case RF_GO:
+      if (!rfShownAt || downAt < rfShownAt) { rfState = RF_EARLY; break; }
+      rfMs = downAt - rfShownAt; rfState = RF_DONE; sfx(2);
+      if (!rfBest || rfMs < rfBest) { rfBest = rfMs; prefs.putUShort("rfbest", rfBest); klog("game: reflex best %lums", (unsigned long)rfMs); }
+      break;
+    default: rfStart(); break;
+  }
+}
+void drawReflex(uint32_t now) {
+  if (!rfBestLoaded) { rfBest = prefs.getUShort("rfbest", 0); rfBestLoaded = true; }
+  if (rfState == RF_WAIT && now >= rfGoAt) rfState = RF_GO;
+  char b[40];
+  switch (rfState) {
+    case RF_WAIT:
+      textCentered("wait for it...", 140, 2, COL_WHITE);
+      for (int i = 0; i < 3; i++) gfx->fillRect(108 + i * 10, 172, 6, 6, (now / 300) % 3 == (uint32_t)i ? ACC : ACC_LOW);
+      break;
+    case RF_GO:
+      gfx->fillRect(0, 50, SCR_W, 200, ACC);
+      textCentered("TAP!", 130, 5, COL_BLACK);
+      if (!rfShownAt) rfShownAt = now + 8;                         // the frame reaches the screen about now
+      break;
+    case RF_DONE:
+      snprintf(b, sizeof(b), "%lums", (unsigned long)rfMs);
+      textCentered(b, 112, 4, COL_WHITE);
+      textCentered(rfMs < 220 ? "lightning" : rfMs < 280 ? "quick" : rfMs < 380 ? "not bad" : "sleepy?", 156, 2, ACC);
+      textCentered("tap to go again", 188, 1, ACC_DIM);
+      break;
+    case RF_EARLY:
+      textCentered("too soon!", 128, 3, COL_RED);
+      textCentered("tap to try again", 168, 1, ACC_DIM);
+      break;
+    default:
+      textCentered("tap when the", 116, 2, COL_WHITE);
+      textCentered("screen lights up", 138, 2, COL_WHITE);
+      textCentered("tap to start", 178, 1, ACC_DIM);
+      break;
+  }
+  if (rfBest) { snprintf(b, sizeof(b), "best %ums", rfBest); textCentered(b, 252, 1, rfState == RF_GO ? COL_BLACK : ACC_DIM); }
+}
+void toySwitch(int k) {
+  toyKind = (k + TOY_COUNT) % TOY_COUNT; toyHasResult = false; toyRollAt = 0;
+  if (toyKind == TOY_REFLEX) rfState = RF_IDLE;
+  prefs.putUChar("toy", toyKind);
+  sfx(1);
+}
+// a tap on the toy screen
+void toyTap(int x, int y, uint32_t downAt) {
+  if (y < 54) { toySwitch(toyKind + 1); return; }
+  switch (toyKind) {
+    case TOY_TTT: ttTap(x, y); break;
+    case TOY_RPS: if (y >= 196 && y < 236) rpsPlay(min(2, max(0, (x - 14) / 74))); break;
+    case TOY_REFLEX: rfTap(downAt); break;
+    default: toyRoll(); break;
+  }
+}
+
 void toyRoll() {
   touchActivity();
+  if (toyKind == TOY_TTT) { ttNew(); return; }
+  if (toyKind == TOY_RPS) { rpsPlay(random(0, 3)); return; }
+  if (toyKind == TOY_REFLEX) { rfStart(); return; }
   toyRollAt = millis();
   toyHasResult = true;
   if (toyKind == 0)      toyResult = random(0, EIGHT_N);
@@ -1661,7 +1879,6 @@ void drawDie(int x, int y, int s, uint8_t v) {
 }
 
 void drawToy() {
-  static const char *TN[3] = {"< ORACLE >", "< DICE >", "< COIN >"};
   uint32_t el = millis() - toyRollAt;
   bool rolling = toyRollAt && el < 1100;
   int jx = rolling ? (int)random(-5, 6) : 0, jy = rolling ? (int)random(-5, 6) : 0;
@@ -1669,7 +1886,10 @@ void drawToy() {
   gfx->fillScreen(COL_VOID);
   for (int y = 50; y < SCR_H; y += 20) for (int x = 10; x < SCR_W; x += 20) gfx->drawPixel(x, y, ACC_DIM);
 
-  if (toyKind == 0) {
+  if (toyKind >= TOY_TTT) {
+    uint32_t now = millis();
+    if (toyKind == TOY_TTT) drawTtt(now); else if (toyKind == TOY_RPS) drawRps(now); else drawReflex(now);
+  } else if (toyKind == 0) {
     gfx->fillCircle(120 + jx, 160 + jy, 92, COL_BLACK);
     gfx->drawCircle(120 + jx, 160 + jy, 92, ACC);
     gfx->drawCircle(120 + jx, 160 + jy, 86, ACC_LOW);
@@ -1704,7 +1924,7 @@ void drawToy() {
     }
   }
   topBar("//RNG", true);
-  textPop(TN[toyKind % 3], 30, 2, ACC);
+  if (!(toyKind == TOY_REFLEX && rfState == RF_GO)) textPop(TOY_TITLE[toyKind % TOY_COUNT], 30, 2, ACC);
 }
 
 void drawAlarm() {
@@ -4410,7 +4630,7 @@ void handlePacket(const uint8_t *d, uint16_t n) {
 
     case CMD_TOY:
       if (len >= 1) {
-        if (p[0] % 3 != toyKind) { toyKind = p[0] % 3; toyHasResult = false; toyRollAt = 0; prefs.putUChar("toy", toyKind); }
+        if (p[0] % TOY_COUNT != toyKind) toySwitch(p[0] % TOY_COUNT);
         setMode(M_TOY, false);
         if (len >= 2 && p[1]) toyRoll();
       }
@@ -4578,9 +4798,7 @@ void onSwipe(int dir) {
       break;
     case M_MUSIC: mediaCmd(dir > 0 ? 1 : 2); break;
     case M_TOY:
-      toyKind = (toyKind + 3 + dir) % 3; toyHasResult = false; toyRollAt = 0;
-      prefs.putUChar("toy", toyKind);
-      sfx(1);
+      toySwitch(toyKind + dir);
       break;
     case M_PET:
       petMood = min(100, petMood + 3);
@@ -4641,8 +4859,7 @@ void onTap(bool dbl) {
       if (dbl) { prefs.putInt("petmood", petMood); toast("yum!", 700); }
       break;
     case M_TOY:
-      if (tch.y0 < 70) { toyKind = (toyKind + 1) % 3; toyHasResult = false; toyRollAt = 0; prefs.putUChar("toy", toyKind); }
-      else toyRoll();
+      toyTap(tch.x0, tch.y0, tch.t0);
       break;
     case M_EYES:
       if (dbl) setExpr(E_LOVE, 3500);
@@ -4692,7 +4909,7 @@ void onShake() {
       toast("wheee!", 900);
       sfx(3);
       break;
-    case M_TOY: toyRoll(); break;
+    case M_TOY: if (toyKind != TOY_TTT && toyKind != TOY_REFLEX) toyRoll(); break;
     case M_TEXT:
       textStyle = (textStyle + 1) % TEXT_STYLES;
       prefs.putUChar("tstyle", textStyle);
