@@ -1,5 +1,5 @@
 /*
-  LARP CHARM firmware v8.5
+  LARP CHARM firmware v8.6
   Board : Waveshare ESP32-S3-Touch-LCD-1.69 (240x280 ST7789V2, CST816T touch)
   Control: Bluetooth LE from the Larp Charm web app
 
@@ -8,7 +8,7 @@
   windows. Tap a pane and the prompt types `open <pane>` before it zooms in.
   Swipe down (or the side button) closes whatever is open.
 
-  Blocks: weather (Biscuit the pixel pup, dressed for it), tty (a kaomoji in the terminal), cc (Claude Code: a live remote through larp-bridge, or a demo), clock, music, eyes, jukebox, pet, dice, message, photo, ID card, torch,
+  Blocks: weather (a pixel-art kid in the Japanese countryside), tty (a kaomoji in the terminal), cc (Claude Code: a live remote through larp-bridge, or a demo), clock, music, eyes, jukebox, pet, dice, message, photo, ID card, torch,
           and a charging screen that appears when you plug it in.
 
   Touch:
@@ -46,7 +46,7 @@
 #include <sys/time.h>
 #include "aafonts.h"
 #include "songs.h"
-#include "pup_sprite.h"
+#include "wx_art.h"
 
 // shape of one eye (kept up here so the IDE's generated prototypes can see it)
 struct EyeShape { float w, h, rad, lidT, slope, lidB; };
@@ -78,7 +78,7 @@ struct EyeShape { float w, h, rad, lidT, slope, lidB; };
 #define SVC_UUID    "6e400001-c4a7-4d2e-9b3c-c4a2d7c0ffee"
 #define RX_UUID     "6e400002-c4a7-4d2e-9b3c-c4a2d7c0ffee"
 #define STATUS_UUID "6e400003-c4a7-4d2e-9b3c-c4a2d7c0ffee"
-#define FW_VERSION  "8.5"
+#define FW_VERSION  "8.6"
 #define DEVICE_NAME "Larp Charm"
 
 enum Cmd : uint8_t {
@@ -3058,10 +3058,11 @@ void drawChargeDeck() {
 
 void drawCharge() { drawChargeDeck(); }
 
-// ═════════════ v8.5: weather, with Biscuit dressed for it ═════════════
+// ═════════════ v8.6: weather, in the Japanese countryside ═════════════
 // The web app looks the weather up (Open-Meteo) for a place you pick and sends it over Bluetooth.
-// Biscuit, a pixel-art pup, wears what the temperature and the sky call for (eight outfits),
-// in a scene that matches and moves: sun, moon and stars, birds, planes, butterflies, fireflies, rain, snow, thunder or fog.
+// A pixel-art kid stands on a country path by the rice paddies, dressed for the temperature and the sky,
+// in a scene that follows the season (summer, sakura spring, momiji autumn, snowy winter) and the weather:
+// clouds drift, rain splashes, snow and petals and leaves fall, dragonflies dart, fireflies glow, lightning strikes.
 enum WxCond : uint8_t { WX_CLEAR, WX_PARTLY, WX_CLOUDY, WX_FOG, WX_DRIZZLE, WX_RAIN, WX_SNOW, WX_THUNDER };
 const char *WX_NAME[8] = {"clear", "partly cloudy", "cloudy", "fog", "drizzle", "rain", "snow", "thunderstorm"};
 struct Wx {
@@ -3076,9 +3077,6 @@ struct Wx {
 const uint16_t WX_OL = c565(34, 24, 40);
 uint32_t wxSayUntil = 0, wxHopAt = 0, wxSpinUntil = 0;
 const char *wxSay = "";
-struct WxDrop { int16_t x, y; uint8_t v; };
-WxDrop   wxDrops[36];
-bool     wxDropsInit = false;
 
 // ── data from the web app: [cond][day][t][feels][hi][lo][hum][wind][rain%][fahr][n] n*[hour][cond][t] place ──
 void wxPacket(const uint8_t *p, uint16_t len) {
@@ -3096,17 +3094,6 @@ void wxPacket(const uint8_t *p, uint16_t len) {
 void wxLoad() { Wx w; if (prefs.getBytes("wx", &w, sizeof(w)) == sizeof(w) && w.have) { wx = w; wx.at = 0; } }
 int wxCelsius(int t) { return wx.fahr ? (t - 32) * 5 / 9 : t; }
 
-// ── drawing helpers: bold outlines hide the jaggies and look like a cartoon ──
-void wxEll(int cx, int cy, int rx, int ry, uint16_t c) { gfx->fillEllipse(cx, cy, rx + 2, ry + 2, WX_OL); gfx->fillEllipse(cx, cy, rx, ry, c); }
-void wxCirc(int cx, int cy, int r, uint16_t c) { gfx->fillCircle(cx, cy, r + 2, WX_OL); gfx->fillCircle(cx, cy, r, c); }
-void wxBox(int x, int y, int w, int h, int r, uint16_t c) { gfx->fillRoundRect(x - 2, y - 2, w + 4, h + 4, r + 2, WX_OL); gfx->fillRoundRect(x, y, w, h, r, c); }
-void wxBand(int cx, int cy, int rx, int ry, int y0, int y1, uint16_t c) {        // the part of an ellipse between two rows
-  for (int y = max(y0, cy - ry); y <= min(y1, cy + ry); y++) {
-    float k = (float)(y - cy) / ry; int dx = (int)(rx * sqrtf(max(0.0f, 1 - k * k)));
-    gfx->drawFastHLine(cx - dx, y, 2 * dx + 1, c);
-  }
-}
-void wxHalfDisc(int cx, int cy, int r, uint16_t c) { for (int y = -r; y <= 0; y++) { int dx = (int)sqrtf((float)(r * r - y * y)); gfx->drawFastHLine(cx - dx, cy + y, 2 * dx + 1, c); } }
 void wxDeg(int x, int y, int r, uint16_t c) { gfx->drawCircle(x, y, r, c); if (r > 1) gfx->drawCircle(x, y, r - 1, c); }
 
 // small weather icons, for the forecast strip
@@ -3127,220 +3114,315 @@ void wxIcon(uint8_t cond, int cx, int cy, int s, bool day) {
   if (cond == WX_FOG) for (int i = 0; i < 3; i++) gfx->drawFastHLine(cx - s / 2 + (i % 2) * 2, cy - s / 4 + i * s / 4, s - 2, CLOUD);
 }
 
-// ── the scene behind the pup, with a bit of life in it ──
-void wxArcBand(int cx, int cy, int r, int w, uint16_t c) {      // the upper half of a ring, for a rainbow
-  for (int a = 0; a <= 180; a += 1) { float t = 3.1416f + a * 0.01745f; for (int k = 0; k < w; k++) gfx->drawPixel(cx + (int)(cosf(t) * (r - k)), cy + (int)(sinf(t) * (r - k)), c); }
-}
-void wxScene(uint32_t now, int cband) {
-  bool day = wx.isDay, wet = wx.cond == WX_RAIN || wx.cond == WX_DRIZZLE || wx.cond == WX_THUNDER, snow = wx.cond == WX_SNOW;
-  bool flash = wx.cond == WX_THUNDER && (now % 3100) < 140;
-  uint16_t top, bot;
-  if (!day) { top = c565(6, 10, 30); bot = wx.cond <= WX_PARTLY ? c565(30, 40, 90) : c565(40, 44, 70); }
-  else if (wx.cond == WX_THUNDER) { top = c565(40, 34, 64); bot = c565(96, 92, 120); }
-  else if (wet) { top = c565(80, 96, 124); bot = c565(150, 164, 186); }
-  else if (snow) { top = c565(150, 166, 196); bot = c565(220, 228, 240); }
-  else if (wx.cond == WX_FOG) { top = c565(150, 156, 166); bot = c565(200, 204, 210); }
-  else if (wx.cond == WX_CLOUDY) { top = c565(110, 140, 180); bot = c565(190, 206, 226); }
-  else { top = c565(40, 130, 240); bot = cband >= 3 ? c565(255, 206, 140) : c565(170, 220, 255); }
-  if (flash) { top = c565(220, 220, 255); bot = COL_WHITE; }
-  for (int y = 0; y < 236; y++) gfx->drawFastHLine(0, y, SCR_W, mix565(top, bot, y * 255 / 236));
-  if (wx.cond == WX_DRIZZLE && day) {                                                       // a rainbow peeks out
-    static const uint16_t RB[5] = { c565(250, 120, 140), c565(255, 190, 110), c565(250, 236, 130), c565(130, 220, 150), c565(120, 170, 250) };
-    for (int k = 0; k < 5; k++) wxArcBand(178, 236, 108 - k * 4, 4, mix565(RB[k], bot, 110));
-  }
-  // sun or moon
-  if (wx.cond <= WX_PARTLY) {
-    if (day) {
-      int sx = 196, sy = 52;
-      for (int k = 0; k < 10; k++) { float a = now / 2400.0f + k * 0.628f; gfx->drawLine(sx + cosf(a) * 26, sy + sinf(a) * 26, sx + cosf(a) * 36, sy + sinf(a) * 36, c565(255, 220, 90)); }
-      gfx->fillCircle(sx, sy, 21, c565(255, 214, 70)); gfx->fillCircle(sx - 6, sy - 6, 6, c565(255, 240, 160));
-    } else {
-      for (int i = 0; i < 22; i++) { int x = (i * 53 + 17) % 230 + 5, y = (i * 37 + 11) % 160 + 8; if ((now / 400 + i) % 7) gfx->drawPixel(x, y, COL_WHITE); else gfx->fillRect(x - 1, y - 1, 3, 3, COL_WHITE); }
-      gfx->fillCircle(196, 50, 19, c565(244, 238, 200)); gfx->fillCircle(206, 42, 17, top);
-      uint32_t sp = now % 9000;                                                            // a shooting star now and then
-      if (sp < 700) { int x = 60 + sp / 5, y = 20 + sp / 14; for (int k = 0; k < 18; k++) gfx->drawPixel(x - k * 2, y - k, mix565(COL_WHITE, top, k * 14)); }
-    }
-  }
-  // birds and the odd plane on nice days
-  if (day && wx.cond <= WX_CLOUDY && !wet) {
-    for (int i = 0; i < 3; i++) {
-      int x = (int)((now / 36 + i * 97) % 320) - 40, y = 104 + i * 12 + (int)(sinf(now / 500.0f + i) * 4);
-      int f = (now / 160 + i) % 2 ? 3 : -2;
-      gfx->drawLine(x - 4, y - f, x, y, c565(40, 40, 60)); gfx->drawLine(x, y, x + 4, y - f, c565(40, 40, 60));
-    }
-    uint32_t pl = now % 40000;
-    if (pl < 9000 && wx.cond <= WX_PARTLY) {
-      int x = 260 - (int)(pl / 30), y = 118;
-      for (int k = 0; k < 40; k += 2) gfx->drawPixel(x + 10 + k, y + 1, mix565(COL_WHITE, top, k * 6));
-      gfx->fillRoundRect(x, y - 1, 11, 3, 1, COL_WHITE); gfx->fillTriangle(x + 4, y, x + 7, y, x + 6, y - 4, COL_WHITE);
-    }
-  }
-  // clouds drift by
-  if (wx.cond != WX_CLEAR && wx.cond != WX_FOG) {
-    uint16_t cc = wet || wx.cond == WX_CLOUDY ? (day ? c565(170, 176, 196) : c565(70, 74, 100)) : (day ? COL_WHITE : c565(90, 96, 130));
-    if (flash) cc = COL_WHITE;
-    for (int i = 0; i < 3; i++) {
-      int x = (int)((now / (60 + i * 25)) + i * 90) % 300 - 40, y = 30 + i * 26 + (i == 1 ? 40 : 0);
-      if (wx.cond == WX_PARTLY && i == 1) continue;
-      gfx->fillCircle(x, y, 14, cc); gfx->fillCircle(x + 16, y - 7, 18, cc); gfx->fillCircle(x + 34, y, 13, cc); gfx->fillRoundRect(x - 10, y, 56, 13, 6, cc);
-    }
-  }
-  if (flash) {                                                                             // the bolt itself
-    int x = 170, y = 50;
-    for (int k = 0; k < 6; k++) { int nx = x + (k % 2 ? -10 : 8), ny = y + 16; for (int t = -1; t <= 1; t++) gfx->drawLine(x + t, y, nx + t, ny, c565(255, 236, 120)); x = nx; y = ny; }
-  }
-  // hills, far then near
-  uint16_t hFar = mix565(bot, snow ? COL_WHITE : day ? c565(90, 150, 110) : c565(20, 40, 50), 110), hNear = mix565(bot, snow ? c565(230, 236, 246) : day ? c565(80, 160, 90) : c565(16, 44, 34), 170);
-  for (int x = 0; x < SCR_W; x++) {
-    int h1 = 196 + (int)(10 * sinf(x * 0.025f + 0.5f) + 6 * sinf(x * 0.06f));
-    int h2 = 214 + (int)(8 * sinf(x * 0.035f + 2.0f));
-    gfx->drawFastVLine(x, h1, 236 - h1, hFar); gfx->drawFastVLine(x, h2, 236 - h2, hNear);
-  }
-  // ground
-  uint16_t g1 = snow ? c565(236, 242, 250) : wet ? c565(52, 92, 64) : day ? c565(108, 190, 92) : c565(26, 60, 40);
-  uint16_t g2 = snow ? c565(200, 214, 232) : wet ? c565(36, 66, 48) : day ? c565(70, 150, 70) : c565(16, 40, 28);
-  for (int x = 0; x < SCR_W; x++) { int h = 232 + (int)(3 * sinf(x * 0.05f + 1.0f)); gfx->drawFastVLine(x, h, SCR_H - h, x % 7 ? g1 : mix565(g1, g2, 90)); }
-  gfx->fillRect(0, 252, SCR_W, SCR_H - 252, g2);
-  // a tree that sways with the wind
-  float sway = sinf(now / 900.0f) * (1.5f + wx.wind / 12.0f);
-  uint16_t trunk = c565(110, 74, 50), leaf = snow ? c565(236, 242, 250) : !day ? c565(30, 70, 50) : wx.cond == WX_CLEAR && cband <= 1 ? c565(220, 130, 60) : c565(70, 160, 80);
-  gfx->fillRoundRect(30, 182, 10, 54, 3, WX_OL); gfx->fillRoundRect(32, 182, 6, 54, 2, trunk);
-  for (int k = 0; k < 3; k++) { static const int8_t TX[3] = {-12, 10, -1}, TY[3] = {6, 4, -12}; int x = 35 + TX[k] + (int)sway, y = 176 + TY[k]; gfx->fillCircle(x, y, 17, WX_OL); }
-  for (int k = 0; k < 3; k++) { static const int8_t TX[3] = {-12, 10, -1}, TY[3] = {6, 4, -12}; int x = 35 + TX[k] + (int)sway, y = 176 + TY[k]; gfx->fillCircle(x, y, 15, leaf); }
-  if (!snow && day) for (int k = 0; k < 4; k++) gfx->fillCircle(30 + k * 6 + (int)sway, 168 + (k % 2) * 10, 2, c565(250, 120, 140));   // blossoms
-  // flowers in the grass
-  if (!snow) for (int i = 0; i < 7; i++) {
-    static const uint8_t FX[7] = {64, 86, 168, 184, 212, 98, 226};
-    static const uint16_t FC[4] = { c565(250, 120, 160), c565(255, 220, 90), COL_WHITE, c565(150, 140, 250) };
-    int x = FX[i] + (int)(sinf(now / 700.0f + i) * (1 + wx.wind / 15.0f)), y = 240 + (i % 3) * 4;
-    gfx->drawLine(FX[i], y + 6, x, y, c565(40, 110, 50));
-    for (int k = 0; k < 4; k++) gfx->fillCircle(x + (k % 2 ? 2 : -2), y + (k / 2 ? 2 : -2), 1, day ? FC[i % 4] : mix565(FC[i % 4], COL_BLACK, 140));
-    gfx->drawPixel(x, y, c565(255, 200, 60));
-  }
-  // butterflies on warm days, fireflies on warm nights
-  if (day && cband >= 3 && wx.cond <= WX_PARTLY)
-    for (int i = 0; i < 2; i++) {
-      int x = 80 + i * 90 + (int)(sinf(now / 1100.0f + i * 2) * 26), y = 216 + (int)(sinf(now / 300.0f + i) * 6);
-      int f = (now / 90 + i) % 2 ? 3 : 1;
-      gfx->fillRect(x - f, y - 2, f, 4, c565(250, 160, 60)); gfx->fillRect(x + 1, y - 2, f, 4, c565(250, 160, 60)); gfx->drawPixel(x, y, WX_OL);
-    }
-  if (!day && cband >= 2 && !wet && !snow)
-    for (int i = 0; i < 6; i++) {
-      int x = 20 + i * 38 + (int)(sinf(now / 1500.0f + i * 1.7f) * 14), y = 200 + (int)(sinf(now / 1100.0f + i) * 18);
-      uint8_t b = (uint8_t)(120 + 120 * sinf(now / 300.0f + i * 2));
-      gfx->fillCircle(x, y, 2, mix565(c565(40, 60, 30), c565(220, 255, 120), b)); gfx->drawPixel(x, y, COL_WHITE);
-    }
-  // rain, snow, fog, wind
-  if (!wxDropsInit) { for (int i = 0; i < 36; i++) wxDrops[i] = { (int16_t)random(0, 240), (int16_t)random(-280, 240), (uint8_t)random(5, 10) }; wxDropsInit = true; }
-  if (wet) {
-    gfx->fillEllipse(70, 246, 22, 4, c565(70, 120, 170)); gfx->fillEllipse(196, 250, 16, 3, c565(70, 120, 170));
-    for (int k = 0; k < 2; k++) { int r = (now / 60 + k * 9) % 18; gfx->drawEllipse(70, 246, r, r / 5, mix565(c565(170, 210, 255), c565(70, 120, 170), r * 14)); }
-  }
-  if (snow) {                                                                              // a snowman
-    int sx = 206; gfx->fillCircle(sx, 228, 13, WX_OL); gfx->fillCircle(sx, 228, 11, COL_WHITE); gfx->fillCircle(sx, 208, 9, WX_OL); gfx->fillCircle(sx, 208, 7, COL_WHITE);
-    gfx->fillRect(sx - 2, 205, 2, 2, WX_OL); gfx->fillRect(sx + 2, 205, 2, 2, WX_OL); gfx->fillTriangle(sx, 208, sx, 211, sx + 7, 209, c565(250, 140, 40));
-    gfx->fillRect(sx - 8, 214, 16, 3, c565(230, 70, 90)); gfx->fillRect(sx - 6, 196, 12, 4, WX_OL); gfx->fillRect(sx - 4, 190, 8, 7, WX_OL);
-  }
-  if (wet || snow) {
-    int n = wx.cond == WX_DRIZZLE ? 16 : 36;
-    for (int i = 0; i < n; i++) {
-      WxDrop &d = wxDrops[i];
-      d.y += snow ? d.v / 4 + 1 : d.v; if (snow) d.x += (int)(sinf((now + i * 400) / 700.0f) * 1.2f);
-      if (d.y > 240) {
-        if (!snow && d.x > 0 && d.x < 240) { gfx->drawPixel(d.x - 2, 236, c565(200, 220, 255)); gfx->drawPixel(d.x + 2, 236, c565(200, 220, 255)); gfx->drawPixel(d.x, 234, c565(200, 220, 255)); }   // splash
-        d.y = random(-40, 0); d.x = random(0, 240);
-      }
-      if (snow) gfx->fillRect(d.x, d.y, 3, 3, COL_WHITE);
-      else gfx->drawLine(d.x, d.y, d.x - 2, d.y + 7, c565(170, 200, 255));
-    }
-  }
-  if (wx.wind >= 20 && !snow)                                                              // leaves on the wind
-    for (int i = 0; i < 4; i++) {
-      int x = (int)((now / (14 - i) + i * 70) % 300) - 30, y = 150 + i * 18 + (int)(sinf(now / 260.0f + i) * 8);
-      gfx->fillEllipse(x, y, 3, 2, i % 2 ? c565(220, 140, 60) : c565(120, 170, 70));
-    }
-  if (wx.cond == WX_FOG && FB)
-    for (int b = 0; b < 4; b++) { int y0 = 70 + b * 44 + (int)(sinf(now / 1500.0f + b) * 6); for (int y = y0; y < y0 + 16 && y < SCR_H; y++) for (int x = 0; x < SCR_W; x++) FB[y * SCR_W + x] = blend565(FB[y * SCR_W + x], COL_WHITE, 110); }
+// ── the art (wx_art.h, made by firmware/tools/mkwxart.py from pixel art drawn with SpriteCook) ──
+// One spot in the Japanese countryside in five looks, recoloured on the fly for rain, grey skies, fog,
+// night and lightning; a sky painted underneath; the kid in eight outfits; particles drawn in code.
+enum { WXB_SUMMER, WXB_SPRING, WXB_AUTUMN, WXB_WINTER, WXB_NIGHT };
+enum { WXG_NIGHT = 1, WXG_OVERCAST = 2, WXG_RAIN = 4, WXG_FOG = 8, WXG_FLASH = 16, WXG_DUSK = 32 };
+const int WX_KX = 124, WX_GY = 252;                                     // where the kid stands
+struct WxLook { int bg, band; uint8_t grade; bool day, wet, snow, flash; };
+WxLook wxL;                                                             // the look for this frame (wxLookUp)
+
+static inline uint32_t wxH(uint32_t i, uint32_t k) { uint32_t x = (i * 2654435761u) ^ (k * 40503u); x ^= x >> 15; x *= 2246822519u; x ^= x >> 13; return x; }
+static inline void wxPx(int x, int y, uint16_t c) { if (x >= 0 && x < SCR_W && y >= 0 && y < SCR_H) { if (FB) FB[y * SCR_W + x] = c; else gfx->drawPixel(x, y, c); } }
+static inline void wxMix(int x, int y, uint16_t c, uint8_t a) { if (FB && x >= 0 && x < SCR_W && y >= 0 && y < SCR_H) FB[y * SCR_W + x] = blend565(FB[y * SCR_W + x], c, a); }
+void wxGlow(int cx, int cy, int r, uint16_t c, uint8_t a) {            // a soft round light
+  for (int y = -r; y <= r; y++) for (int x = -r; x <= r; x++) { int d = x * x + y * y; if (d <= r * r) wxMix(cx + x, cy + y, c, (uint8_t)(a * (r * r - d) / (r * r))); }
 }
 
-// ── Biscuit, a pixel-art pup (pup_sprite.h, made with firmware/tools/mksprite.py) ──
-// One sprite per outfit: 0 hot, 1 warm, 2 mild, 3 cool, 4 freezing, 5 rain, 6 snow, 7 night.
-// It breathes, sways with the tilt, hops when tapped, turns to look around, shivers in the cold
-// and hides from thunder, with a few drawn extras on top (Zzz, frosty breath, sweat, hearts, a "!").
-int wxOutfit(int band) {
-  bool wet = wx.cond == WX_RAIN || wx.cond == WX_DRIZZLE || wx.cond == WX_THUNDER;
-  if (wet) return 5;
-  if (wx.cond == WX_SNOW) return 6;
-  if (!wx.isDay && band >= 2) return 7;
-  return 4 - constrain(band, 0, 4);
+// colour grades: the same picture goes grey, rainy, foggy, dark or lit by lightning
+void wxGrade(uint8_t &r, uint8_t &g, uint8_t &b, uint8_t gr) {
+  float R = r, G = g, B = b, L;
+  if (gr & WXG_OVERCAST) { L = 0.3f * R + 0.59f * G + 0.11f * B; R = (R + (L - R) * 0.35f) * 0.86f; G = (G + (L - G) * 0.35f) * 0.88f; B = (B + (L - B) * 0.3f) * 0.93f; }
+  if (gr & WXG_RAIN)     { L = 0.3f * R + 0.59f * G + 0.11f * B; R = (R + (L - R) * 0.45f) * 0.66f; G = (G + (L - G) * 0.45f) * 0.7f; B = (B + (L - B) * 0.4f) * 0.78f + 10; }
+  if (gr & WXG_FOG)      { L = 0.3f * R + 0.59f * G + 0.11f * B; R = R + (L - R) * 0.3f; G = G + (L - G) * 0.3f; B = B + (L - B) * 0.3f; R += (206 - R) * 0.42f; G += (210 - G) * 0.42f; B += (216 - B) * 0.42f; }
+  if (gr & WXG_NIGHT)    { R = R * 0.3f; G = G * 0.36f; B = B * 0.55f + 16; }
+  if (gr & WXG_DUSK)     { R = R * 0.72f; G = G * 0.76f; B = B * 0.88f + 10; }
+  if (gr & WXG_FLASH)    { R += (255 - R) * 0.55f; G += (255 - G) * 0.55f; B += (255 - B) * 0.6f; }
+  r = (uint8_t)constrain((int)(R + 0.5f), 0, 255); g = (uint8_t)constrain((int)(G + 0.5f), 0, 255); b = (uint8_t)constrain((int)(B + 0.5f), 0, 255);
 }
-// draws frame f with its bottom-centre at (cx, gy): squash shortens it by a few rows, lean shears the top sideways
-void wxSprite(int f, int cx, int gy, int squash, float lean, bool flip) {
-  const uint8_t *px = PUP_PX[f];
-  int h = PUP_H - squash, x0 = cx - PUP_W / 2;
+void wxPal(const uint8_t *src, int n, uint8_t gr, uint16_t *dst) {
+  for (int i = 0; i < n; i++) { uint8_t r = pgm_read_byte(src + i * 3), g = pgm_read_byte(src + i * 3 + 1), b = pgm_read_byte(src + i * 3 + 2); wxGrade(r, g, b, gr); dst[i] = c565(r, g, b); }
+}
+const int WXK_PN = sizeof(WXK_PAL) / 3, WXS_PN = sizeof(WXS_PAL) / 3;
+uint16_t wxBgPal[256], wxKidPal[WXK_PN], wxSkyPal[WXS_PN], wxSkyRaw[WXS_PN];
+int wxBgKey = -1, wxKidKey = -1, wxSkyKey = -1;
+
+// what to show: the season follows the temperature, the grade follows the sky and the clock
+void wxLookUp(uint32_t now) {
+  WxLook &L = wxL;
+  int c = wxCelsius(wx.t);
+  L.band = !wx.have ? 2 : c >= 28 ? 4 : c >= 20 ? 3 : c >= 12 ? 2 : c >= 4 ? 1 : 0;
+  L.day = !wx.have || wx.isDay;
+  L.wet = wx.have && (wx.cond == WX_RAIN || wx.cond == WX_DRIZZLE || wx.cond == WX_THUNDER);
+  L.snow = wx.have && wx.cond == WX_SNOW;
+  L.flash = wx.have && wx.cond == WX_THUNDER && (now % 3100 < 140 || (now % 3100 > 220 && now % 3100 < 290));
+  L.bg = L.snow || L.band == 0 ? WXB_WINTER : L.band == 1 ? WXB_AUTUMN : L.band == 2 ? WXB_SPRING : WXB_SUMMER;
+  L.grade = 0;
+  if (!L.day) { if (L.bg == WXB_SUMMER && !L.wet && wx.cond <= WX_CLOUDY) L.bg = WXB_NIGHT; else L.grade |= WXG_NIGHT; }
+  if (L.wet) L.grade |= WXG_RAIN;
+  else if (wx.have && (wx.cond == WX_CLOUDY || L.snow)) L.grade |= WXG_OVERCAST;
+  else if (wx.have && wx.cond == WX_FOG) L.grade |= WXG_FOG;
+  if (L.flash) L.grade |= WXG_FLASH;
+}
+
+// a picture from the art, index 0 transparent
+void wxBlit(const uint8_t *px, int w, int h, int x0, int y0, const uint16_t *pal, bool flip) {
+  for (int y = 0; y < h; y++) {
+    int sy = y0 + y; if (sy < 0 || sy >= SCR_H) continue;
+    const uint8_t *row = px + y * w;
+    for (int x = 0; x < w; x++) { uint8_t i = pgm_read_byte(row + (flip ? w - 1 - x : x)); if (i) wxPx(x0 + x, sy, pal[i]); }
+  }
+}
+void wxSkyPiece(int k, int x, int y, bool graded) { wxBlit(WXS_PX + WXS_OFF[k], WXS_W[k], WXS_H[k], x, y, graded ? wxSkyPal : wxSkyRaw, false); }
+
+// ── the sky, painted in chunky bands, with its sun or moon, stars, drifting clouds and lightning ──
+void wxSky(uint32_t now) {
+  const WxLook &L = wxL;
+  uint8_t c = wx.have ? wx.cond : WX_PARTLY;
+  uint8_t t[3], b[3];
+  auto set = [&](uint8_t r0, uint8_t g0, uint8_t b0, uint8_t r1, uint8_t g1, uint8_t b1) { t[0] = r0; t[1] = g0; t[2] = b0; b[0] = r1; b[1] = g1; b[2] = b1; };
+  if (L.flash) set(214, 214, 255, 255, 255, 255);
+  else if (!L.day) { if (L.wet) set(8, 10, 20, 30, 34, 52); else if (c <= WX_PARTLY) set(4, 8, 26, 30, 42, 92); else set(14, 16, 30, 44, 48, 70); }
+  else if (c == WX_THUNDER) set(42, 36, 68, 98, 94, 124);
+  else if (L.wet) set(72, 88, 114, 140, 152, 172);
+  else if (L.snow) set(148, 164, 194, 218, 226, 240);
+  else if (c == WX_FOG) set(150, 156, 168, 206, 210, 216);
+  else if (c == WX_CLOUDY) set(108, 132, 168, 188, 200, 218);
+  else if (L.band >= 4) set(52, 128, 230, 255, 214, 150);
+  else set(52, 128, 230, 160, 214, 255);
+  int sky = WXB_Y0[L.bg] + 40;                                           // the art's top rows are mostly sky too
+  for (int y = 0; y < sky; y += 4) {
+    float k = (float)y / sky;
+    gfx->fillRect(0, y, SCR_W, 4, c565(t[0] + (b[0] - t[0]) * k, t[1] + (b[1] - t[1]) * k, t[2] + (b[2] - t[2]) * k));
+  }
+  gfx->fillRect(0, sky, SCR_W, SCR_H - sky, c565(b[0], b[1], b[2]));     // the art has gaps in places; nothing stale shows through
+  if (!L.day && c <= WX_PARTLY) {                                        // stars that twinkle, and now and then a shooting one
+    for (int i = 0; i < 30; i++) {
+      int x = wxH(i, 1) % SCR_W, y = wxH(i, 2) % (sky - 8), tw = (now / 300 + wxH(i, 3)) % 9;
+      uint16_t col = tw == 0 ? c565(90, 100, 140) : i % 5 == 0 ? c565(255, 240, 200) : COL_WHITE;
+      wxPx(x, y, col);
+      if (i % 7 == 0 && tw > 5) { wxPx(x - 1, y, c565(120, 130, 180)); wxPx(x + 1, y, c565(120, 130, 180)); wxPx(x, y - 1, c565(120, 130, 180)); wxPx(x, y + 1, c565(120, 130, 180)); }
+    }
+    uint32_t sp = now % 9000;
+    if (sp < 600) { int x = 70 + sp / 5, y = 14 + sp / 16; for (int k = 0; k < 14; k++) wxMix(x - k * 2, y - k, COL_WHITE, 255 - k * 18); }
+  }
+  if (L.day && c <= WX_PARTLY) wxSkyPiece(4, 186, 18 + (int)(sinf(now / 2200.0f) * 1.5f), false);
+  if (!L.day && c <= WX_CLOUDY) wxSkyPiece(5, 192, 18, false);
+  // clouds: which, at what height, how fast (px per second, more with wind)
+  static const int8_t SETS[8][4] = { {2, -1, -1, -1}, {0, 2, 1, -1}, {0, 1, 0, 2}, {1, 0, 2, 1}, {3, 1, -1, -1}, {3, 0, 3, -1}, {1, 0, -1, -1}, {3, 3, 3, 0} };
+  static const uint8_t CY[4] = {28, 54, 12, 70};
+  float wind = 3 + (wx.have ? wx.wind : 8) / 4.0f;
+  for (int i = 0; i < 4; i++) {
+    int k = SETS[c][i]; if (k < 0) continue;
+    if (!L.day && c == WX_CLEAR) continue;
+    int w = WXS_W[k], span = SCR_W + w + 60;
+    int x = (int)((now / 1000.0f) * wind * (0.6f + i * 0.25f) + wxH(i, c) % span) % span - w - 30;
+    wxSkyPiece(k, x, CY[i], true);
+  }
+  if (L.flash) {                                                         // a crooked bolt down to the hills
+    int x = 150 + (now / 3100) % 3 * 22, y = 40;
+    uint32_t s = now / 3100;
+    while (y < sky + 20) {
+      int nx = x + (int)(wxH(s, y) % 13) - 6, ny = y + 8;
+      for (int k = 0; k <= 8; k++) { int px = x + (nx - x) * k / 8, py = y + k; wxPx(px, py, c565(255, 250, 200)); wxPx(px + 1, py, COL_WHITE); wxMix(px - 1, py, c565(255, 240, 140), 120); wxMix(px + 2, py, c565(255, 240, 140), 120); }
+      x = nx; y = ny;
+    }
+  }
+}
+
+// ── critters and bits that live in the scene ──
+void wxDragonfly(int x, int y, uint16_t body, uint32_t now) {
+  for (int k = 0; k < 6; k++) wxPx(x + k, y, body);
+  wxPx(x + 6, y, mix565(body, COL_BLACK, 90));
+  bool up = (now / 40) % 2;
+  uint16_t wing = c565(220, 236, 255);
+  wxMix(x + 3, y - 1 - up, wing, 200); wxMix(x + 4, y - 1 - up, wing, 200); wxMix(x + 3, y + 1 + up, wing, 200); wxMix(x + 4, y + 1 + up, wing, 200);
+}
+void wxBack(uint32_t now) {
+  const WxLook &L = wxL;
+  uint8_t c = wx.have ? wx.cond : WX_PARTLY;
+  bool fair = !L.wet && !L.snow && c != WX_FOG;
+  // birds over the hills on fair days, crows under grey skies
+  if (L.day && !L.wet && c != WX_FOG && L.bg != WXB_WINTER) {
+    for (int i = 0; i < 3; i++) {
+      int x = (int)((now / 38 + i * 97) % 320) - 40, y = 84 + i * 9 + (int)(sinf(now / 600.0f + i) * 3), f = (now / 170 + i) % 2;
+      uint16_t col = c == WX_CLOUDY ? c565(30, 30, 36) : c565(40, 40, 60);
+      wxPx(x - 2, y - f, col); wxPx(x - 1, y - (f ? 0 : 1) + 0, col); wxPx(x, y, col); wxPx(x + 1, y - (f ? 0 : 1), col); wxPx(x + 2, y - f, col);
+    }
+  }
+  // dragonflies darting about: blue in summer, red in autumn
+  if (L.day && fair && (L.bg == WXB_SUMMER || L.bg == WXB_AUTUMN)) {
+    for (int i = 0; i < 2; i++) {
+      uint32_t seg = now / 1300 + i * 7, t = now % 1300;
+      float e = t < 500 ? 1 - (1 - t / 500.0f) * (1 - t / 500.0f) : 1;
+      int x0 = 20 + wxH(seg, i) % 190, y0 = 150 + wxH(seg, i + 9) % 80, x1 = 20 + wxH(seg + 1, i) % 190, y1 = 150 + wxH(seg + 1, i + 9) % 80;
+      wxDragonfly(x0 + (int)((x1 - x0) * e), y0 + (int)((y1 - y0) * e) + (int)(sinf(now / 90.0f + i) * 1), L.bg == WXB_AUTUMN ? c565(220, 50, 36) : c565(60, 150, 230), now);
+    }
+  }
+  // butterflies over the spring and summer flowers
+  if (L.day && fair && (L.bg == WXB_SUMMER || L.bg == WXB_SPRING)) {
+    for (int i = 0; i < 2; i++) {
+      int x = 40 + i * 120 + (int)(sinf(now / 1700.0f + i * 2) * 40 + sinf(now / 430.0f + i) * 6), y = 214 + (int)(sinf(now / 900.0f + i * 3) * 14);
+      uint16_t col = i ? c565(255, 236, 120) : COL_WHITE;
+      bool open = (now / 110 + i) % 2;
+      wxPx(x, y, c565(60, 50, 40));
+      if (open) { wxPx(x - 1, y - 1, col); wxPx(x - 2, y - 1, col); wxPx(x - 1, y, col); wxPx(x + 1, y - 1, col); wxPx(x + 2, y - 1, col); wxPx(x + 1, y, col); }
+      else { wxPx(x - 1, y - 1, col); wxPx(x + 1, y - 1, col); }
+    }
+  }
+  // summer: specks of pollen drifting up in the light
+  if (L.day && fair && L.bg == WXB_SUMMER)
+    for (int i = 0; i < 10; i++) { int x = (wxH(i, 4) % SCR_W + (int)(sinf(now / 1200.0f + i) * 8)), y = 250 - (int)((now / 40 + (wxH(i, 5) & 1023)) % 160); wxMix(x, y, c565(255, 250, 210), 150); }
+  // winter: the snow glitters
+  if (L.bg == WXB_WINTER && L.day && !L.wet)
+    for (int i = 0; i < 10; i++) { uint32_t s = now / 160 + i * 13; if (wxH(s, i) % 3) continue; int x = wxH(s, 7) % SCR_W, y = 190 + wxH(s, 8) % 60; wxPx(x, y, COL_WHITE); wxMix(x - 1, y, COL_WHITE, 140); wxMix(x + 1, y, COL_WHITE, 140); wxMix(x, y - 1, COL_WHITE, 140); wxMix(x, y + 1, COL_WHITE, 140); }
+  // fireflies on warm nights
+  if (!L.day && !L.wet && !L.snow && L.band >= 2)
+    for (int i = 0; i < 12; i++) {
+      int x = 10 + wxH(i, 6) % 220 + (int)(sinf(now / 1500.0f + i * 1.7f) * 14), y = 150 + wxH(i, 7) % 90 + (int)(sinf(now / 1100.0f + i) * 10);
+      float p = 0.5f + 0.5f * sinf(now / 380.0f + i * 2.1f);
+      if (p < 0.15f) continue;
+      wxGlow(x, y, 4, c565(200, 255, 110), (uint8_t)(p * 150)); wxPx(x, y, c565(240, 255, 170));
+    }
+}
+
+// rain, snow, petals, leaves, fog and wind: drawn over the kid
+void wxFront(uint32_t now) {
+  const WxLook &L = wxL;
+  uint8_t c = wx.have ? wx.cond : WX_PARTLY;
+  int wind = wx.have ? wx.wind : 8;
+  if (L.wet) {
+    int n = c == WX_DRIZZLE ? 26 : c == WX_THUNDER ? 70 : 54, len = c == WX_DRIZZLE ? 4 : 7, slant = min(wind / 8, 4);
+    uint16_t col = L.flash ? COL_WHITE : L.day ? c565(190, 214, 255) : c565(120, 140, 190);
+    for (int i = 0; i < n; i++) {
+      int v = 7 + wxH(i, 11) % 5, ground = 200 + wxH(i, 12) % 52;
+      int y = (int)((now / 33 * v + (wxH(i, 13) & 1023)) % (ground + 30)) - 30, x = (wxH(i, 14) % (SCR_W + 40)) - 20 + y * slant / 12;
+      if (y < ground - len) { for (int k = 0; k < len; k++) wxMix(x - k * slant / 6, y - k, col, 210 - k * 18); }
+      else { int d = y - (ground - len); if (d < 6) { wxMix(x - d, ground - d / 2, col, 200); wxMix(x + d, ground - d / 2, col, 200); wxMix(x, ground, col, 140); } }
+    }
+  }
+  if (L.snow) {
+    for (int i = 0; i < 70; i++) {
+      int sz = wxH(i, 21) % 2 == 0 ? 2 : 1, v = 2 + wxH(i, 22) % 3 + sz;
+      int y = (int)((now / 25 * v / 4 + (wxH(i, 23) & 1023)) % 300) - 10, x = (int)(wxH(i, 24) % 260) - 10 + (int)(sinf(now / 700.0f + i) * 4) + y * wind / 300;
+      gfx->fillRect(x, y, sz, sz, COL_WHITE); if (sz == 2) wxMix(x - 1, y, COL_WHITE, 90);
+    }
+  }
+  if (!L.wet && !L.snow && L.bg == WXB_SPRING) {                       // sakura petals, fluttering down
+    static const uint16_t PET[3] = { c565(255, 183, 197), c565(255, 216, 226), c565(236, 140, 168) };
+    for (int i = 0; i < 18; i++) {
+      int v = 3 + wxH(i, 31) % 3;
+      int y = (int)((now / 40 * v / 3 + (wxH(i, 32) & 1023)) % 310) - 20, x = (int)(((wxH(i, 33) & 1023) + now / 60 * (1 + wind / 6)) % 280) - 20 + (int)(sinf(now / 500.0f + i) * 5);
+      uint16_t col = PET[i % 3]; int ph = (now / 160 + i) % 3;
+      wxPx(x, y, col); if (ph == 0) wxPx(x + 1, y, col); else if (ph == 1) wxPx(x, y + 1, col); else { wxPx(x + 1, y, col); wxPx(x, y + 1, col); }
+    }
+  }
+  if (!L.wet && !L.snow && L.bg == WXB_AUTUMN) {                       // maple leaves, tumbling
+    static const uint16_t LEAF[3] = { c565(222, 62, 40), c565(242, 122, 42), c565(250, 176, 54) };
+    for (int i = 0; i < 10; i++) {
+      int v = 2 + wxH(i, 41) % 3;
+      int y = (int)((now / 37 * v / 3 + (wxH(i, 42) & 1023)) % 310) - 20, x = (int)(((wxH(i, 43) & 1023) + now / 70 * (1 + wind / 5)) % 280) - 20 + (int)(sinf(now / 650.0f + i) * 9);
+      uint16_t col = LEAF[i % 3];
+      if ((now / 220 + i) % 2) { wxPx(x, y - 1, col); wxPx(x - 1, y, col); wxPx(x, y, col); wxPx(x + 1, y, col); wxPx(x, y + 1, mix565(col, COL_BLACK, 70)); }
+      else { wxPx(x - 1, y - 1, col); wxPx(x + 1, y - 1, col); wxPx(x, y, col); wxPx(x - 1, y + 1, col); wxPx(x + 1, y + 1, mix565(col, COL_BLACK, 70)); }
+    }
+  }
+  if (wx.have && c == WX_FOG && FB)                                      // fog, drifting in bands
+    for (int b = 0; b < 4; b++) {
+      int y0 = 96 + b * 44 + (int)(sinf(now / 1500.0f + b) * 6);
+      for (int y = y0; y < y0 + 18 && y < SCR_H; y++) {
+        uint8_t a = (uint8_t)(90 * sinf((y - y0) / 18.0f * 3.1416f));
+        int off = (int)(now / (40 + b * 10)) % 60;
+        for (int x = 0; x < SCR_W; x++) { uint8_t aa = (uint8_t)(a * (0.75f + 0.25f * sinf((x + off) / 9.5f))); FB[y * SCR_W + x] = blend565(FB[y * SCR_W + x], c565(230, 232, 236), aa); }
+      }
+    }
+  if (wind >= 20 && !L.snow)                                             // gusts
+    for (int i = 0; i < 4; i++) {
+      int len = 14 + wxH(i, 51) % 12, y = 110 + wxH(i, 52) % 130, x = (int)((now / 40 * (8 + i) + (wxH(i, 53) & 1023)) % 360) - 60;
+      for (int k = 0; k < len; k++) wxMix(x + k, y + (k > len - 4 ? -(k - len + 4) / 2 : 0), COL_WHITE, 120 - k * 4);
+    }
+}
+
+// ── the kid: one sprite per outfit, 0 hot, 1 warm, 2 mild, 3 cool, 4 freezing, 5 rain, 6 snow, 7 night ──
+// It breathes, sways with the tilt, hops when tapped, turns to look around, shivers in the cold and trembles
+// at thunder, with drawn extras: a lantern glow at night, frosty breath, a bead of sweat, hearts, a "!".
+int wxOutfit() {
+  const WxLook &L = wxL;
+  if (L.wet) return 5;
+  if (L.snow) return 6;
+  if (!L.day && L.band >= 2) return 7;
+  return 4 - constrain(L.band, 0, 4);
+}
+// draws frame f with its feet centred on (cx, gy): squash shortens it by a few rows, lean shears the top sideways
+void wxKid(int f, int cx, int gy, int squash, float lean, bool flip) {
+  const uint8_t *px = WXK_PX[f];
+  int h = WXK_H - squash, x0 = cx - WXK_W / 2;
   for (int dy = 0; dy < h; dy++) {
-    int sy = dy * PUP_H / h, y = gy - h + dy;
+    int sy = dy * WXK_H / h, y = gy - h + dy;
     if (y < 0 || y >= SCR_H) continue;
     int sh = (int)roundf(lean * (h - dy) / h);
-    const uint8_t *row = px + sy * PUP_W;
-    for (int sx = 0; sx < PUP_W; sx++) {
-      uint8_t i = pgm_read_byte(row + (flip ? PUP_W - 1 - sx : sx));
-      if (!i) continue;
-      int x = x0 + sx + sh;
-      if (x < 0 || x >= SCR_W) continue;
-      uint16_t c = pgm_read_word(PUP_PAL + i);
-      if (FB) FB[y * SCR_W + x] = c; else gfx->drawPixel(x, y, c);
-    }
+    const uint8_t *row = px + sy * WXK_W;
+    for (int sx = 0; sx < WXK_W; sx++) { uint8_t i = pgm_read_byte(row + (flip ? WXK_W - 1 - sx : sx)); if (i) wxPx(x0 + sx + sh, y, wxKidPal[i]); }
   }
 }
 uint32_t wxTurnAt = 0, wxHeartAt = 0;
-void wxPup(uint32_t now, int band) {
-  int f = wxOutfit(band);
-  bool scared = wx.cond == WX_THUNDER, sleepy = f == 7, cold = f == 4 || f == 6;
-  int cx = 132, gy = 238;
-  // hop on tap, with a squash on landing
+void wxPup(uint32_t now) {
+  const WxLook &L = wxL;
+  int f = wxOutfit();
+  bool scared = wx.have && wx.cond == WX_THUNDER, cold = f == 4 || f == 6;
+  int key = L.day ? 0 : WXG_DUSK;
+  if (key != wxKidKey) { wxPal(WXK_PAL, WXK_PN, key, wxKidPal); wxKidKey = key; }
+  int cx = WX_KX, gy = WX_GY;
   uint32_t ht = now - wxHopAt;
   int hop = ht < 420 ? (int)(sinf(ht / 420.0f * 3.1416f) * 18) : 0;
   int squash = ht >= 420 && ht < 560 ? 4 - (int)((ht - 420) / 35) : 0;
-  // breathing: slow when asleep
-  if (!hop && !squash) squash = (sinf(now / (sleepy ? 900.0f : 520.0f)) > 0.6f) ? 1 : 0;
-  // sway with the tilt, or a gentle idle rock
+  if (!hop && !squash) squash = sinf(now / 560.0f) > 0.6f ? 1 : 0;   // breathing
   float lean = imuOK ? constrain(tiltX * 4.0f, -4.0f, 4.0f) : sinf(now / 1400.0f) * 1.5f;
-  if (scared) lean = sinf(now / 45.0f) * 1.5f;                                   // trembling
+  if (scared) lean = sinf(now / 45.0f) * 1.5f;
   int shiver = (cold || scared) && (now / 70) % 2 ? 1 : 0;
-  // now and then it turns to look the other way; a shake spins it round and round
-  if (!sleepy && now > wxTurnAt + 5200 && !random(0, 160)) wxTurnAt = now;
+  if (now > wxTurnAt + 5200 && !random(0, 160)) wxTurnAt = now;      // now and then it looks the other way
   bool flip = (now - wxTurnAt < 1600) || (now < wxSpinUntil && (now / 110) % 2);
   if (now < wxSpinUntil) hop = max(hop, (int)(fabsf(sinf(now / 110.0f)) * 6));
-  if (FB) {                                                                     // a soft shadow that shrinks as it hops
-    int rx = 24 - hop / 2;
-    for (int y = -3; y <= 3; y++) { int dx = (int)(rx * sqrtf(1.0f - y * y / 12.0f)); for (int x = cx - dx; x <= cx + dx; x++) if (x >= 0 && x < SCR_W && gy + y < SCR_H) FB[(gy + y) * SCR_W + x] = blend565(FB[(gy + y) * SCR_W + x], WX_OL, 120); }
+  if (FB) {                                                           // a soft shadow that shrinks as it hops
+    int rx = 17 - hop / 3;
+    for (int y = -2; y <= 2; y++) { int dx = (int)(rx * sqrtf(1.0f - y * y / 6.0f)); for (int x = cx - dx; x <= cx + dx; x++) wxMix(x, gy + y, c565(20, 16, 30), 110); }
   }
-  wxSprite(f, cx + shiver, gy - hop, squash, lean, flip);
-  int top = gy - hop - PUP_H + squash;
-  // extras
-  if (sleepy)
-    for (int i = 0; i < 2; i++) { float pz = fmodf(now / 1600.0f + i * 0.5f, 1.0f); textAt(i ? "z" : "Z", cx + 24 + (int)(pz * 10), top + 4 - (int)(pz * 24), 1 + i, COL_WHITE); }
-  if (cold)
-    for (int i = 0; i < 3; i++) { float pz = fmodf(now / 1400.0f + i * 0.33f, 1.0f); gfx->fillCircle(cx - 12 - (int)(pz * 20), top + 40 - (int)(pz * 12), 1 + (int)(pz * 4), mix565(COL_WHITE, c565(150, 166, 196), (uint8_t)(pz * 255))); }
-  if (f == 0 && wx.isDay)
-    for (int k = -1; k <= 1; k += 2) gfx->fillCircle(cx + k * 22, top + 14 + (now / 120 + (k > 0 ? 4 : 0)) % 9, 1, c565(140, 200, 255));
-  if (scared && (now / 400) % 2) { textAt("!", cx + 26, top - 2, 2, c565(255, 220, 80)); }
+  int top = gy - hop - WXK_H + squash;
+  int lx = flip ? WXK_W - 1 - WXK_LX : WXK_LX;
+  if (f == 7) wxGlow(cx - WXK_W / 2 + lx, top + WXK_LY, 16, c565(255, 180, 90), 110 + (int)(sinf(now / 140.0f) * 20));
+  wxKid(f, cx + shiver, gy - hop, squash, lean, flip);
+  if (f == 7) wxGlow(cx - WXK_W / 2 + lx, top + WXK_LY, 4, c565(255, 230, 160), 120);
+  if (cold) for (int i = 0; i < 3; i++) { float pz = fmodf(now / 1400.0f + i * 0.33f, 1.0f); int px = cx + (flip ? -8 : 8) + (int)((flip ? -1 : 1) * pz * 16), py = top + 28 - (int)(pz * 10); wxGlow(px, py, 1 + (int)(pz * 4), COL_WHITE, (uint8_t)(200 * (1 - pz))); }
+  if (f == 0 && L.day) { int k = (now / 900) % 2 ? 1 : -1, sy = (now / 90) % 10; wxPx(cx + k * 17, top + 14 + sy, c565(150, 210, 255)); wxPx(cx + k * 17, top + 15 + sy, c565(110, 180, 255)); }
+  if (scared && (now / 400) % 2) textAt("!", cx + 22, top - 4, 2, c565(255, 220, 80));
   if (now - wxHeartAt < 1500) {
     float pz = (now - wxHeartAt) / 1500.0f;
     for (int k = -1; k <= 1; k += 2) {
-      int hx = cx + k * (18 + (int)(pz * 8)), hy = top + 10 - (int)(pz * 26);
+      int hx = cx + k * (18 + (int)(pz * 8)), hy = top + 8 - (int)(pz * 24);
       uint16_t hc = c565(255, 110, 150);
       gfx->fillCircle(hx - 2, hy, 2, hc); gfx->fillCircle(hx + 2, hy, 2, hc); gfx->fillTriangle(hx - 4, hy + 1, hx + 4, hy + 1, hx, hy + 5, hc);
     }
   }
 }
 
+void wxScene(uint32_t now) {
+  wxLookUp(now);
+  int key = wxL.bg * 64 + wxL.grade;
+  if (key != wxBgKey) { wxPal(WXB_PAL[wxL.bg], 256, wxL.grade, wxBgPal); wxBgKey = key; }
+  uint8_t sg = wxL.grade | (wxL.day || wxL.bg != WXB_NIGHT ? 0 : WXG_NIGHT);   // clouds darken at night too
+  if (sg != wxSkyKey) { wxPal(WXS_PAL, WXS_PN, sg, wxSkyPal); wxSkyKey = sg; }
+  static bool rawDone = false;
+  if (!rawDone) { wxPal(WXS_PAL, WXS_PN, 0, wxSkyRaw); rawDone = true; }
+  wxSky(now);
+  int y0 = WXB_Y0[wxL.bg];
+  wxBlit(WXB_PX + WXB_OFF[wxL.bg], SCR_W, SCR_H - y0, 0, y0, wxBgPal, false);
+  wxBack(now);
+}
+
 void drawWeather() {
   uint32_t now = millis();
-  int c = wxCelsius(wx.t);
-  int band = !wx.have ? 2 : c >= 28 ? 4 : c >= 20 ? 3 : c >= 12 ? 2 : c >= 4 ? 1 : 0;
-  wxScene(now, band);
+  wxScene(now);
   // the readout, top left over the sky
   char b[40];
   uint16_t ink = COL_WHITE, sh = c565(10, 14, 30);
@@ -3363,10 +3445,11 @@ void drawWeather() {
     textAt("pick a place in the", 16, 32, 1, ink);
     textAt("app: weather tab", 16, 44, 1, ink);
   }
-  wxPup(now, wx.have ? band : 2);
+  wxPup(now);
+  wxFront(now);
   // the next few hours, along the bottom
   if (wx.have && wx.hn) {
-    dimRect(18, 254, 204, 24, 1);
+    dimRect(18, 254, 204, 24, 2);
     for (int i = 0; i < wx.hn; i++) {
       int x = 30 + i * 51;
       snprintf(b, sizeof(b), "%02u", wx.hHour[i]);
@@ -3376,20 +3459,21 @@ void drawWeather() {
       textAt(b, x - 4, 268, 1, c565(255, 220, 120));
     }
   }
-  if (now < wxSayUntil) {                                                                    // what Biscuit has to say about it
-    int w = strlen(wxSay) * 6 + 14, x = constrain(132 - w / 2, 10, 230 - w), y = 136;
+  if (now < wxSayUntil) {                                                                    // what the kid has to say about it
+    int w = strlen(wxSay) * 6 + 14, x = constrain(WX_KX - w / 2, 10, 230 - w), y = 158;
     gfx->fillRoundRect(x, y, w, 18, 6, COL_WHITE); gfx->drawRoundRect(x, y, w, 18, 6, WX_OL);
     gfx->fillTriangle(x + w / 2 - 4, y + 17, x + w / 2 + 4, y + 17, x + w / 2, y + 23, COL_WHITE);
     textAt(wxSay, x + 7, y + 5, 1, WX_OL);
   }
 }
 void wxTap() {
-  static const char *LINE[5] = {"arf! brrrr!", "arf! coat weather", "arf! hoodie time", "arf! walkies?", "arf! so toasty!"};
-  int c = wxCelsius(wx.t), band = c >= 28 ? 4 : c >= 20 ? 3 : c >= 12 ? 2 : c >= 4 ? 1 : 0;
-  wxSay = !wx.have ? "arf? where am i?" : wx.cond == WX_THUNDER ? "awoo! thunder!" : wx.cond == WX_RAIN || wx.cond == WX_DRIZZLE ? "arf! puddles!" : wx.cond == WX_SNOW ? "arf! snow day!!" : wx.cond == WX_FOG ? "arf? can't see" : !wx.isDay ? "*yawn* night..." : band == 4 ? "arf! so hot..." : LINE[band];
+  static const char *LINE[5] = {"samui! brrr", "momiji season!", "hanami time!", "bug hunting!", "atsui~ so hot"};
+  wxLookUp(millis());
+  const WxLook &L = wxL;
+  wxSay = !wx.have ? "eh? where am i?" : wx.cond == WX_THUNDER ? "kaminari!! eek" : L.wet ? "ame da~ puddles!" : L.snow ? "yuki da!! snowball!" : wx.cond == WX_FOG ? "kiri... can't see" : !L.day ? (L.band >= 2 ? "hotaru! fireflies" : "oyasumi~") : LINE[L.band];
   wxSayUntil = millis() + 2200; wxHopAt = wxHeartAt = millis(); sfx(4);
 }
-void wxShake() { wxSpinUntil = millis() + 1200; wxSay = "whoaaa"; wxSayUntil = millis() + 1200; sfx(3); }
+void wxShake() { wxSpinUntil = millis() + 1200; wxSay = "waaa~"; wxSayUntil = millis() + 1200; sfx(3); }
 
 // ═════════════ v5: torch ═════════════
 const uint16_t TORCH_COL[4] = { COL_WHITE, c565(255, 206, 150), c565(255, 0, 0), c565(120, 230, 255) };

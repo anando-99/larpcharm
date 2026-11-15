@@ -150,7 +150,7 @@
   const boot = performance.now();
   const klog = [];
   const charmLog = window.charmLog = msg => { klog.push({ t: performance.now() - boot, s: String(msg).replace(/[^\x20-\x7e]/g, '?').slice(0, 31) }); if (klog.length > 8) klog.shift(); };
-  ['kernel: larp-os 8.5 up', 'imu: qmi8658 online', 'fs: ffat mounted', 'rtc: clock ok'].forEach(charmLog);
+  ['kernel: larp-os 8.6 up', 'imu: qmi8658 online', 'fs: ffat mounted', 'rtc: clock ok'].forEach(charmLog);
   const typing = { cmd: '', at: 0, tile: -1 };
   const scope = new Array(74).fill(0); let scopeHead = 0, lastTilt = 0;
   const bar = (f, n, fill, head, empty) => { const k = Math.round(Math.max(0, Math.min(1, f)) * (n - 2)); let s = '['; for (let i = 0; i < n - 2; i++) s += i < k - 1 ? fill : i === k - 1 ? head : empty; return s + ']'; };
@@ -762,11 +762,12 @@
   }
 
 
-  // ── weather: Biscuit the pixel pup, dressed for it (same scene and sprite as the firmware's drawWeather) ──
+  // ── weather: a pixel-art kid in the Japanese countryside (same art and scene as the firmware's drawWeather) ──
+  // wxart.js carries the art (made by firmware/tools/mkwxart.py, the same pixels as wx_art.h).
   const WXN = ['clear', 'partly cloudy', 'cloudy', 'fog', 'drizzle', 'rain', 'snow', 'thunderstorm'];
   const OL = '#221828';
-  const wxb = { sayUntil: 0, say: '', hop: -1e9, heart: -1e9, turn: 0,
-    drops: Array.from({ length: 36 }, () => ({ x: Math.random() * 240, y: Math.random() * 520 - 280, v: 5 + Math.random() * 5 | 0 })) };
+  const WXB = { SUMMER: 0, SPRING: 1, AUTUMN: 2, WINTER: 3, NIGHT: 4 }, WXG = { NIGHT: 1, OVERCAST: 2, RAIN: 4, FOG: 8, FLASH: 16, DUSK: 32 };
+  const WX_KX = 124, WX_GY = 252;
   const mixc = (a, b, t) => { const A = rgb(a), B = rgb(b); return `rgb(${A.map((v, i) => Math.round(v + (B[i] - v) * t)).join(',')})`; };
   function wxIcon(cond, x, y, s, day) {
     if (cond <= 1) { if (day) circle(x - (cond ? s / 3 : 0), y - (cond ? s / 3 : 0), s / 2, '#ffce3c', true); else { circle(x - s / 4, y - s / 4, s / 2, '#f0ecc8', true); circle(x, y - s / 2, s / 2, '#0a0e1e', true); } }
@@ -774,126 +775,220 @@
     if (cond === 4 || cond === 5 || cond === 7) { c.strokeStyle = '#5aaaff'; c.lineWidth = 1; for (let i = -1; i <= 1; i++) { c.beginPath(); c.moveTo(x + i * s / 3, y + s / 2); c.lineTo(x + i * s / 3 - 2, y + s / 2 + s / 3); c.stroke(); } }
     if (cond === 6) for (let i = -1; i <= 1; i++) R(x + i * s / 3 - 1, y + s / 2 + 1, 2, 2, '#fff');
     if (cond === 3) for (let i = 0; i < 3; i++) R(x - s / 2 + (i % 2) * 2, y - s / 4 + i * s / 4, s - 2, 1, '#ecf0f8');
+  }  const wxb = { sayUntil: 0, say: '', hop: -1e9, heart: -1e9, turn: 0, spin: 0 };
+  const wxH = (i, k) => { let x = (Math.imul(i, 2654435761) ^ Math.imul(k, 40503)) >>> 0; x ^= x >>> 15; x = Math.imul(x, 2246822519) >>> 0; x ^= x >>> 13; return x >>> 0; };
+  const P = (x, y, col) => R(x | 0, y | 0, 1, 1, col);
+  const PM = (x, y, col, a) => { if (a <= 0) return; c.globalAlpha = Math.min(1, a / 255); R(x | 0, y | 0, 1, 1, col); c.globalAlpha = 1; };
+  const glow = (x, y, r, col, a) => { const g = c.createRadialGradient(x, y, 0, x, y, r); g.addColorStop(0, col); g.addColorStop(1, 'rgba(0,0,0,0)'); c.globalAlpha = Math.min(1, a / 255); c.fillStyle = g; c.fillRect(x - r, y - r, 2 * r, 2 * r); c.globalAlpha = 1; };
+  const hex = (r, g, b) => `rgb(${r | 0},${g | 0},${b | 0})`;
+  function wxGrade(r, g, b, gr) {
+    let L;
+    if (gr & WXG.OVERCAST) { L = .3 * r + .59 * g + .11 * b; r = (r + (L - r) * .35) * .86; g = (g + (L - g) * .35) * .88; b = (b + (L - b) * .3) * .93; }
+    if (gr & WXG.RAIN) { L = .3 * r + .59 * g + .11 * b; r = (r + (L - r) * .45) * .66; g = (g + (L - g) * .45) * .7; b = (b + (L - b) * .4) * .78 + 10; }
+    if (gr & WXG.FOG) { L = .3 * r + .59 * g + .11 * b; r += (L - r) * .3; g += (L - g) * .3; b += (L - b) * .3; r += (206 - r) * .42; g += (210 - g) * .42; b += (216 - b) * .42; }
+    if (gr & WXG.NIGHT) { r *= .3; g *= .36; b = b * .55 + 16; }
+    if (gr & WXG.DUSK) { r *= .72; g *= .76; b = b * .88 + 10; }
+    if (gr & WXG.FLASH) { r += (255 - r) * .55; g += (255 - g) * .55; b += (255 - b) * .6; }
+    const k = v => Math.max(0, Math.min(255, Math.round(v)));
+    return [k(r), k(g), k(b)];
   }
-  // the pup sprite: 8 outfits decoded once into small canvases (and mirrored copies, for when it looks the other way)
-  let pupCache = null;
-  function pupFrames() {
-    if (pupCache || !window.PUP) return pupCache;
-    const P = window.PUP, raw = Uint8Array.from(atob(P.px), ch => ch.charCodeAt(0)), pal = P.pal.map(rgb);
-    pupCache = [];
-    for (let f = 0; f < P.n; f++) {
-      const pair = [0, 1].map(fl => {
-        const cv2 = document.createElement('canvas'); cv2.width = P.w; cv2.height = P.h;
-        const g = cv2.getContext('2d'), im = g.createImageData(P.w, P.h);
-        for (let y = 0; y < P.h; y++) for (let x = 0; x < P.w; x++) {
-          const i = raw[f * P.w * P.h + y * P.w + (fl ? P.w - 1 - x : x)]; if (!i) continue;
-          const o = (y * P.w + x) * 4, col = pal[i - 1]; im.data[o] = col[0]; im.data[o + 1] = col[1]; im.data[o + 2] = col[2]; im.data[o + 3] = 255;
-        }
-        g.putImageData(im, 0, 0); return cv2;
-      });
-      pupCache.push(pair);
+  // the art as images, recoloured per grade and cached
+  const wxImgs = {}, wxCache = new Map();
+  function wxArt(name, src, gr) {
+    const key = name + ':' + gr;
+    if (wxCache.has(key)) return wxCache.get(key);
+    let im = wxImgs[name];
+    if (!im) { im = wxImgs[name] = new Image(); im.src = src; }
+    if (!im.complete || !im.naturalWidth) return null;
+    const cv2 = document.createElement('canvas'); cv2.width = im.naturalWidth; cv2.height = im.naturalHeight;
+    const g = cv2.getContext('2d'); g.drawImage(im, 0, 0);
+    if (gr) {
+      const d = g.getImageData(0, 0, cv2.width, cv2.height), a = d.data;
+      for (let i = 0; i < a.length; i += 4) if (a[i + 3]) { const v = wxGrade(a[i], a[i + 1], a[i + 2], gr); a[i] = v[0]; a[i + 1] = v[1]; a[i + 2] = v[2]; }
+      g.putImageData(d, 0, 0);
     }
-    return pupCache;
+    wxCache.set(key, cv2); return cv2;
   }
-  function weather() {
-    const d = window.wxData && window.wxData(), now = performance.now();
-    const W0 = d || { cond: 1, isDay: true, t: 21, feels: 21, hi: 24, lo: 16, hum: 60, wind: 10, fahr: false, hours: [], place: '' };
-    const cC = W0.fahr ? (W0.t - 32) * 5 / 9 : W0.t;
-    let band = !d ? 2 : cC >= 28 ? 4 : cC >= 20 ? 3 : cC >= 12 ? 2 : cC >= 4 ? 1 : 0;
-    const cband = band, cond = W0.cond, day = W0.isDay, wet = cond === 4 || cond === 5 || cond === 7, snow = cond === 6, wind = W0.wind || 0;
-    const flash = cond === 7 && now % 3100 < 140;
-    // sky
-    let top, bot;
-    if (!day) { top = '#060a1e'; bot = cond <= 1 ? '#1e285a' : '#282c46'; }
-    else if (cond === 7) { top = '#282240'; bot = '#605c78'; } else if (wet) { top = '#50607c'; bot = '#96a4ba'; }
-    else if (snow) { top = '#96a6c4'; bot = '#dce4f0'; } else if (cond === 3) { top = '#969ca6'; bot = '#c8ccd2'; }
-    else if (cond === 2) { top = '#6e8cb4'; bot = '#becee2'; } else { top = '#2882f0'; bot = band >= 3 ? '#ffce8c' : '#aadcff'; }
-    if (flash) { top = '#dcdcff'; bot = '#fff'; }
-    c.fillStyle = (() => { const g = c.createLinearGradient(0, 0, 0, 236); g.addColorStop(0, top); g.addColorStop(1, bot); return g; })(); c.fillRect(0, 0, W, 236);
-    if (cond === 4 && day) ['#fa788c', '#ffbe6e', '#faec82', '#82dc96', '#78aafa'].forEach((col, k) => { c.strokeStyle = col; c.globalAlpha = .55; c.lineWidth = 4; c.beginPath(); c.arc(178, 236, 106 - k * 4, Math.PI, 0); c.stroke(); c.globalAlpha = 1; });
-    if (cond <= 1) {
-      if (day) { c.strokeStyle = '#ffdc5a'; c.lineWidth = 1.5; for (let k = 0; k < 10; k++) { const a = now / 2400 + k * 0.628; c.beginPath(); c.moveTo(196 + Math.cos(a) * 26, 52 + Math.sin(a) * 26); c.lineTo(196 + Math.cos(a) * 36, 52 + Math.sin(a) * 36); c.stroke(); } circle(196, 52, 21, '#ffd646', true); circle(190, 46, 6, '#fff0a0', true); }
-      else {
-        for (let i = 0; i < 22; i++) { const x = (i * 53 + 17) % 230 + 5, y = (i * 37 + 11) % 160 + 8; R(x, y, (now / 400 + i | 0) % 7 ? 1 : 2, 1, '#fff'); }
-        circle(196, 50, 19, '#f4eec8', true); circle(206, 42, 17, top, true);
-        const sp = now % 9000; if (sp < 700) { const x = 60 + sp / 5, y = 20 + sp / 14; c.strokeStyle = '#fff'; c.lineWidth = 1; c.beginPath(); c.moveTo(x, y); c.lineTo(x - 34, y - 17); c.stroke(); }
+  function wxLook(d, now) {
+    const cC = d ? (d.fahr ? (d.t - 32) * 5 / 9 : d.t) : 16;
+    const L = { band: !d ? 2 : cC >= 28 ? 4 : cC >= 20 ? 3 : cC >= 12 ? 2 : cC >= 4 ? 1 : 0, day: !d || d.isDay, cond: d ? d.cond : 1, wind: d ? d.wind || 0 : 8, have: !!d };
+    L.wet = !!d && (L.cond === 4 || L.cond === 5 || L.cond === 7); L.snow = !!d && L.cond === 6;
+    const ph = now % 3100; L.flash = !!d && L.cond === 7 && (ph < 140 || (ph > 220 && ph < 290));
+    L.bg = L.snow || L.band === 0 ? WXB.WINTER : L.band === 1 ? WXB.AUTUMN : L.band === 2 ? WXB.SPRING : WXB.SUMMER;
+    L.grade = 0;
+    if (!L.day) { if (L.bg === WXB.SUMMER && !L.wet && L.cond <= 2) L.bg = WXB.NIGHT; else L.grade |= WXG.NIGHT; }
+    if (L.wet) L.grade |= WXG.RAIN; else if (d && (L.cond === 2 || L.snow)) L.grade |= WXG.OVERCAST; else if (d && L.cond === 3) L.grade |= WXG.FOG;
+    if (L.flash) L.grade |= WXG.FLASH;
+    return L;
+  }
+  function wxSkyPiece(k, x, y, gr) { const A = window.WXART, s = wxArt('sky', A.sky.src, gr); if (s) c.drawImage(s, A.sky.x[k], 0, A.sky.w[k], A.sky.h[k], x | 0, y | 0, A.sky.w[k], A.sky.h[k]); }
+  function wxSky(L, now) {
+    const A = window.WXART, cd = L.cond;
+    let t, b;
+    if (L.flash) [t, b] = [[214, 214, 255], [255, 255, 255]];
+    else if (!L.day) [t, b] = L.wet ? [[8, 10, 20], [30, 34, 52]] : cd <= 1 ? [[4, 8, 26], [30, 42, 92]] : [[14, 16, 30], [44, 48, 70]];
+    else if (cd === 7) [t, b] = [[42, 36, 68], [98, 94, 124]];
+    else if (L.wet) [t, b] = [[72, 88, 114], [140, 152, 172]];
+    else if (L.snow) [t, b] = [[148, 164, 194], [218, 226, 240]];
+    else if (cd === 3) [t, b] = [[150, 156, 168], [206, 210, 216]];
+    else if (cd === 2) [t, b] = [[108, 132, 168], [188, 200, 218]];
+    else if (L.band >= 4) [t, b] = [[52, 128, 230], [255, 214, 150]];
+    else [t, b] = [[52, 128, 230], [160, 214, 255]];
+    const sky = A.bg[L.bg].y0 + 40;
+    for (let y = 0; y < sky; y += 4) { const k = y / sky; R(0, y, W, 4, hex(t[0] + (b[0] - t[0]) * k, t[1] + (b[1] - t[1]) * k, t[2] + (b[2] - t[2]) * k)); }
+    R(0, sky, W, H - sky, hex(...b));
+    if (!L.day && cd <= 1) {
+      for (let i = 0; i < 30; i++) {
+        const x = wxH(i, 1) % W, y = wxH(i, 2) % (sky - 8), tw = ((now / 300 | 0) + wxH(i, 3)) % 9;
+        P(x, y, tw === 0 ? '#5a648c' : i % 5 === 0 ? '#fff0c8' : '#fff');
+        if (i % 7 === 0 && tw > 5) for (const [dx, dy] of [[-1, 0], [1, 0], [0, -1], [0, 1]]) P(x + dx, y + dy, '#7882b4');
+      }
+      const sp = now % 9000; if (sp < 600) { const x = 70 + sp / 5, y = 14 + sp / 16; for (let k = 0; k < 14; k++) PM(x - k * 2, y - k, '#fff', 255 - k * 18); }
+    }
+    if (L.day && cd <= 1) wxSkyPiece(4, 186, 18 + Math.sin(now / 2200) * 1.5, 0);
+    if (!L.day && cd <= 2) wxSkyPiece(5, 192, 18, 0);
+    const SETS = [[2, -1, -1, -1], [0, 2, 1, -1], [0, 1, 0, 2], [1, 0, 2, 1], [3, 1, -1, -1], [3, 0, 3, -1], [1, 0, -1, -1], [3, 3, 3, 0]], CY = [28, 54, 12, 70];
+    const sg = L.grade | (L.day || L.bg !== WXB.NIGHT ? 0 : WXG.NIGHT), wind = 3 + L.wind / 4;
+    for (let i = 0; i < 4; i++) {
+      const k = SETS[cd][i]; if (k < 0 || (!L.day && cd === 0)) continue;
+      const w = A.sky.w[k], span = W + w + 60;
+      wxSkyPiece(k, Math.floor((now / 1000 * wind * (0.6 + i * 0.25) + wxH(i, cd) % span) % span) - w - 30, CY[i], sg);
+    }
+    if (L.flash) {
+      const s = now / 3100 | 0; let x = 150 + s % 3 * 22, y = 40;
+      while (y < sky + 20) { const nx = x + wxH(s, y) % 13 - 6; for (let k = 0; k <= 8; k++) { const px = x + (nx - x) * k / 8 | 0, py = y + k; P(px, py, '#fffac8'); P(px + 1, py, '#fff'); PM(px - 1, py, '#fff08c', 120); PM(px + 2, py, '#fff08c', 120); } x = nx; y += 8; }
+    }
+  }
+  function wxDragonfly(x, y, body, now) {
+    R(x | 0, y | 0, 6, 1, body); P(x + 6, y, '#222');
+    const up = (now / 40 | 0) % 2;
+    for (const dx of [3, 4]) { PM(x + dx, y - 1 - up, '#dcecff', 200); PM(x + dx, y + 1 + up, '#dcecff', 200); }
+  }
+  function wxBack(L, now) {
+    const cd = L.cond, fair = !L.wet && !L.snow && cd !== 3;
+    if (L.day && !L.wet && cd !== 3 && L.bg !== WXB.WINTER)
+      for (let i = 0; i < 3; i++) {
+        const x = ((now / 38 | 0) + i * 97) % 320 - 40, y = 84 + i * 9 + Math.sin(now / 600 + i) * 3 | 0, f = ((now / 170 | 0) + i) % 2, col = cd === 2 ? '#1e1e24' : '#28283c';
+        P(x - 2, y - f, col); P(x - 1, y - (f ? 0 : 1), col); P(x, y, col); P(x + 1, y - (f ? 0 : 1), col); P(x + 2, y - f, col);
+      }
+    if (L.day && fair && (L.bg === WXB.SUMMER || L.bg === WXB.AUTUMN))
+      for (let i = 0; i < 2; i++) {
+        const seg = (now / 1300 | 0) + i * 7, t = now % 1300, e = t < 500 ? 1 - (1 - t / 500) ** 2 : 1;
+        const x0 = 20 + wxH(seg, i) % 190, y0 = 150 + wxH(seg, i + 9) % 80, x1 = 20 + wxH(seg + 1, i) % 190, y1 = 150 + wxH(seg + 1, i + 9) % 80;
+        wxDragonfly(x0 + (x1 - x0) * e, y0 + (y1 - y0) * e + Math.sin(now / 90 + i), L.bg === WXB.AUTUMN ? '#dc3224' : '#3c96e6', now);
+      }
+    if (L.day && fair && (L.bg === WXB.SUMMER || L.bg === WXB.SPRING))
+      for (let i = 0; i < 2; i++) {
+        const x = 40 + i * 120 + Math.sin(now / 1700 + i * 2) * 40 + Math.sin(now / 430 + i) * 6 | 0, y = 214 + Math.sin(now / 900 + i * 3) * 14 | 0, col = i ? '#ffec78' : '#fff', open = ((now / 110 | 0) + i) % 2;
+        P(x, y, '#3c3228');
+        if (open) { P(x - 1, y - 1, col); P(x - 2, y - 1, col); P(x - 1, y, col); P(x + 1, y - 1, col); P(x + 2, y - 1, col); P(x + 1, y, col); } else { P(x - 1, y - 1, col); P(x + 1, y - 1, col); }
+      }
+    if (L.day && fair && L.bg === WXB.SUMMER) for (let i = 0; i < 10; i++) PM(wxH(i, 4) % W + Math.sin(now / 1200 + i) * 8, 250 - ((now / 40 | 0) + (wxH(i, 5) & 1023)) % 160, '#fffad2', 150);
+    if (L.bg === WXB.WINTER && L.day && !L.wet)
+      for (let i = 0; i < 10; i++) { const s = (now / 160 | 0) + i * 13; if (wxH(s, i) % 3) continue; const x = wxH(s, 7) % W, y = 190 + wxH(s, 8) % 60; P(x, y, '#fff'); for (const [dx, dy] of [[-1, 0], [1, 0], [0, -1], [0, 1]]) PM(x + dx, y + dy, '#fff', 140); }
+    if (!L.day && !L.wet && !L.snow && L.band >= 2)
+      for (let i = 0; i < 12; i++) {
+        const x = 10 + wxH(i, 6) % 220 + Math.sin(now / 1500 + i * 1.7) * 14, y = 150 + wxH(i, 7) % 90 + Math.sin(now / 1100 + i) * 10, p = .5 + .5 * Math.sin(now / 380 + i * 2.1);
+        if (p < .15) continue; glow(x, y, 4, '#c8ff6e', p * 150); P(x, y, '#f0ffaa');
+      }
+  }
+  function wxFront(L, now) {
+    const cd = L.cond, wind = L.wind;
+    if (L.wet) {
+      const n = cd === 4 ? 26 : cd === 7 ? 70 : 54, len = cd === 4 ? 4 : 7, slant = Math.min(wind / 8 | 0, 4), col = L.flash ? '#fff' : L.day ? '#bed6ff' : '#788cbe';
+      for (let i = 0; i < n; i++) {
+        const v = 7 + wxH(i, 11) % 5, ground = 200 + wxH(i, 12) % 52, y = ((now / 33 | 0) * v + (wxH(i, 13) & 1023)) % (ground + 30) - 30, x = wxH(i, 14) % (W + 40) - 20 + (y * slant / 12 | 0);
+        if (y < ground - len) for (let k = 0; k < len; k++) PM(x - (k * slant / 6 | 0), y - k, col, 210 - k * 18);
+        else { const dd = y - (ground - len); if (dd < 6) { PM(x - dd, ground - (dd >> 1), col, 200); PM(x + dd, ground - (dd >> 1), col, 200); PM(x, ground, col, 140); } }
       }
     }
-    if (day && cond <= 2 && !wet) {
-      c.strokeStyle = '#28283c'; c.lineWidth = 1;
-      for (let i = 0; i < 3; i++) { const x = ((now / 36 + i * 97) % 320) - 40, y = 104 + i * 12 + Math.sin(now / 500 + i) * 4, f = (now / 160 + i | 0) % 2 ? 3 : -2; c.beginPath(); c.moveTo(x - 4, y - f); c.lineTo(x, y); c.lineTo(x + 4, y - f); c.stroke(); }
-      const pl = now % 40000; if (pl < 9000 && cond <= 1) { const x = 260 - pl / 30, y = 118; c.strokeStyle = 'rgba(255,255,255,.6)'; c.beginPath(); c.moveTo(x + 10, y + 1); c.lineTo(x + 50, y + 1); c.stroke(); R(x, y - 1, 11, 3, '#fff'); R(x + 5, y - 4, 2, 4, '#fff'); }
+    if (L.snow)
+      for (let i = 0; i < 70; i++) {
+        const sz = wxH(i, 21) % 2 === 0 ? 2 : 1, v = 2 + wxH(i, 22) % 3 + sz, y = ((now / 25 | 0) * v / 4 + (wxH(i, 23) & 1023)) % 300 - 10 | 0, x = wxH(i, 24) % 260 - 10 + Math.sin(now / 700 + i) * 4 + y * wind / 300 | 0;
+        R(x, y, sz, sz, '#fff'); if (sz === 2) PM(x - 1, y, '#fff', 90);
+      }
+    if (!L.wet && !L.snow && L.bg === WXB.SPRING) {
+      const PET = ['#ffb7c5', '#ffd8e2', '#ec8ca8'];
+      for (let i = 0; i < 18; i++) {
+        const v = 3 + wxH(i, 31) % 3, y = ((now / 40 | 0) * v / 3 + (wxH(i, 32) & 1023)) % 310 - 20 | 0, x = ((wxH(i, 33) & 1023) + (now / 60 | 0) * (1 + (wind / 6 | 0))) % 280 - 20 + Math.sin(now / 500 + i) * 5 | 0;
+        const col = PET[i % 3], ph = ((now / 160 | 0) + i) % 3;
+        P(x, y, col); if (ph === 0) P(x + 1, y, col); else if (ph === 1) P(x, y + 1, col); else { P(x + 1, y, col); P(x, y + 1, col); }
+      }
     }
-    if (cond !== 0 && cond !== 3) {
-      const cc = flash ? '#fff' : wet || cond === 2 ? (day ? '#aab0c4' : '#464a64') : (day ? '#fff' : '#5a6082');
-      for (let i = 0; i < 3; i++) { if (cond === 1 && i === 1) continue; const x = ((now / (60 + i * 25) + i * 90) % 300) - 40, y = 30 + i * 26 + (i === 1 ? 40 : 0); circle(x, y, 14, cc, true); circle(x + 16, y - 7, 18, cc, true); circle(x + 34, y, 13, cc, true); c.fillStyle = cc; c.beginPath(); c.roundRect(x - 10, y, 56, 13, 6); c.fill(); }
+    if (!L.wet && !L.snow && L.bg === WXB.AUTUMN) {
+      const LEAF = ['#de3e28', '#f27a2a', '#fab036'];
+      for (let i = 0; i < 10; i++) {
+        const v = 2 + wxH(i, 41) % 3, y = ((now / 37 | 0) * v / 3 + (wxH(i, 42) & 1023)) % 310 - 20 | 0, x = ((wxH(i, 43) & 1023) + (now / 70 | 0) * (1 + (wind / 5 | 0))) % 280 - 20 + Math.sin(now / 650 + i) * 9 | 0;
+        const col = LEAF[i % 3], dk = mixc(col, '#000000', .27);
+        if (((now / 220 | 0) + i) % 2) { P(x, y - 1, col); P(x - 1, y, col); P(x, y, col); P(x + 1, y, col); P(x, y + 1, dk); }
+        else { P(x - 1, y - 1, col); P(x + 1, y - 1, col); P(x, y, col); P(x - 1, y + 1, col); P(x + 1, y + 1, dk); }
+      }
     }
-    if (flash) { c.strokeStyle = '#ffec78'; c.lineWidth = 3; c.beginPath(); let x = 170, y = 50; c.moveTo(x, y); for (let k = 0; k < 6; k++) { x += k % 2 ? -10 : 8; y += 16; c.lineTo(x, y); } c.stroke(); }
-    // hills
-    const hFar = mixc(bot, snow ? '#ffffff' : day ? '#5a966e' : '#142832', .43), hNear = mixc(bot, snow ? '#e6ecf6' : day ? '#50a05a' : '#102c22', .67);
-    c.fillStyle = hFar; c.beginPath(); c.moveTo(0, 236); for (let x = 0; x <= W; x += 3) c.lineTo(x, 196 + 10 * Math.sin(x * 0.025 + 0.5) + 6 * Math.sin(x * 0.06)); c.lineTo(W, 236); c.fill();
-    c.fillStyle = hNear; c.beginPath(); c.moveTo(0, 236); for (let x = 0; x <= W; x += 3) c.lineTo(x, 214 + 8 * Math.sin(x * 0.035 + 2)); c.lineTo(W, 236); c.fill();
-    const g1 = snow ? '#ecf2fa' : wet ? '#345c40' : day ? '#6cbe5c' : '#1a3c28', g2 = snow ? '#c8d6e8' : wet ? '#244230' : day ? '#469646' : '#10281c';
-    c.fillStyle = g1; c.beginPath(); c.moveTo(0, H); for (let x = 0; x <= W; x += 4) c.lineTo(x, 232 + 3 * Math.sin(x * 0.05 + 1)); c.lineTo(W, H); c.fill(); R(0, 252, W, H - 252, g2);
-    // the tree
-    const sway = Math.sin(now / 900) * (1.5 + wind / 12), leaf = snow ? '#ecf2fa' : !day ? '#1e4632' : cond === 0 && cband <= 1 ? '#dc823c' : '#46a050';
-    R(30, 182, 10, 54, OL); R(32, 182, 6, 54, '#6e4a32');
-    [[-12, 6], [10, 4], [-1, -12]].forEach(([dx, dy]) => circle(35 + dx + sway, 176 + dy, 17, OL, true));
-    [[-12, 6], [10, 4], [-1, -12]].forEach(([dx, dy]) => circle(35 + dx + sway, 176 + dy, 15, leaf, true));
-    if (!snow && day) for (let k = 0; k < 4; k++) circle(30 + k * 6 + sway, 168 + (k % 2) * 10, 2, '#fa788c', true);
-    if (!snow) [64, 86, 168, 184, 212, 98, 226].forEach((fx, i) => { const x = fx + Math.sin(now / 700 + i) * (1 + wind / 15), y = 240 + (i % 3) * 4; c.strokeStyle = '#286e32'; c.lineWidth = 1; c.beginPath(); c.moveTo(fx, y + 6); c.lineTo(x, y); c.stroke(); const fc = ['#fa78a0', '#ffdc5a', '#fff', '#968cfa'][i % 4]; [[2, 2], [-2, 2], [2, -2], [-2, -2]].forEach(([a, b]) => circle(x + a, y + b, 1.2, day ? fc : mixc(fc, '#000000', .55), true)); R(x, y, 1, 1, '#ffc83c'); });
-    if (day && cband >= 3 && cond <= 1) for (let i = 0; i < 2; i++) { const x = 80 + i * 90 + Math.sin(now / 1100 + i * 2) * 26, y = 216 + Math.sin(now / 300 + i) * 6, f = (now / 90 + i | 0) % 2 ? 3 : 1; R(x - f, y - 2, f, 4, '#faa03c'); R(x + 1, y - 2, f, 4, '#faa03c'); }
-    if (!day && cband >= 2 && !wet && !snow) for (let i = 0; i < 6; i++) { const x = 20 + i * 38 + Math.sin(now / 1500 + i * 1.7) * 14, y = 200 + Math.sin(now / 1100 + i) * 18; circle(x, y, 2.2, `rgba(220,255,120,${0.5 + 0.5 * Math.sin(now / 300 + i * 2)})`, true); }
-    if (wet) { c.fillStyle = '#4678aa'; c.beginPath(); c.ellipse(70, 246, 22, 4, 0, 0, 7); c.ellipse(196, 250, 16, 3, 0, 0, 7); c.fill(); c.strokeStyle = 'rgba(170,210,255,.7)'; for (let k = 0; k < 2; k++) { const r = (now / 60 + k * 9) % 18; c.beginPath(); c.ellipse(70, 246, Math.max(.1, r), Math.max(.1, r / 5), 0, 0, 7); c.stroke(); } }
-    if (snow) { const sx = 206; circle(sx, 228, 13, OL, true); circle(sx, 228, 11, '#fff', true); circle(sx, 208, 9, OL, true); circle(sx, 208, 7, '#fff', true); R(sx - 2, 205, 2, 2, OL); R(sx + 2, 205, 2, 2, OL); c.fillStyle = '#fa8c28'; c.beginPath(); c.moveTo(sx, 208); c.lineTo(sx, 211); c.lineTo(sx + 7, 209); c.fill(); R(sx - 8, 214, 16, 3, '#e6465a'); R(sx - 6, 196, 12, 4, OL); R(sx - 4, 190, 8, 7, OL); }
-    if (wet || snow) wxb.drops.slice(0, cond === 4 ? 16 : 36).forEach((p, i) => {
-      p.y += snow ? (p.v >> 2) + 1 : p.v; if (snow) p.x += Math.sin((now + i * 400) / 700) * 1.2; if (p.y > 240) { p.y = -Math.random() * 40; p.x = Math.random() * 240; }
-      if (snow) R(p.x, p.y, 3, 3, '#fff'); else { c.strokeStyle = '#aac8ff'; c.lineWidth = 1; c.beginPath(); c.moveTo(p.x, p.y); c.lineTo(p.x - 2, p.y + 7); c.stroke(); }
-    });
-    if (wind >= 20 && !snow) for (let i = 0; i < 4; i++) { const x = ((now / (14 - i) + i * 70) % 300) - 30, y = 150 + i * 18 + Math.sin(now / 260 + i) * 8; c.fillStyle = i % 2 ? '#dc8c3c' : '#78aa46'; c.beginPath(); c.ellipse(x, y, 3, 2, 0, 0, 7); c.fill(); }
-    if (cond === 3) for (let b = 0; b < 4; b++) R(0, 70 + b * 44 + Math.sin(now / 1500 + b) * 6, W, 16, 'rgba(255,255,255,.43)');
-    // readout
+    if (L.have && cd === 3)
+      for (let b = 0; b < 4; b++) { const y0 = 96 + b * 44 + Math.sin(now / 1500 + b) * 6, g = c.createLinearGradient(0, y0, 0, y0 + 18); g.addColorStop(0, 'rgba(230,232,236,0)'); g.addColorStop(.5, 'rgba(230,232,236,.35)'); g.addColorStop(1, 'rgba(230,232,236,0)'); c.fillStyle = g; c.fillRect(0, y0, W, 18); }
+    if (wind >= 20 && !L.snow)
+      for (let i = 0; i < 4; i++) { const len = 14 + wxH(i, 51) % 12, y = 110 + wxH(i, 52) % 130, x = ((now / 40 | 0) * (8 + i) + (wxH(i, 53) & 1023)) % 360 - 60; for (let k = 0; k < len; k++) PM(x + k, y + (k > len - 4 ? -((k - len + 4) >> 1) : 0), '#fff', 120 - k * 4); }
+  }
+  function wxKid(L, now) {
+    const A = window.WXART, K = A.kid;
+    const f = L.wet ? 5 : L.snow ? 6 : !L.day && L.band >= 2 ? 7 : 4 - L.band;
+    const scared = L.have && L.cond === 7, cold = f === 4 || f === 6, cx = WX_KX, gy = WX_GY;
+    const ht = now - wxb.hop; let hop = ht < 420 ? Math.sin(ht / 420 * Math.PI) * 18 | 0 : 0;
+    let squash = ht >= 420 && ht < 560 ? 4 - ((ht - 420) / 35 | 0) : 0;
+    if (!hop && !squash) squash = Math.sin(now / 560) > .6 ? 1 : 0;
+    const lean = scared ? Math.sin(now / 45) * 1.5 : Math.max(-4, Math.min(4, tiltX * 4)) + Math.sin(now / 1400) * 1.5;
+    const shiver = (cold || scared) && (now / 70 | 0) % 2 ? 1 : 0;
+    if (now > wxb.turn + 5200 && Math.random() < 1 / 160) wxb.turn = now;
+    const flip = now - wxb.turn < 1600 || (now < wxb.spin && (now / 110 | 0) % 2);
+    if (now < wxb.spin) hop = Math.max(hop, Math.abs(Math.sin(now / 110)) * 6 | 0);
+    c.fillStyle = 'rgba(20,16,30,.43)'; c.beginPath(); c.ellipse(cx, gy, 17 - hop / 3, 2.5, 0, 0, 7); c.fill();
+    const top = gy - hop - K.h + squash, lx = flip ? K.w - 1 - K.lantern[0] : K.lantern[0];
+    if (f === 7) glow(cx - (K.w >> 1) + lx, top + K.lantern[1], 16, '#ffb45a', 110 + Math.sin(now / 140) * 20);
+    const strip = wxArt('kid', K.src, L.day ? 0 : WXG.DUSK);
+    if (strip) {
+      const h = K.h - squash, x0 = cx - (K.w >> 1) + shiver, y0 = gy - hop - h, sm = c.imageSmoothingEnabled;
+      c.imageSmoothingEnabled = false;
+      c.save(); if (flip) { c.translate(2 * x0 + K.w, 0); c.scale(-1, 1); }
+      for (let dy = 0; dy < h; dy++) { const sh = Math.round(lean * (h - dy) / h) * (flip ? -1 : 1); c.drawImage(strip, f * K.w, dy * K.h / h | 0, K.w, 1, x0 + sh, y0 + dy, K.w, 1); }
+      c.restore(); c.imageSmoothingEnabled = sm;
+    }
+    if (f === 7) glow(cx - (K.w >> 1) + lx, top + K.lantern[1], 4, '#ffe6a0', 120);
+    if (cold) for (let i = 0; i < 3; i++) { const pz = (now / 1400 + i * .33) % 1; glow(cx + (flip ? -8 : 8) + (flip ? -1 : 1) * pz * 16, top + 28 - pz * 10, 1 + pz * 4, '#fff', 200 * (1 - pz)); }
+    if (f === 0 && L.day) { const k = (now / 900 | 0) % 2 ? 1 : -1, sy = (now / 90 | 0) % 10; P(cx + k * 17, top + 14 + sy, '#96d2ff'); P(cx + k * 17, top + 15 + sy, '#6eb4ff'); }
+    if (scared && (now / 400 | 0) % 2) G('!', cx + 22, top - 4, 2, '#ffdc50');
+    if (now - wxb.heart < 1500) { const pz = (now - wxb.heart) / 1500; for (const k of [-1, 1]) { const hx = cx + k * (18 + pz * 8), hy = top + 8 - pz * 24; circle(hx - 2, hy, 2, '#ff6e96', true); circle(hx + 2, hy, 2, '#ff6e96', true); c.fillStyle = '#ff6e96'; c.beginPath(); c.moveTo(hx - 4, hy + 1); c.lineTo(hx + 4, hy + 1); c.lineTo(hx, hy + 5); c.fill(); } }
+  }
+  function weather() {
+    const d = window.wxData && window.wxData(), now = performance.now(), A = window.WXART;
+    if (!A) { R(0, 0, W, H, '#000'); return; }
+    const L = wxLook(d, now);
+    wxSky(L, now);
+    const bg = wxArt('bg' + L.bg, A.bg[L.bg].src, L.grade);
+    if (bg) c.drawImage(bg, 0, A.bg[L.bg].y0);
+    wxBack(L, now);
     dim(10, 11, 140, d ? 87 : 44, .25);
     if (d) {
       const sh = '#0a0e1e'; G(d.place.slice(0, 20), 17, 17, 1, sh); G(d.place.slice(0, 20), 16, 16, 1, '#fff');
       const t = String(d.t); G(t, 18, 30, 4, sh); G(t, 16, 28, 4, '#fff');
       c.strokeStyle = '#fff'; c.lineWidth = 1.5; c.beginPath(); c.arc(16 + t.length * 24 + 5, 33, 2.5, 0, 7); c.stroke(); G(d.fahr ? 'F' : 'C', 16 + t.length * 24 + 11, 30, 2, '#fff');
-      G(WXN[cond], 16, 62, 1, '#fff'); G(`H ${d.hi}  L ${d.lo}  feels ${d.feels}`, 16, 74, 1, '#fff'); G(`hum ${d.hum}%  wind ${d.wind}km/h`, 16, 86, 1, '#fff');
+      G(WXN[d.cond], 16, 62, 1, '#fff'); G(`H ${d.hi}  L ${d.lo}  feels ${d.feels}`, 16, 74, 1, '#fff'); G(`hum ${d.hum}%  wind ${d.wind}km/h`, 16, 86, 1, '#fff');
     } else { G('no weather yet', 16, 18, 1, '#fff'); G('pick a place in the', 16, 32, 1, '#fff'); G('app: weather tab', 16, 44, 1, '#fff'); }
-    // Biscuit (pup.js holds the same sprite pixels as the firmware's pup_sprite.h)
-    const f = wet ? 5 : snow ? 6 : !day && band >= 2 ? 7 : 4 - band;
-    const scared = cond === 7, sleepy = f === 7, cold = f === 4 || f === 6, cx = 132, gy = 238;
-    const ht = now - wxb.hop, hop = ht < 420 ? Math.sin(ht / 420 * Math.PI) * 18 | 0 : 0;
-    let squash = ht >= 420 && ht < 560 ? 4 - ((ht - 420) / 35 | 0) : 0;
-    if (!hop && !squash) squash = Math.sin(now / (sleepy ? 900 : 520)) > 0.6 ? 1 : 0;
-    const lean = scared ? Math.sin(now / 45) * 1.5 : Math.max(-4, Math.min(4, tiltX * 4)) + Math.sin(now / 1400) * 1.5;
-    const shiver = (cold || scared) && (now / 70 | 0) % 2 ? 1 : 0;
-    if (!sleepy && now > wxb.turn + 5200 && Math.random() < 1 / 160) wxb.turn = now;
-    const flip = now - wxb.turn < 1600;
-    c.fillStyle = 'rgba(34,24,40,.47)'; c.beginPath(); c.ellipse(cx, gy, 24 - hop / 2, 3.5, 0, 0, 7); c.fill();
-    const spr = pupFrames();
-    if (spr) {
-      const src = spr[f][flip ? 1 : 0], P = window.PUP, h = P.h - squash, x0 = cx - (P.w >> 1) + shiver, y0 = gy - hop - h;
-      const sm = c.imageSmoothingEnabled; c.imageSmoothingEnabled = false;
-      for (let dy = 0; dy < h; dy++) c.drawImage(src, 0, dy * P.h / h | 0, P.w, 1, x0 + Math.round(lean * (h - dy) / h), y0 + dy, P.w, 1);
-      c.imageSmoothingEnabled = sm;
-    }
-    const ptop = gy - hop - 70 + squash;
-    if (sleepy) for (let i = 0; i < 2; i++) { const pz = (now / 1600 + i * 0.5) % 1; G(i ? 'z' : 'Z', cx + 24 + pz * 10 | 0, ptop + 4 - pz * 24 | 0, 1 + i, '#fff'); }
-    if (cold) for (let i = 0; i < 3; i++) { const pz = (now / 1400 + i * 0.33) % 1; circle(cx - 12 - pz * 20, ptop + 40 - pz * 12, 1 + pz * 4, `rgba(255,255,255,${1 - pz})`, true); }
-    if (f === 0 && day) for (const k of [-1, 1]) circle(cx + k * 22, ptop + 14 + ((now / 120 | 0) + (k > 0 ? 4 : 0)) % 9, 1, '#8cc8ff', true);
-    if (scared && (now / 400 | 0) % 2) G('!', cx + 26, ptop - 2, 2, '#ffdc50');
-    if (now - wxb.heart < 1500) { const pz = (now - wxb.heart) / 1500; for (const k of [-1, 1]) { const hx = cx + k * (18 + pz * 8), hy = ptop + 10 - pz * 26; c.fillStyle = '#ff6e96'; circle(hx - 2, hy, 2, '#ff6e96', true); circle(hx + 2, hy, 2, '#ff6e96', true); c.beginPath(); c.moveTo(hx - 4, hy + 1); c.lineTo(hx + 4, hy + 1); c.lineTo(hx, hy + 5); c.fill(); } }
-    // the next few hours
+    wxKid(L, now);
+    wxFront(L, now);
     if (d && d.hours.length) {
-      dim(18, 254, 204, 24, .5);
+      dim(18, 254, 204, 24, .45);
       d.hours.forEach((h, i) => { const x = 30 + i * 51; G(String(h.h).padStart(2, '0'), x - 4, 258, 1, '#fff'); wxIcon(h.cond, x + 18, 263, 12, h.h >= 6 && h.h < 19); G(String(h.t), x - 4, 268, 1, '#ffdc78'); });
     }
-    if (now < wxb.sayUntil) { const w = wxb.say.length * 6 + 14, x = Math.max(10, Math.min(230 - w, 132 - w / 2)), y = 136; c.fillStyle = '#fff'; c.beginPath(); c.roundRect(x, y, w, 18, 6); c.fill(); c.strokeStyle = OL; c.lineWidth = 1; c.stroke(); G(wxb.say, x + 7, y + 5, 1, OL); }
+    if (now < wxb.sayUntil) {
+      const w = wxb.say.length * 6 + 14, x = Math.max(10, Math.min(230 - w, WX_KX - w / 2)), y = 158;
+      c.fillStyle = '#fff'; c.beginPath(); c.roundRect(x, y, w, 18, 6); c.fill(); c.strokeStyle = OL; c.lineWidth = 1; c.stroke();
+      c.beginPath(); c.moveTo(x + w / 2 - 4, y + 17); c.lineTo(x + w / 2 + 4, y + 17); c.lineTo(x + w / 2, y + 23); c.fill();
+      G(wxb.say, x + 7, y + 5, 1, OL);
+    }
   }
   window.wxPreviewTap = () => {
-    const d = window.wxData && window.wxData(), cC = d ? (d.fahr ? (d.t - 32) * 5 / 9 : d.t) : 18, band = cC >= 28 ? 4 : cC >= 20 ? 3 : cC >= 12 ? 2 : cC >= 4 ? 1 : 0;
-    wxb.say = !d ? 'arf? where am i?' : d.cond === 7 ? 'awoo! thunder!' : d.cond === 5 || d.cond === 4 ? 'arf! puddles!' : d.cond === 6 ? 'arf! snow day!!' : d.cond === 3 ? "arf? can't see" : !d.isDay ? '*yawn* night...' : band === 4 ? 'arf! so hot...' : ['arf! brrrr!', 'arf! coat weather', 'arf! hoodie time', 'arf! walkies?'][band];
+    const d = window.wxData && window.wxData(), L = wxLook(d, performance.now());
+    wxb.say = !d ? 'eh? where am i?' : d.cond === 7 ? 'kaminari!! eek' : L.wet ? 'ame da~ puddles!' : L.snow ? 'yuki da!! snowball!' : d.cond === 3 ? "kiri... can't see" : !L.day ? (L.band >= 2 ? 'hotaru! fireflies' : 'oyasumi~') : ['samui! brrr', 'momiji season!', 'hanami time!', 'bug hunting!', 'atsui~ so hot'][L.band];
     wxb.sayUntil = performance.now() + 2200; wxb.hop = wxb.heart = performance.now();
   };
   const scenes = { 0: clock, 1: text, 2: photo, 3: sing, 4: music, 5: pet, 6: toy, 7: card, 8: deck, 9: eyes, 10: jukeDeck, 11: torch, 12: chargeDeck, 13: tty, 14: claude, 15: weather };
