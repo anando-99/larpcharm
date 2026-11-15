@@ -20,6 +20,7 @@
     trx = Math.max(-1, Math.min(1, (e.clientY - (r.top + r.height / 2)) / 420));
   }, { passive: true });
   addEventListener('deviceorientation', e => { if (e.gamma != null && !calm) { tryy = Math.max(-1, Math.min(1, e.gamma / 40)); trx = Math.max(-1, Math.min(1, (e.beta - 45) / 40)); } });
+  ['pointerdown', 'keydown', 'input'].forEach(ev => addEventListener(ev, () => window.Cotton && window.Cotton.poke(), true));   // using the page counts as a touch
   window.kickCharm = (n = 3) => { if (!calm) glitch = Math.max(glitch, Math.round(n)); };
 
   // ── drawing helpers, named after the firmware's ──
@@ -273,12 +274,13 @@
   }
   function ticker() { const s = song(); if (!ui.playing || !s.title) return; dim(44, 260, 152, 13, .75); T('♪', 48, 263, 1, ACC); T(marquee(s.title + (s.artist ? ' - ' + s.artist : ''), 22, 7), 58, 263, 1, '#fff'); }
   // ── the Aero look (mirrors firmware 5.0) ──
-  const AERO_ACC = ['#0084FF', '#00A8D6', '#E840A8'], INK = '#08264e';
+  const AERO_ACC = ['#0084FF', '#00A8D6', '#E840A8', '#F06EAA'], INK = '#08264e';
   const NUN = '"Nunito", "Trebuchet MS", sans-serif';
-  const ATITLE = { 0: 'Clock', 1: 'Message', 2: 'Photo', 3: 'Sing-along', 4: 'Music', 5: 'Pet', 6: 'Dice', 7: 'ID card', 8: 'Larp Charm', 9: 'Eyes', 10: 'Jukebox', 11: 'Torch', 12: 'Power' };
+  const ATITLE = { 0: 'Clock', 1: 'Message', 2: 'Photo', 3: 'Sing-along', 4: 'Music', 5: 'Pet', 6: 'Dice', 7: 'ID card', 8: 'Larp Charm', 9: 'Eyes', 10: 'Jukebox', 11: 'Torch', 12: 'Power', 13: 'About me' };
   const bgCache = {};
   function lg(x, y0, y1, stops) { const g = x.createLinearGradient(0, y0, 0, y1); stops.forEach(([p, col]) => g.addColorStop(p, col)); return g; }
   function aeroBg(v) {
+    if (v === 3) return window.Cotton.sky();
     if (bgCache[v]) return bgCache[v];
     const o = document.createElement('canvas'); o.width = W; o.height = H; const x = o.getContext('2d');
     const ribbon = (yc, amp, f, ph, w, a) => { x.save(); x.strokeStyle = `rgba(255,255,255,${a})`; x.lineWidth = w; x.shadowColor = '#fff'; x.shadowBlur = 14; x.beginPath();
@@ -312,10 +314,11 @@
     c.strokeStyle = 'rgba(255,255,255,.6)'; c.lineWidth = 1; c.stroke();
     c.fillStyle = 'rgba(255,255,255,.85)'; c.beginPath(); c.ellipse(x - r * 0.38, y - r * 0.42, r * 0.3, r * 0.2, -0.5, 0, 7); c.fill();
   }
+  const pal = () => ui.skin === 4 ? 3 : ui.aero;
   function aeroBackdrop() {
-    c.drawImage(aeroBg(ui.aero), 0, 0);
-    const n = ui.aero === 1 ? 12 : 7;
-    for (let i = 0; i < n; i++) { const b = bubs[i]; b.y -= b.v * (ui.aero === 1 ? 1.4 : 1); b.x += Math.sin(frame * 0.03 + b.ph) * 0.35 + tiltX * 0.3; if (b.y < -b.r - 4) { b.y = H + b.r + Math.random() * 60; b.x = 10 + Math.random() * 220; } bubble(b.x, b.y, b.r); }
+    c.drawImage(aeroBg(pal()), 0, 0);
+    const n = pal() === 1 ? 12 : 7;
+    for (let i = 0; i < n; i++) { const b = bubs[i]; b.y -= b.v * (pal() === 1 ? 1.4 : 1); b.x += Math.sin(frame * 0.03 + b.ph) * 0.35 + tiltX * 0.3; if (b.y < -b.r - 4) { b.y = H + b.r + Math.random() * 60; b.x = 10 + Math.random() * 220; } bubble(b.x, b.y, b.r); }
   }
   const shade = (h, k) => { const [r, g, b] = rgb(h); return k > 0 ? `rgb(${r + (255 - r) * k | 0},${g + (255 - g) * k | 0},${b + (255 - b) * k | 0})` : `rgb(${r * (1 + k) | 0},${g * (1 + k) | 0},${b * (1 + k) | 0})`; };
   function orb(x, y, r, col, fade = 1) {
@@ -561,6 +564,9 @@
     else qFrame(base + qloc);
   }
   function questScene(m) { if (m === 8) return questHome(); if (QSCREEN[m] != null) return qFrame(QSCREEN[m]); (scenes[m] || deck)(); }
+  // Cotton: the personal look (cotton.js draws it)
+  const cottonHome = () => window.Cotton.home(c, window.ctProfile, { connected: document.body.classList.contains('connected'), bat: ui.bat, charging: ui.charging, frame, glyph });
+  let lastTap = { x: 120, y: 160 };
   const aeroScenes = { 0: aeroClock, 4: aeroMusic, 5: aeroPet, 6: aeroToy, 7: aeroCard, 8: aeroHome, 9: eyes, 10: aeroJuke, 11: torch, 12: aeroCharge };
 
   // ── tap a block to open it, tap again to go back ──
@@ -577,13 +583,25 @@
     const d = drag; drag = null; orbit.drag = false;
     if (!d) return;
     if (!d.moved) return tapAt(e);
-    const dy = e.clientY - d.y0;                       // Ronin: swipe up to climb, down to descend
+    const dy = e.clientY - d.y0, dx = e.clientX - d.x0;
+    if (ui.skin === 4 && shownMode === 8) {             // Cotton: up opens the drawer, sideways changes the weather
+      if (Math.abs(dy) > 24 && Math.abs(dy) > Math.abs(dx)) window.Cotton.swipe(dy < 0 ? 'up' : 'down');
+      else if (Math.abs(dx) > 24) window.ctStep('mood');
+      return;
+    }
+    // Ronin: swipe up to climb, down to descend
     if (ui.skin === 3 && shownMode === 8 && Math.abs(dy) > 24 && Math.abs(dy) > Math.abs(e.clientX - d.x0)) window.roninStep(dy < 0 ? 1 : -1);
   });
   cv.addEventListener('pointercancel', () => { drag = null; orbit.drag = false; });
   function tapAt(e) {
     const r = cv.getBoundingClientRect(), x = (e.clientX - r.left) * W / r.width, y = (e.clientY - r.top) * H / r.height;
     if (ui.mode !== 8) return window.charmGoto(8);
+    if (ui.skin === 4) {
+      const r = window.Cotton.tap(x, y);
+      if (r === 'mood' || r === 'status') window.ctStep(r);
+      else if (typeof r === 'number') { lastTap = { x, y }; window.charmGoto(r); }
+      return;
+    }
     if (ui.skin === 3) {
       if (y < 92) return window.roninStep(1);
       if (y > 196) return window.roninStep(-1);
@@ -608,12 +626,15 @@
     rx += (trx - rx) * 0.08; ry += (tryy - ry) * 0.08; tiltX = ry; tiltY = 0.4 + rx * 0.6;
     if (!calm) rig.style.transform = `rotateX(${(-rx * 9).toFixed(2)}deg) rotateY(${(ry * 13).toFixed(2)}deg)`;
     const s = song(), [r, g, b] = rgb(val('mColor') || '#f472b6'), mx = Math.max(r, g, b);
-    ACC = ui.playing && s.title && mx >= 40 ? `rgb(${r * 255 / mx | 0},${g * 255 / mx | 0},${b * 255 / mx | 0})` : ui.skin === 1 ? AERO_ACC[ui.aero] : ui.skin === 2 ? '#FAD25A' : ui.skin === 3 ? '#E64638' : THEMES[ui.theme] || THEMES[0];
+    ACC = ui.playing && s.title && mx >= 40 ? `rgb(${r * 255 / mx | 0},${g * 255 / mx | 0},${b * 255 / mx | 0})` : ui.skin === 1 ? AERO_ACC[ui.aero] : ui.skin === 2 ? '#FAD25A' : ui.skin === 3 ? '#E64638' : ui.skin === 4 ? AERO_ACC[3] : THEMES[ui.theme] || THEMES[0];
     if (ACC[0] !== '#') ACC = '#' + ACC.match(/\d+/g).map(v => (+v).toString(16).padStart(2, '0')).join('');
 
     if (ui.mode !== shownMode && !zoom) {
       const opening = shownMode === 8, ti = TMODE.indexOf(opening ? ui.mode : shownMode);
-      if (ui.skin >= 2) { const l = QMODE.indexOf(opening ? ui.mode : shownMode); if (!opening && l >= 0) { if (ui.skin === 2) qloc = l; else rloc = l; } shownMode = ui.mode; }
+      if (ui.skin === 4) {
+        if ((opening || ui.mode === 8) && !calm) zoom = { aero: true, cotton: true, x: opening ? lastTap.x : 120, y: opening ? lastTap.y : 150, r: 6, col: '#FFD6E8', s: 0, opening, to: ui.mode };
+        else shownMode = ui.mode;
+      } else if (ui.skin === 2 || ui.skin === 3) { const l = QMODE.indexOf(opening ? ui.mode : shownMode); if (!opening && l >= 0) { if (ui.skin === 2) qloc = l; else rloc = l; } shownMode = ui.mode; }
       else if (ui.skin === 1) {
         const oi = ORB.findIndex(o => o[0] === (opening ? ui.mode : shownMode));
         if (!opening && oi >= 0) orbitFocus(oi, true);
@@ -625,7 +646,8 @@
     c.save(); c.globalAlpha = 1;
     try {
       if (zoom && zoom.aero) {
-        aeroHome(); zoom.s++;
+        if (zoom.cotton) cottonHome(); else aeroHome();
+        zoom.s++;
         let t = zoom.s / 7; t = 1 - (1 - t) * (1 - t); if (!zoom.opening) t = 1 - t;
         const rr = zoom.r + (200 - zoom.r) * t, x = zoom.x + (120 - zoom.x) * t, y = zoom.y + (140 - zoom.y) * t;
         c.fillStyle = zoom.col; c.beginPath(); c.arc(x, y, rr, 0, 7); c.fill(); c.strokeStyle = '#fff'; c.lineWidth = 2; c.stroke();
@@ -637,7 +659,12 @@
         R(x, y, w, h, '#000'); c.strokeStyle = ACC; c.lineWidth = 2; c.strokeRect(x + 1, y + 1, w - 2, h - 2);
         if (zoom.s >= 7) { shownMode = zoom.to; zoom = null; glitch = Math.max(glitch, 3); }
       } else {
-        if (ui.skin === 3) roninScene(shownMode);
+        if (shownMode === 13) window.Cotton.bio(c, window.ctProfile);
+        else if (ui.skin === 4) {
+          if (shownMode === 8) cottonHome();
+          else { const f = aeroScenes[shownMode]; if (f) f(); else if (shownMode === 3) sing(); else { (scenes[shownMode] || deck)(); aeroTop(true); } }
+        }
+        else if (ui.skin === 3) roninScene(shownMode);
         else if (ui.skin === 2) questScene(shownMode);
         else if (ui.skin === 1) {
           const f = aeroScenes[shownMode];

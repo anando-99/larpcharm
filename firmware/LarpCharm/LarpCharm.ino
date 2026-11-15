@@ -1,9 +1,11 @@
 /*
-  LARP CHARM firmware v6.1
+  LARP CHARM firmware v7.0
   Board : Waveshare ESP32-S3-Touch-LCD-1.69 (240x280 ST7789V2, CST816T touch)
   Control: Bluetooth LE from the Larp Charm web app
 
-  Four looks, switch by holding a finger on the home screen (or from the app):
+  Five looks, switch by holding a finger on the home screen (or from the app):
+    COTTON the default, personal look: a pastel sky, a little avatar of you, your mood as the weather
+           in a window, a status badge and a bio page; you doze off when left alone
     DECK   the cyberdeck: one fused screen, tap a block to open it
     AERO   glossy Frutiger Aero / Y2K: an orbit of orbs; drag sideways or tilt the charm to spin it,
            tap the front orb to open it
@@ -11,7 +13,7 @@
     RONIN  a samurai climbs a mountain stairway at night; swipe up or down between landings
   Swipe down (or the side button) closes whatever is open.
 
-  Blocks: clock, music, eyes, jukebox, pet, dice, message, photo, ID card, torch,
+  Blocks: bio, clock, music, eyes, jukebox, pet, dice, message, photo, ID card, torch,
           and a charging screen that appears when you plug it in.
 
   Touch:
@@ -83,7 +85,7 @@ struct OrbSprite { uint16_t *px; uint8_t *a; };
 #define SVC_UUID    "6e400001-c4a7-4d2e-9b3c-c4a2d7c0ffee"
 #define RX_UUID     "6e400002-c4a7-4d2e-9b3c-c4a2d7c0ffee"
 #define STATUS_UUID "6e400003-c4a7-4d2e-9b3c-c4a2d7c0ffee"
-#define FW_VERSION  "6.1"
+#define FW_VERSION  "7.0"
 #define DEVICE_NAME "Larp Charm"
 
 enum Cmd : uint8_t {
@@ -106,15 +108,17 @@ enum Cmd : uint8_t {
   CMD_TIMER       = 0x13, // [seconds u16]  (0 = cancel)
   CMD_TOY         = 0x14, // [toy 0=8-ball 1=dice 2=coin][roll 0/1]
   CMD_THEME       = 0x15, // [theme 0..5]
-  CMD_SKIN        = 0x16, // [look 0=deck 1=aero 2=quest 3=ronin]([aero style 0..2])
+  CMD_SKIN        = 0x16, // [look 0=deck 1=aero 2=quest 3=ronin 4=cotton]([aero style 0..2])
   CMD_EYES        = 0x17, // [expression 0..11, 255 = automatic]
   CMD_TUNE        = 0x18, // [op 0=stop 1=play now 2=add to queue 3=skip][song ids...]
   CMD_TORCH       = 0x19, // [on 0/1][colour 0..3]
   CMD_SONG_LIST   = 0x1A, // -> "song=id,notes,name" ... "songs=end"
   CMD_SONG_DELETE = 0x1B, // [song id 100..107]
+  CMD_PROFILE     = 0x1C, // [mood][status][tone][hair][hair colour][outfit][accessory][status colour] name 0x1F pronouns 0x1F bio 0x1F likes 0x1F custom status
+  CMD_MOOD        = 0x1D, // [mood][status]
 };
 
-enum Mode : uint8_t { M_CLOCK = 0, M_TEXT, M_PHOTO, M_SING /* was clips */, M_MUSIC, M_PET, M_TOY, M_CARD, M_DECK, M_EYES, M_JUKE, M_TORCH, M_CHARGE, M_COUNT };
+enum Mode : uint8_t { M_CLOCK = 0, M_TEXT, M_PHOTO, M_SING /* was clips */, M_MUSIC, M_PET, M_TOY, M_CARD, M_DECK, M_EYES, M_JUKE, M_TORCH, M_CHARGE, M_BIO, M_COUNT };
 
 // ───────────── Display ─────────────
 Arduino_DataBus *bus   = new Arduino_ESP32SPI(LCD_DC, LCD_CS, LCD_SCK, LCD_MOSI);
@@ -157,7 +161,7 @@ const uint16_t COL_AMBER  = c565(250, 204, 21);
 const uint16_t COL_RED    = c565(239, 68, 68);
 const uint16_t COL_GREY   = c565(90, 90, 110);
 const uint16_t COL_VOID   = c565(3, 5, 12);
-const uint16_t AERO_ACC_C[3] = { c565(0, 132, 255), c565(0, 168, 214), c565(232, 64, 168) };
+const uint16_t AERO_ACC_C[4] = { c565(0, 132, 255), c565(0, 168, 214), c565(232, 64, 168), c565(240, 110, 170) };
 
 // colour themes for the deck (swipe sideways on the deck, or pick one in the app)
 #define THEME_COUNT 6
@@ -172,9 +176,12 @@ uint8_t  mode = M_DECK;
 uint8_t  theme = 0;
 #define SKIN_QUEST 2
 #define SKIN_RONIN 3
-#define SKIN_COUNT 4
-#define PIXEL_SKIN (skin >= SKIN_QUEST)
-uint8_t  skin = 0, aeroVar = 0;                       // look: 0 deck, 1 aero
+#define SKIN_COTTON 4
+#define SKIN_COUNT 5
+#define PIXEL_SKIN (skin == SKIN_QUEST || skin == SKIN_RONIN)
+#define AERO_LIKE  (skin == SKIN_AERO || skin == SKIN_COTTON)     // looks that share the glossy Aero screens
+uint8_t  skin = 0, aeroVar = 0;                       // look: 0 deck, 1 aero, 2 quest, 3 ronin, 4 cotton
+static inline uint8_t aeroPal() { return skin == SKIN_COTTON ? 3 : aeroVar % 3; }   // Cotton paints the Aero screens pastel
 bool     eyesIdle = false, tiltSpin = true, idleEyesOn = false;
 uint8_t  idleReturn = 8;
 uint32_t stepsToday = 0, lastStepAt = 0, stepsSaved = 0;
@@ -370,6 +377,11 @@ void loadPrefs() {
   }
   soundsOn = fl & 1; shakeWake = fl & 2; hourChime = fl & 4; fxOn = fl & 8; eyesIdle = fl & 16; tiltSpin = fl & 32;
   skin       = prefs.getUChar("skin", 0) % SKIN_COUNT;
+  if (prefs.getUChar("uiv", 0) < 7) {          // first start after the 7.0 update: the Cotton look, on its home screen
+    prefs.putUChar("uiv", 7);
+    skin = SKIN_COTTON; mode = M_DECK;
+    prefs.putUChar("skin", skin); prefs.putUChar("mode", mode);
+  }
   aeroVar    = prefs.getUChar("avar", 0) % 3;
   stepsToday = stepsSaved = prefs.getULong("steps", 0);
   stepDay    = prefs.getShort("sday", -1);
@@ -602,7 +614,7 @@ void shadeRows(int y0, int y1, int k0, int k1) {
 
 // The accent colour follows the theme, and takes the album's colour while music plays.
 void accentTarget(uint8_t &r, uint8_t &g, uint8_t &b) {
-  uint16_t t = skin == SKIN_RONIN ? c565(230, 70, 56) : skin == SKIN_QUEST ? c565(250, 210, 90) : skin ? AERO_ACC_C[aeroVar % 3] : THEMES[theme % THEME_COUNT];
+  uint16_t t = skin == SKIN_RONIN ? c565(230, 70, 56) : skin == SKIN_QUEST ? c565(250, 210, 90) : skin ? AERO_ACC_C[aeroPal()] : THEMES[theme % THEME_COUNT];
   r = r8(t); g = g8(t); b = b8(t);
   if (npPlaying && npTitle.length() && millis() > themePreviewUntil) {
     int nr = r8(npColor), ng = g8(npColor), nb = b8(npColor), mx = max(nr, max(ng, nb));
@@ -953,17 +965,31 @@ void drawBubble(float cx, float cy, float r) {
 #define AERO_VARS 3
 const char *AERO_NAMES[AERO_VARS] = {"Meadow", "Ocean", "Bubblegum"};
 const uint16_t AERO_ACC[AERO_VARS] = { c565(0, 132, 255), c565(0, 168, 214), c565(232, 64, 168) };
-const char *AERO_TITLE[M_COUNT] = {"Clock", "Message", "Photo", "Clips", "Music", "Pet", "Dice", "ID card", "Larp Charm", "Eyes", "Jukebox", "Torch", "Power"};
+const char *AERO_TITLE[M_COUNT] = {"Clock", "Message", "Photo", "Clips", "Music", "Pet", "Dice", "ID card", "Larp Charm", "Eyes", "Jukebox", "Torch", "Power", "About me"};
 uint16_t *aeroBg = nullptr;
 int8_t    aeroBuilt = -1;
 
 // The still part of the Aero backdrop is worked out once per style and kept in PSRAM.
 void buildAeroBg() {
-  if (!aeroBg || aeroBuilt == (int8_t)aeroVar) return;
+  uint8_t pal = aeroPal();
+  if (!aeroBg || aeroBuilt == (int8_t)pal) return;
   for (int y = 0; y < SCR_H; y++) {
     for (int x = 0; x < SCR_W; x++) {
       float r, g, b;
-      if (aeroVar == 1) {                                         // ocean
+      if (pal == 3) {                                             // cotton candy sky
+        float t = y / 279.0f;
+        if (t < 0.55f) { float k = t / 0.55f; r = 255 - 22 * k; g = 214 + 4 * k; b = 234 + 21 * k; }
+        else           { float k = (t - 0.55f) / 0.45f; r = 233 - 37 * k; g = 218 + 14 * k; b = 255; }
+        float gx = x - 40.0f, gy = y - 10.0f, glow = expf(-sqrtf(gx * gx + gy * gy) / 80.0f) * 0.32f;
+        r = scr(r, glow); g = scr(g, glow); b = scr(b, glow);
+        float c2 = 238 - 8 * fabsf(sinf(x * 0.06f + 2.1f)) - 5 * fabsf(sinf(x * 0.15f));
+        float a2 = clamp01(y - c2 + 0.5f) * 0.5f;
+        r += (255 - r) * a2; g += (255 - g) * a2; b += (255 - b) * a2;
+        float cf = 256 - 9 * fabsf(sinf(x * 0.045f + 0.3f)) - 6 * fabsf(sinf(x * 0.11f + 1.7f));
+        float ca = clamp01(y - cf + 0.5f);
+        if (ca > 0) { float sh = clamp01((y - cf) / 24); float cr = 255 - 26 * sh, cg = 252 - 22 * sh, cb = 255 - 2 * sh;
+          r += (cr - r) * ca; g += (cg - g) * ca; b += (cb - b) * ca; }
+      } else if (pal == 1) {                                      // ocean
         float t = y / 279.0f;
         if (t < 0.5f) { float k = t / 0.5f; r = 150 - 130 * k; g = 232 - 82 * k; b = 255 - 35 * k; }
         else          { float k = (t - 0.5f) / 0.5f; r = 20 - 18 * k; g = 150 - 98 * k; b = 220 - 100 * k; }
@@ -974,7 +1000,7 @@ void buildAeroBg() {
         float sa = clamp01(y - sand + 0.5f);
         if (sa > 0) { float k = clamp01((y - sand) / 18); float sr = 240 - 40 * k, sg = 222 - 46 * k, sb = 170 - 50 * k;
           r += (sr - r) * sa; g += (sg - g) * sa; b += (sb - b) * sa; }
-      } else if (aeroVar == 2) {                                  // bubblegum Y2K
+      } else if (pal == 2) {                                      // bubblegum Y2K
         float t = y / 279.0f;
         if (t < 0.5f) { float k = t / 0.5f; r = 255 - 50 * k; g = 208 - 46 * k; b = 238 + 17 * k; }
         else          { float k = (t - 0.5f) / 0.5f; r = 205 - 105 * k; g = 162 - 96 * k; b = 255 - 55 * k; }
@@ -1012,7 +1038,7 @@ void buildAeroBg() {
       aeroBg[y * SCR_W + x] = rgbf(r, g, b);
     }
   }
-  aeroBuilt = aeroVar;
+  aeroBuilt = pal;
 }
 
 struct AeroBubble { float x, y, r, v, ph; };
@@ -1027,15 +1053,16 @@ void aeroBackdrop(const uint16_t *base) {
   buildAeroBg();
   if (!base) base = aeroBg;
   if (base && FB) memcpy(FB, base, FB_BYTES); else gfx->fillScreen(c565(80, 170, 240));
-  int n = aeroVar == 1 ? 12 : 7;
+  uint8_t pal = aeroPal();
+  int n = pal == 1 ? 12 : 7;
   for (int i = 0; i < n; i++) {
     AeroBubble &b = abub[i];
-    b.y -= b.v * (aeroVar == 1 ? 1.4f : 1.0f);
+    b.y -= b.v * (pal == 1 ? 1.4f : 1.0f);
     b.x += sinf(frameNo * 0.03f + b.ph) * 0.35f + tiltX * 0.3f;
     if (b.y < -b.r - 4) { b.y = SCR_H + b.r + random(0, 60); b.x = random(10, 230); }
     drawBubble(b.x, b.y, b.r);
   }
-  if (aeroVar == 2)
+  if (pal >= 2)
     for (int i = 0; i < 6; i++) {
       int ph = (frameNo + i * 13) % 50, rr = ph < 25 ? ph / 6 : (50 - ph) / 6;
       static const uint8_t P[6][2] = {{30, 40}, {212, 60}, {64, 200}, {186, 222}, {120, 30}, {20, 140}};
@@ -2023,7 +2050,7 @@ void blitOrb(int i, int cx, int cy, int r, float fade) {
 }
 void buildHomeBase() {
   buildAeroBg();
-  if (!homeBase || !aeroBg || homeBaseVar == (int8_t)aeroVar) return;
+  if (!homeBase || !aeroBg || homeBaseVar == (int8_t)aeroVar || skin != SKIN_AERO) return;
   memcpy(homeBase, aeroBg, FB_BYTES);
   uint16_t *screen = FB;
   FB = homeBase;
@@ -2737,7 +2764,7 @@ void drawJukeAero() {
 }
 
 void drawJukeQuest();
-void drawJuke() { if (PIXEL_SKIN) drawJukeQuest(); else if (skin == SKIN_AERO) drawJukeAero(); else drawJukeDeck(); }
+void drawJuke() { if (PIXEL_SKIN) drawJukeQuest(); else if (AERO_LIKE) drawJukeAero(); else drawJukeDeck(); }
 
 // ═════════════ v5: charging screen ═════════════
 uint8_t chargeReturn = M_DECK;
@@ -2806,7 +2833,7 @@ void drawChargeAero() {
 }
 
 void drawChargeQuest();
-void drawCharge() { if (PIXEL_SKIN) drawChargeQuest(); else if (skin == SKIN_AERO) drawChargeAero(); else drawChargeDeck(); }
+void drawCharge() { if (PIXEL_SKIN) drawChargeQuest(); else if (AERO_LIKE) drawChargeAero(); else drawChargeDeck(); }
 
 // ═════════════ v5: torch ═════════════
 const uint16_t TORCH_COL[4] = { COL_WHITE, c565(255, 206, 150), c565(255, 0, 0), c565(120, 230, 255) };
@@ -2815,7 +2842,7 @@ uint8_t torchCol = 0;
 void drawTorch() {
   gfx->fillScreen(TORCH_COL[torchCol & 3]);
   if (millis() < chromeUntil) {
-    if (skin == SKIN_AERO) aaTextC(F_S, "Tap for another colour", 120, 256, c565(90, 90, 90));
+    if (AERO_LIKE) aaTextC(F_S, "Tap for another colour", 120, 256, c565(90, 90, 90));
     else textCentered("TAP: COLOUR  SWIPE DOWN: OFF", 252, 1, c565(90, 90, 90));
   }
 }
@@ -5504,7 +5531,8 @@ void drawScene() {
     case M_JUKE:  drawJuke();  break;
     case M_TORCH: drawTorch(); break;
     case M_CHARGE: drawCharge(); break;
-    default:      if (skin == SKIN_RONIN) drawRoninHome(); else if (skin == SKIN_QUEST) drawQuestHome(); else if (skin) drawAeroHome(); else drawDeck(); break;
+    case M_BIO:   drawBio(); break;
+    default:      if (skin == SKIN_COTTON) drawCottonHome(); else if (skin == SKIN_RONIN) drawRoninHome(); else if (skin == SKIN_QUEST) drawQuestHome(); else if (skin) drawAeroHome(); else drawDeck(); break;
   }
 }
 
@@ -5579,7 +5607,7 @@ void aeroZoom(int oi, bool opening) {
 }
 
 void openModule(int m) {
-  if (mode == M_DECK) { sfx(1); if (PIXEL_SKIN) questTransitionOut(); else if (skin) aeroZoom(orbOfMode(m), true); else zoomAnim(tileOfMode(m), true); }
+  if (mode == M_DECK) { sfx(1); if (skin == SKIN_COTTON) cottonZoom(true); else if (PIXEL_SKIN) questTransitionOut(); else if (skin) aeroZoom(orbOfMode(m), true); else zoomAnim(tileOfMode(m), true); }
   setMode(m);
   lastFrame = 0;
 }
@@ -5589,6 +5617,14 @@ void closeModule() {
   if (mode == M_CHARGE) { setMode(chargeReturn == M_CHARGE ? M_DECK : chargeReturn); lastFrame = 0; return; }
   int ti = tileOfMode(mode), oi = orbOfMode(mode);
   sfx(1);
+  if (skin == SKIN_COTTON) {
+    setMode(M_DECK);
+    updateAccent();
+    drawScene();
+    cottonZoom(false);
+    lastFrame = 0;
+    return;
+  }
   if (PIXEL_SKIN) {
     int ql = qLocOfMode(mode);
     questTransitionOut();
@@ -5616,6 +5652,788 @@ void idleEyesEnd() {
   lastFrame = 0;
 }
 
+void sendStatus(const char *extra);
+// ═════════════ v7: the Cotton look ═════════════
+// The personal look, and the default: a cotton-candy sky, a little you, your mood in a window and a status badge.
+//   tap you            -> your bio page          tap the window   -> next mood
+//   tap the badge      -> next status            swipe sideways   -> change the weather (mood)
+//   swipe up / handle  -> the drawer with every other screen    shake -> a hop, hearts and a kind word
+// Left alone for a while you doze off under a twilight sky; a touch wakes you with a hop and a hello.
+
+#define CT_MOODS   9
+#define CT_STATS   8
+#define CT_TONES   6
+#define CT_HAIRS   6
+#define CT_HCOLS   8
+#define CT_OUTFITS 6
+#define CT_ACCS    7
+#define CT_DOZE_MS 12000
+const char *CT_MOOD_NAME[CT_MOODS] = {"happy", "excited", "loved", "calm", "sleepy", "meh", "sad", "stressed", "inspired"};
+const char *CT_STAT_NAME[CT_STATS] = {"available", "busy", "studying", "working", "out & about", "gaming", "creating", "resting"};
+const uint16_t CT_STAT_COL[CT_STATS] = { c565(110, 214, 160), c565(255, 112, 146), c565(170, 140, 240), c565(96, 168, 245),
+                                         c565(250, 196, 84), c565(255, 150, 110), c565(240, 120, 200), c565(150, 166, 206) };
+const uint16_t CT_TONE[CT_TONES]     = { c565(255, 226, 208), c565(250, 210, 180), c565(232, 180, 142), c565(198, 142, 102), c565(150, 102, 72), c565(108, 72, 52) };
+const uint16_t CT_HCOL[CT_HCOLS]     = { c565(58, 44, 62), c565(112, 74, 54), c565(156, 92, 58), c565(244, 210, 136),
+                                         c565(232, 128, 78), c565(250, 150, 196), c565(184, 156, 240), c565(126, 186, 250) };
+const uint16_t CT_OUTFIT[CT_OUTFITS] = { c565(255, 168, 204), c565(156, 204, 255), c565(204, 178, 255), c565(164, 230, 202), c565(255, 228, 146), c565(250, 248, 255) };
+const uint16_t CT_INK    = c565(98, 62, 128);
+const uint16_t CT_INK2   = c565(150, 112, 176);
+const uint16_t CT_FACE   = c565(66, 42, 80);
+const uint16_t CT_MOUTH  = c565(176, 72, 104);
+const uint16_t CT_BLUSH  = c565(255, 132, 170);
+const uint16_t CT_PINK   = c565(255, 120, 172);
+const uint16_t CT_PINKL  = c565(255, 214, 232);
+const uint16_t CT_BLUEL  = c565(208, 232, 255);
+const uint16_t CT_BUTTER = c565(255, 214, 112);
+const uint16_t CT_PANE_T[CT_MOODS] = { c565(255, 236, 190), c565(200, 232, 255), c565(255, 200, 224), c565(205, 232, 255), c565(120, 110, 190),
+                                       c565(205, 212, 232), c565(150, 170, 210), c565(110, 105, 150), c565(215, 190, 255) };
+const uint16_t CT_PANE_B[CT_MOODS] = { c565(255, 210, 225), c565(255, 214, 236), c565(255, 170, 205), c565(232, 244, 255), c565(170, 150, 220),
+                                       c565(226, 230, 242), c565(190, 205, 232), c565(150, 140, 185), c565(255, 205, 236) };
+const char *CT_HELLO[4] = {"hi!", "oh, hi!", "hello :)", "you're back!"};
+#define CT_KIND_N 10
+const char *CT_KIND[CT_KIND_N] = {"you got this!", "proud of you", "drink some water :)", "you're doing great", "take a deep breath",
+                                  "you are enough", "stay cozy", "one step at a time", "today is yours", "sending a hug"};
+
+struct CtProfile { uint8_t mood, stat, tone, hair, hcol, outfit, acc, statCol; };     // stat == CT_STATS: the custom one
+CtProfile ct = {0, 0, 1, 0, 1, 0, 1, 0};
+String ctName = "me", ctPron = "", ctBio = "hi! this little charm is me. tap my window to change my mood :)";
+String ctLikes = "matcha,cats,pixel art", ctCustom = "";
+
+bool     ctDozing = false, ctDrawer = false, ctBioDirty = true;
+float    ctDozeT = 0, ctDrawerT = 0;
+uint32_t ctHopAt = 0, ctBlinkUntil = 0, ctNextBlink = 0, ctLookUntil = 0, ctWaveAt = 0, ctNextAct = 0, ctSayUntil = 0, ctHappyUntil = 0;
+int8_t   ctLook = 0;
+int16_t  ctZoomX = 120, ctZoomY = 160;
+String   ctSay;
+struct CtHeart { float x, y, vx, vy, life; };
+#define CT_HEARTS 14
+CtHeart ctHearts[CT_HEARTS];
+struct CtCloud { float x, y, s, v; };
+CtCloud ctClouds[3] = { {40, 86, 0.95f, 0.10f}, {196, 150, 0.62f, 0.07f}, {60, 200, 0.78f, 0.085f} };
+
+void ctLoad() {
+  CtProfile p;
+  if (prefs.getBytes("ctp", &p, sizeof(p)) == sizeof(p)) ct = p;
+  ct.mood %= CT_MOODS; ct.stat %= (CT_STATS + 1); ct.tone %= CT_TONES; ct.hair %= CT_HAIRS;
+  ct.hcol %= CT_HCOLS; ct.outfit %= CT_OUTFITS; ct.acc %= CT_ACCS; ct.statCol %= CT_STATS;
+  ctName = prefs.getString("ctn", ctName); ctPron = prefs.getString("ctpr", ctPron);
+  ctBio = prefs.getString("ctb", ctBio);   ctLikes = prefs.getString("ctl", ctLikes);
+  ctCustom = prefs.getString("ctc", ctCustom);
+  if (ct.stat == CT_STATS && !ctCustom.length()) ct.stat = 0;
+}
+void ctSaveState() { prefs.putBytes("ctp", &ct, sizeof(ct)); }
+void ctSaveAll() {
+  ctSaveState();
+  prefs.putString("ctn", ctName); prefs.putString("ctpr", ctPron); prefs.putString("ctb", ctBio);
+  prefs.putString("ctl", ctLikes); prefs.putString("ctc", ctCustom);
+}
+
+// ── soft shapes: every edge is anti-aliased, everything is clipped to one rectangle ──
+int16_t ctCX0 = 0, ctCY0 = 0, ctCX1 = SCR_W, ctCY1 = SCR_H;
+void ctClip(int x0, int y0, int x1, int y1) { ctCX0 = max(0, x0); ctCY0 = max(0, y0); ctCX1 = min((int)SCR_W, x1); ctCY1 = min((int)SCR_H, y1); }
+void ctNoClip() { ctCX0 = 0; ctCY0 = 0; ctCX1 = SCR_W; ctCY1 = SCR_H; }
+#define CT_BOX(fx0, fy0, fx1, fy1) \
+  int x0 = max((int)ctCX0, (int)floorf(fx0)), x1 = min((int)ctCX1 - 1, (int)ceilf(fx1)); \
+  int y0 = max((int)ctCY0, (int)floorf(fy0)), y1 = min((int)ctCY1 - 1, (int)ceilf(fy1)); \
+  if (!FB || x0 > x1 || y0 > y1) return;
+static inline void ctPut(int x, int y, uint16_t col, float a) {
+  if (a <= 0.03f) return;
+  uint16_t *p = FB + y * SCR_W + x;
+  *p = blend565(*p, col, (uint8_t)(a >= 1 ? 255 : a * 255));
+}
+
+void ctEllipse(float cx, float cy, float rx, float ry, uint16_t col, float al) {
+  if (rx < 0.3f || ry < 0.3f) return;
+  CT_BOX(cx - rx - 1, cy - ry - 1, cx + rx + 1, cy + ry + 1);
+  float m = fminf(rx, ry);
+  for (int y = y0; y <= y1; y++) {
+    float ny = (y + 0.5f - cy) / ry, ny2 = ny * ny;
+    for (int x = x0; x <= x1; x++) {
+      float nx = (x + 0.5f - cx) / rx, a = (1.0f - sqrtf(nx * nx + ny2)) * m + 0.5f;
+      if (a > 0) ctPut(x, y, col, (a > 1 ? 1 : a) * al);
+    }
+  }
+}
+void ctRRect(float x, float y, float w, float h, float r, uint16_t col, float al) {
+  float hw = w * 0.5f, hh = h * 0.5f, cx = x + hw, cy = y + hh, rr = fminf(r, fminf(hw, hh));
+  CT_BOX(x - 1, y - 1, x + w + 1, y + h + 1);
+  for (int j = y0; j <= y1; j++) {
+    float py = j + 0.5f - cy;
+    for (int i = x0; i <= x1; i++) {
+      float a = 0.5f - sdRound(i + 0.5f - cx, py, hw, hh, rr);
+      if (a > 0) ctPut(i, j, col, (a > 1 ? 1 : a) * al);
+    }
+  }
+}
+// rounded pane with a top-to-bottom gradient
+void ctPane(float x, float y, float w, float h, float r, uint16_t top, uint16_t bot) {
+  float hw = w * 0.5f, hh = h * 0.5f, cx = x + hw, cy = y + hh, rr = fminf(r, fminf(hw, hh));
+  CT_BOX(x - 1, y - 1, x + w + 1, y + h + 1);
+  for (int j = y0; j <= y1; j++) {
+    float py = j + 0.5f - cy;
+    uint16_t col = mix565(top, bot, (uint8_t)(clamp01((j - y) / h) * 255));
+    for (int i = x0; i <= x1; i++) {
+      float a = 0.5f - sdRound(i + 0.5f - cx, py, hw, hh, rr);
+      if (a > 0) ctPut(i, j, col, a > 1 ? 1 : a);
+    }
+  }
+}
+void ctSeg(float ax, float ay, float bx, float by, float w, uint16_t col, float al) {
+  float hw = w * 0.5f;
+  CT_BOX(fminf(ax, bx) - hw - 1, fminf(ay, by) - hw - 1, fmaxf(ax, bx) + hw + 1, fmaxf(ay, by) + hw + 1);
+  float dx = bx - ax, dy = by - ay, L2 = dx * dx + dy * dy;
+  for (int y = y0; y <= y1; y++)
+    for (int x = x0; x <= x1; x++) {
+      float px = x + 0.5f - ax, py = y + 0.5f - ay;
+      float t = L2 > 0 ? clamp01((px * dx + py * dy) / L2) : 0;
+      float ex = px - dx * t, ey = py - dy * t, a = hw - sqrtf(ex * ex + ey * ey) + 0.5f;
+      if (a > 0) ctPut(x, y, col, (a > 1 ? 1 : a) * al);
+    }
+}
+// an arc of a circle, angles in radians with y pointing down (so 1.5*PI is straight up)
+void ctArc(float cx, float cy, float r, float a0, float a1, float w, uint16_t col, float al) {
+  float hw = w * 0.5f;
+  CT_BOX(cx - r - hw - 1, cy - r - hw - 1, cx + r + hw + 1, cy + r + hw + 1);
+  bool full = a1 - a0 >= 6.2831f;
+  float e0x = cx + cosf(a0) * r, e0y = cy + sinf(a0) * r, e1x = cx + cosf(a1) * r, e1y = cy + sinf(a1) * r;
+  for (int y = y0; y <= y1; y++)
+    for (int x = x0; x <= x1; x++) {
+      float dx = x + 0.5f - cx, dy = y + 0.5f - cy, rad = sqrtf(dx * dx + dy * dy);
+      if (fabsf(rad - r) > hw + 1) continue;
+      float d = fabsf(rad - r);
+      if (!full) {
+        float ang = atan2f(dy, dx);
+        while (ang < a0) ang += 6.2831853f;
+        while (ang >= a0 + 6.2831853f) ang -= 6.2831853f;
+        if (ang > a1) {
+          float d0 = sqrtf((x + 0.5f - e0x) * (x + 0.5f - e0x) + (y + 0.5f - e0y) * (y + 0.5f - e0y));
+          float d1 = sqrtf((x + 0.5f - e1x) * (x + 0.5f - e1x) + (y + 0.5f - e1y) * (y + 0.5f - e1y));
+          d = fminf(d0, d1);
+        }
+      }
+      float a = hw - d + 0.5f;
+      if (a > 0) ctPut(x, y, col, (a > 1 ? 1 : a) * al);
+    }
+}
+void ctTri(float ax, float ay, float bx, float by, float cx, float cy, uint16_t col, float al) {
+  CT_BOX(fminf(ax, fminf(bx, cx)) - 1, fminf(ay, fminf(by, cy)) - 1, fmaxf(ax, fmaxf(bx, cx)) + 1, fmaxf(ay, fmaxf(by, cy)) + 1);
+  float area = (bx - ax) * (cy - ay) - (by - ay) * (cx - ax);
+  if (fabsf(area) < 0.5f) return;
+  float sg = area > 0 ? 1.0f : -1.0f;
+  const float P[3][2] = {{ax, ay}, {bx, by}, {cx, cy}};
+  float EX[3], EY[3], IL[3];
+  for (int k = 0; k < 3; k++) { EX[k] = P[(k + 1) % 3][0] - P[k][0]; EY[k] = P[(k + 1) % 3][1] - P[k][1]; IL[k] = sg / sqrtf(EX[k] * EX[k] + EY[k] * EY[k]); }
+  for (int y = y0; y <= y1; y++)
+    for (int x = x0; x <= x1; x++) {
+      float px = x + 0.5f, py = y + 0.5f, m = 1e9f;
+      for (int k = 0; k < 3; k++) m = fminf(m, (EX[k] * (py - P[k][1]) - EY[k] * (px - P[k][0])) * IL[k]);
+      float a = m + 0.5f;
+      if (a > 0) ctPut(x, y, col, (a > 1 ? 1 : a) * al);
+    }
+}
+// heart, (x^2 + y^2 - 1)^3 - x^2 y^3 <= 0, four samples a pixel
+void ctHeart(float cx, float cy, float s, uint16_t col, float al) {
+  if (s < 0.8f) return;
+  CT_BOX(cx - 1.2f * s - 1, cy - 1.15f * s - 1, cx + 1.2f * s + 1, cy + 1.1f * s + 1);
+  for (int y = y0; y <= y1; y++)
+    for (int x = x0; x <= x1; x++) {
+      int n = 0;
+      for (int k = 0; k < 4; k++) {
+        float hx = (x + 0.25f + 0.5f * (k & 1) - cx) / s, hy = -(y + 0.25f + 0.5f * (k >> 1) - cy) / s + 0.12f;
+        float q = hx * hx + hy * hy - 1;
+        if (q * q * q - hx * hx * hy * hy * hy <= 0) n++;
+      }
+      if (n) ctPut(x, y, col, n * 0.25f * al);
+    }
+}
+void ctStar(float cx, float cy, float r, uint16_t col, float al) {     // a four-point twinkle
+  ctEllipse(cx, cy, r * 0.24f, r, col, al);
+  ctEllipse(cx, cy, r, r * 0.24f, col, al);
+}
+void ctCloud(float x, float y, float s, uint16_t col, uint16_t shade) {
+  ctEllipse(x + 1 * s, y + 7 * s, 25 * s, 8 * s, shade, 0.45f);
+  ctEllipse(x - 14 * s, y + 1 * s, 11 * s, 9 * s, col, 1);
+  ctEllipse(x + 1 * s, y - 5 * s, 14 * s, 12 * s, col, 1);
+  ctEllipse(x + 16 * s, y + 1 * s, 10 * s, 8 * s, col, 1);
+  ctEllipse(x, y + 4 * s, 24 * s, 7 * s, col, 1);
+}
+void ctTint(uint16_t col, uint8_t a) {
+  if (!FB || a < 8) return;
+  for (int i = 0; i < SCR_W * SCR_H; i++) FB[i] = blend565(FB[i], col, a);
+}
+
+// ── you ──
+enum CtFace : uint8_t { CF_SMILE, CF_JOY, CF_LOVE, CF_CALM, CF_SLEEPY, CF_MEH, CF_SAD, CF_STRESS, CF_STAR, CF_DOZE };
+const uint8_t CT_MOOD_FACE[CT_MOODS] = {CF_SMILE, CF_JOY, CF_LOVE, CF_CALM, CF_SLEEPY, CF_MEH, CF_SAD, CF_STRESS, CF_STAR};
+
+// where the fringe ends, in head units below the head's centre (negative is up)
+float ctBangY(uint8_t style, float dx) {
+  float y;
+  switch (style) {
+    case 2:  y = -10 + 3.0f * fabsf(sinf(dx / 7.0f)); break;     // buns: a soft centre parting
+    case 3:  y = -9 + dx * 0.22f; break;                          // short: swept to one side
+    case 5:  y = -8 + 5.0f * fabsf(sinf(dx / 5.0f)); break;      // curls
+    default: y = -7 + 4.0f * fabsf(sinf(dx / 6.5f)); break;      // straight bangs
+  }
+  float ax = fabsf(dx);
+  if (ax > 24) y = fmaxf(y, -7 + (ax - 24) * 3.0f);             // the sides come down and frame the face
+  return fminf(y, 14);
+}
+void ctHairCap(float cx, float cy, float s, uint8_t style, uint16_t col) {
+  float rx = 33.5f * s, ry = 31.0f * s, ccy = cy - 2 * s, m = fminf(rx, ry);
+  CT_BOX(cx - rx - 1, ccy - ry - 1, cx + rx + 1, cy + 15 * s);
+  for (int y = y0; y <= y1; y++) {
+    float ny = (y + 0.5f - ccy) / ry, ny2 = ny * ny;
+    for (int x = x0; x <= x1; x++) {
+      float nx = (x + 0.5f - cx) / rx, a1 = (1.0f - sqrtf(nx * nx + ny2)) * m + 0.5f;
+      if (a1 <= 0) continue;
+      float by = cy + ctBangY(style, (x + 0.5f - cx) / s) * s, a2 = by - (y + 0.5f) + 0.5f;
+      float a = fminf(a1, a2);
+      if (a > 0) ctPut(x, y, col, a > 1 ? 1 : a);
+    }
+  }
+}
+
+// cx, cy: the centre of the head. s: scale (1 on the home screen). gy: where the feet stand.
+void ctAvatar(float cx, float cy, float s, uint8_t face, bool blink, int8_t look, float wave, bool body, float gy) {
+  uint16_t tone = CT_TONE[ct.tone % CT_TONES], hair = CT_HCOL[ct.hcol % CT_HCOLS], oc = CT_OUTFIT[ct.outfit % CT_OUTFITS];
+  uint8_t st = ct.hair % CT_HAIRS;
+  if (body) ctEllipse(cx, gy, 30 * s, 5 * s, CT_INK, 0.14f);
+
+  // hair at the back
+  switch (st) {
+    case 0: ctRRect(cx - 35 * s, cy - 18 * s, 70 * s, 50 * s, 22 * s, hair, 1); break;
+    case 1: ctRRect(cx - 35 * s, cy - 18 * s, 70 * s, 82 * s, 26 * s, hair, 1); break;
+    case 2: ctEllipse(cx - 24 * s, cy - 27 * s, 12 * s, 12 * s, hair, 1); ctEllipse(cx + 24 * s, cy - 27 * s, 12 * s, 12 * s, hair, 1);
+            ctRRect(cx - 34 * s, cy - 14 * s, 68 * s, 34 * s, 18 * s, hair, 1); break;
+    case 3: ctRRect(cx - 33 * s, cy - 14 * s, 66 * s, 30 * s, 18 * s, hair, 1); break;
+    case 4: ctEllipse(cx + 33 * s, cy + 12 * s, 10 * s, 22 * s, hair, 1);
+            ctRRect(cx - 34 * s, cy - 14 * s, 68 * s, 34 * s, 18 * s, hair, 1);
+            ctEllipse(cx + 31 * s, cy - 8 * s, 4.5f * s, 4 * s, CT_PINK, 1); break;
+    case 5: for (int k = 0; k <= 10; k++) { float a = 3.14159f + k * 0.314159f; ctEllipse(cx + cosf(a) * 31 * s, cy - 4 * s + sinf(a) * 30 * s, 12 * s, 12 * s, hair, 1); }
+            for (int sd = -1; sd <= 1; sd += 2) { ctEllipse(cx + sd * 33 * s, cy + 10 * s, 11 * s, 11 * s, hair, 1); ctEllipse(cx + sd * 30 * s, cy + 23 * s, 9 * s, 9 * s, hair, 1); }
+            break;
+  }
+
+  if (body) {
+    uint16_t shoe = mix565(oc, CT_INK, 130);
+    ctEllipse(cx - 10 * s, gy - 6 * s, 9 * s, 5 * s, shoe, 1);
+    ctEllipse(cx + 10 * s, gy - 6 * s, 9 * s, 5 * s, shoe, 1);
+    ctEllipse(cx - 26 * s, cy + 47 * s, 7 * s, 10 * s, oc, 1);
+    ctEllipse(cx - 27 * s, cy + 56 * s, 5 * s, 5 * s, tone, 1);
+    if (wave > 0.01f) {
+      float hx = cx + 37 * s, hy = cy + 20 * s - wave * 6 * s;
+      ctSeg(cx + 19 * s, cy + 38 * s, hx - 2 * s, hy + 3 * s, 12 * s, oc, 1);
+      ctEllipse(hx, hy, 5.2f * s, 5.2f * s, tone, 1);
+    } else {
+      ctEllipse(cx + 26 * s, cy + 47 * s, 7 * s, 10 * s, oc, 1);
+      ctEllipse(cx + 27 * s, cy + 56 * s, 5 * s, 5 * s, tone, 1);
+    }
+    ctRRect(cx - 24 * s, cy + 27 * s, 48 * s, 44 * s, 18 * s, oc, 1);
+    ctEllipse(cx, cy + 29 * s, 13 * s, 5 * s, mix565(oc, COL_WHITE, 130), 1);
+    ctHeart(cx, cy + 47 * s, 4.5f * s, COL_WHITE, 0.9f);
+  }
+
+  // head
+  ctEllipse(cx - 30 * s, cy + 4 * s, 5 * s, 6.5f * s, tone, 1);
+  ctEllipse(cx + 30 * s, cy + 4 * s, 5 * s, 6.5f * s, tone, 1);
+  ctEllipse(cx, cy, 31 * s, 29 * s, tone, 1);
+
+  if (ct.acc == 4) {                                              // cat ears sit under the fringe
+    for (int sd = -1; sd <= 1; sd += 2) {
+      ctTri(cx + sd * 27 * s, cy - 14 * s, cx + sd * 22 * s, cy - 45 * s, cx + sd * 5 * s, cy - 27 * s, hair, 1);
+      ctTri(cx + sd * 23 * s, cy - 20 * s, cx + sd * 21 * s, cy - 38 * s, cx + sd * 11 * s, cy - 27 * s, CT_PINKL, 1);
+    }
+  }
+  ctHairCap(cx, cy, s, st, hair);
+  ctArc(cx - 2 * s, cy - 2 * s, 27 * s, 3.70f, 4.45f, 2.6f * s, COL_WHITE, 0.4f);
+
+  // face
+  float ey = cy + 5 * s, lx = look * 1.6f * s;
+  bool closed = blink && face != CF_JOY && face != CF_CALM && face != CF_DOZE && face != CF_STRESS && face != CF_LOVE && face != CF_STAR;
+  for (int sd = -1; sd <= 1; sd += 2) {
+    float ex = cx + sd * 11 * s;
+    if (closed || face == CF_CALM || face == CF_DOZE) ctArc(ex, ey - 2 * s, 4 * s, 0.5f, 2.64f, 1.7f * s, CT_FACE, 1);
+    else switch (face) {
+      case CF_JOY:  ctArc(ex, ey + 2 * s, 4 * s, 3.6f, 5.82f, 1.9f * s, CT_FACE, 1); break;
+      case CF_LOVE: ctHeart(ex, ey, 4.4f * s, CT_PINK, 1); break;
+      case CF_STAR: ctStar(ex, ey, 5.5f * s, c565(255, 190, 70), 1); ctEllipse(ex, ey, 1.6f * s, 1.6f * s, COL_WHITE, 1); break;
+      case CF_STRESS:
+        ctSeg(ex - sd * 3 * s, ey - 3 * s, ex + sd * 2.5f * s, ey, 1.7f * s, CT_FACE, 1);
+        ctSeg(ex + sd * 2.5f * s, ey, ex - sd * 3 * s, ey + 3 * s, 1.7f * s, CT_FACE, 1); break;
+      case CF_SLEEPY: ctSeg(ex - 3.6f * s, ey + 1 * s, ex + 3.6f * s, ey + 1 * s, 1.8f * s, CT_FACE, 1); break;
+      case CF_MEH:
+        ctEllipse(ex + lx, ey + 1.5f * s, 3.4f * s, 2.6f * s, CT_FACE, 1);
+        ctSeg(ex - 4.5f * s, ey - 0.6f * s, ex + 4.5f * s, ey - 0.6f * s, 1.6f * s, CT_FACE, 1); break;
+      default:
+        ctEllipse(ex + lx, ey, 3.6f * s, 4.6f * s, CT_FACE, 1);
+        ctEllipse(ex + lx + 1.2f * s, ey - 1.7f * s, 1.4f * s, 1.4f * s, COL_WHITE, 1);
+        if (face == CF_SAD) ctSeg(ex - sd * 5 * s, ey - 6 * s, ex + sd * 3 * s, ey - 9 * s, 1.5f * s, CT_FACE, 0.8f);
+        break;
+    }
+    ctEllipse(cx + sd * 18 * s, cy + 12 * s, 5.5f * s, 3.4f * s, CT_BLUSH, face == CF_LOVE ? 0.75f : 0.45f);
+  }
+  float my = cy + 14 * s;
+  switch (face) {
+    case CF_JOY: case CF_STAR:
+      ctEllipse(cx, my + 1 * s, 4.4f * s, 3.8f * s, CT_MOUTH, 1);
+      ctEllipse(cx, my + 2.8f * s, 2.6f * s, 1.5f * s, CT_BLUSH, 1); break;
+    case CF_SLEEPY: ctEllipse(cx, my + 1 * s, 2.2f * s, 2.6f * s, CT_MOUTH, 1); break;
+    case CF_DOZE:   ctEllipse(cx, my + 1 * s, 1.6f * s, 1.8f * s, CT_MOUTH, 1); break;
+    case CF_MEH:    ctSeg(cx - 3.5f * s, my + 1 * s, cx + 3.5f * s, my + 1 * s, 1.6f * s, CT_MOUTH, 1); break;
+    case CF_SAD:    ctArc(cx, my + 6 * s, 4.5f * s, 3.8f, 5.62f, 1.6f * s, CT_MOUTH, 1);
+                    ctEllipse(cx - 13 * s, ey + 7 * s + fmodf(millis() / 90.0f, 8) * s, 1.5f * s, 2.3f * s, c565(120, 180, 250), 0.85f); break;
+    case CF_STRESS:
+      ctSeg(cx - 4 * s, my + 1 * s, cx - 1.3f * s, my - 0.6f * s, 1.5f * s, CT_MOUTH, 1);
+      ctSeg(cx - 1.3f * s, my - 0.6f * s, cx + 1.3f * s, my + 1 * s, 1.5f * s, CT_MOUTH, 1);
+      ctSeg(cx + 1.3f * s, my + 1 * s, cx + 4 * s, my - 0.6f * s, 1.5f * s, CT_MOUTH, 1);
+      ctEllipse(cx + 25 * s, cy - 9 * s, 2.3f * s, 3.3f * s, c565(150, 200, 255), 0.9f); break;
+    default: ctArc(cx, my - 3 * s, 4.6f * s, 0.6f, 2.54f, 1.6f * s, CT_MOUTH, 1); break;
+  }
+
+  // accessory
+  switch (ct.acc) {
+    case 1: {                                                     // bow
+      float bx = cx + 19 * s, by = cy - 27 * s;
+      ctSeg(bx - 1 * s, by + 2 * s, bx - 4 * s, by + 8 * s, 2.4f * s, CT_PINK, 1);
+      ctSeg(bx + 1 * s, by + 2 * s, bx + 4 * s, by + 8 * s, 2.4f * s, CT_PINK, 1);
+      ctEllipse(bx - 6.5f * s, by, 6.5f * s, 5 * s, CT_PINK, 1); ctEllipse(bx + 6.5f * s, by, 6.5f * s, 5 * s, CT_PINK, 1);
+      ctEllipse(bx, by, 2.8f * s, 3 * s, mix565(CT_PINK, CT_INK, 70), 1);
+      break;
+    }
+    case 2: {                                                     // flower
+      float fx = cx - 20 * s, fy = cy - 25 * s;
+      for (int k = 0; k < 5; k++) { float a = k * 1.2566f - 1.57f; ctEllipse(fx + cosf(a) * 3.8f * s, fy + sinf(a) * 3.8f * s, 3.4f * s, 3.4f * s, COL_WHITE, 1); }
+      ctEllipse(fx, fy, 2.6f * s, 2.6f * s, CT_BUTTER, 1);
+      break;
+    }
+    case 3:                                                       // glasses
+      for (int sd = -1; sd <= 1; sd += 2) ctArc(cx + sd * 11 * s, ey, 6.8f * s, 0, 6.2832f, 1.5f * s, CT_INK, 0.9f);
+      ctSeg(cx - 4.3f * s, ey - 1 * s, cx + 4.3f * s, ey - 1 * s, 1.4f * s, CT_INK, 0.9f);
+      break;
+    case 5:                                                       // headphones
+      ctArc(cx, cy - 3 * s, 35 * s, 3.45f, 5.97f, 4.5f * s, c565(130, 180, 250), 1);
+      for (int sd = -1; sd <= 1; sd += 2) { ctRRect(cx + sd * 36 * s - 5 * s, cy - 8 * s, 10 * s, 18 * s, 5 * s, c565(130, 180, 250), 1); ctEllipse(cx + sd * 36 * s, cy + 1 * s, 2.6f * s, 4 * s, CT_PINKL, 1); }
+      break;
+    case 6:                                                       // star clips
+      ctStar(cx + 21 * s, cy - 23 * s, 7 * s, CT_BUTTER, 1); ctStar(cx + 28 * s, cy - 14 * s, 4 * s, COL_WHITE, 1);
+      break;
+  }
+}
+
+// ── the mood window: the weather is your mood ──
+void ctWeather(uint8_t mood, float px, float py, uint16_t paneMid) {
+  uint32_t ms = millis();
+  float t = ms / 1000.0f;
+  switch (mood) {
+    case 0:                                                       // happy: a smiling sun
+      for (int k = 0; k < 8; k++) { float a = t * 0.6f + k * 0.7854f; ctSeg(px + cosf(a) * 13, py + sinf(a) * 13, px + cosf(a) * 18, py + sinf(a) * 18, 2.6f, c565(255, 186, 90), 1); }
+      ctEllipse(px, py, 10.5f, 10.5f, CT_BUTTER, 1);
+      ctEllipse(px - 3.5f, py - 1, 1.2f, 1.5f, CT_FACE, 1); ctEllipse(px + 3.5f, py - 1, 1.2f, 1.5f, CT_FACE, 1);
+      ctArc(px, py + 1, 3.2f, 0.6f, 2.54f, 1.2f, CT_MOUTH, 1);
+      break;
+    case 1: {                                                     // excited: a rainbow
+      const uint16_t RB[4] = { c565(255, 150, 190), c565(255, 210, 120), c565(150, 220, 180), c565(130, 190, 250) };
+      for (int k = 0; k < 4; k++) ctArc(px, py + 12, 22 - k * 4.2f, 3.1416f, 6.2832f, 4.4f, RB[k], 1);
+      ctCloud(px - 19, py + 13, 0.36f, COL_WHITE, CT_BLUEL); ctCloud(px + 19, py + 13, 0.36f, COL_WHITE, CT_BLUEL);
+      break;
+    }
+    case 2:                                                       // loved: a beating heart
+      for (int k = 0; k < 3; k++) {
+        float ph = fmodf(t * 0.45f + k / 3.0f, 1.0f);
+        ctHeart(px - 16 + k * 16, py + 20 - ph * 40, 3, COL_WHITE, sinf(ph * 3.1416f) * 0.9f);
+      }
+      ctHeart(px, py, 11 + 1.3f * fabsf(sinf(t * 3.4f)), c565(255, 104, 156), 1);
+      ctEllipse(px - 4, py - 4, 2.6f, 1.8f, COL_WHITE, 0.7f);
+      break;
+    case 3:                                                       // calm: the sun behind a lazy cloud
+      ctEllipse(px + 8, py - 6, 9, 9, CT_BUTTER, 1);
+      ctCloud(px - 3 + sinf(t * 0.7f) * 3, py + 6, 0.5f, COL_WHITE, CT_BLUEL);
+      break;
+    case 4:                                                       // sleepy: a crescent moon and stars
+      ctEllipse(px + 1, py, 11, 11, c565(255, 240, 190), 1);
+      ctEllipse(px + 7, py - 4, 9.5f, 9.5f, paneMid, 1);
+      for (int k = 0; k < 3; k++) { static const int8_t SX[3] = {-16, 14, -6}, SY[3] = {-12, 10, 16}; float b = 0.5f + 0.5f * sinf(t * 2.2f + k * 2); ctStar(px + SX[k], py + SY[k], 2 + 2.2f * b, COL_WHITE, 0.5f + 0.5f * b); }
+      break;
+    case 5:                                                       // meh: grey clouds drifting by
+      ctCloud(px - 8 + sinf(t * 0.5f) * 3, py - 5, 0.42f, c565(236, 238, 248), c565(190, 196, 216));
+      ctCloud(px + 9 - sinf(t * 0.4f) * 3, py + 8, 0.5f, c565(244, 246, 252), c565(190, 196, 216));
+      break;
+    case 6: case 7: {                                             // sad: rain. stressed: rain and lightning
+      bool storm = mood == 7, flash = storm && (ms % 2600) < 260;
+      for (int k = 0; k < 6; k++) { float yy = py + 2 + fmodf(t * 34 + k * 9, 24); float xx = px - 17 + k * 7; ctSeg(xx, yy, xx - 1.5f, yy + 4, 1.6f, c565(110, 160, 240), 0.9f); }
+      if (flash) { ctTri(px + 2, py - 2, px - 6, py + 12, px + 1, py + 10, CT_BUTTER, 1); ctTri(px + 1, py + 8, px - 2, py + 22, px + 6, py + 7, CT_BUTTER, 1); }
+      ctCloud(px, py - 7, 0.56f, storm ? c565(176, 176, 204) : c565(226, 230, 245), storm ? c565(120, 118, 160) : c565(170, 180, 210));
+      break;
+    }
+    default:                                                      // inspired: sparkles
+      for (int k = 0; k < 5; k++) {
+        static const int8_t SX[5] = {0, -15, 14, -9, 11}, SY[5] = {0, -10, -9, 13, 12};
+        float b = 0.5f + 0.5f * sinf(t * 3 + k * 1.3f);
+        ctStar(px + SX[k], py + SY[k], (k ? 3.5f : 8) + 2.5f * b, k % 2 ? CT_BUTTER : COL_WHITE, 0.6f + 0.4f * b);
+      }
+      break;
+  }
+}
+void ctMoodWindow(int x, int y, int w, int h) {
+  uint8_t m = ct.mood % CT_MOODS;
+  ctRRect(x + 2, y + 4, w, h, 15, CT_INK, 0.12f);
+  ctRRect(x, y, w, h, 15, COL_WHITE, 0.96f);
+  int px0 = x + 5, py0 = y + 5, pw = w - 10, ph = h - 10;
+  ctPane(px0, py0, pw, ph, 11, CT_PANE_T[m], CT_PANE_B[m]);
+  ctClip(px0 + 1, py0 + 1, px0 + pw - 1, py0 + ph - 1);
+  ctWeather(m, px0 + pw * 0.5f, py0 + ph * 0.5f + 1, mix565(CT_PANE_T[m], CT_PANE_B[m], 110));
+  ctEllipse(px0 - 2, py0 - 2, 12, 24, CT_PINK, 0.85f);              // curtains
+  ctEllipse(px0 + pw + 2, py0 - 2, 12, 24, CT_PINK, 0.85f);
+  ctNoClip();
+  ctRRect(x - 4, y + h - 3, w + 8, 7, 3, COL_WHITE, 1);             // sill and a box of flowers
+  ctRRect(x + 9, y + h + 3, w - 18, 9, 3, c565(250, 160, 196), 1);
+  static const uint16_t FL[3] = { c565(130, 190, 250), CT_BUTTER, c565(255, 120, 172) };
+  for (int k = 0; k < 3; k++) { float fx = x + 18 + k * (w - 36) / 2.0f; ctEllipse(fx, y + h + 1, 3.2f, 3.2f, FL[k], 1); ctEllipse(fx, y + h + 1, 1.2f, 1.2f, COL_WHITE, 1); }
+  aaTextC(F_S, CT_MOOD_NAME[m], x + w / 2, y + h + 28, CT_INK);
+}
+
+// ── the status badge ──
+const char *ctStatText() { return ct.stat >= CT_STATS ? ctCustom.c_str() : CT_STAT_NAME[ct.stat]; }
+uint16_t ctStatColor() { return CT_STAT_COL[ct.stat >= CT_STATS ? ct.statCol % CT_STATS : ct.stat]; }
+int ctBadge(int cx, int y, bool big) {
+  const char *s = ctStatText();
+  int w = aaWidth(F_S, s) + (big ? 36 : 28), h = big ? 24 : 20, x = cx - w / 2;
+  uint16_t col = ctStatColor();
+  float pulse = 0.5f + 0.5f * sinf(millis() / 420.0f);
+  if (big) ctRRect(x + 1, y + 3, w, h, h / 2, CT_INK, 0.12f);
+  ctRRect(x, y, w, h, h / 2, COL_WHITE, 0.96f);
+  float dx = x + (big ? 14 : 11), dy = y + h / 2.0f;
+  ctEllipse(dx, dy, 6 + 2 * pulse, 6 + 2 * pulse, col, 0.25f + 0.15f * pulse);
+  ctEllipse(dx, dy, 4.2f, 4.2f, col, 1);
+  aaText(F_S, s, x + (big ? 25 : 20), y + h / 2 + 5, CT_INK);
+  return w;
+}
+
+void ctSpeech(const String &s, int cx, int y) {
+  int w = aaWidth(F_S, s.c_str()) + 20, x = constrain(cx - w / 2, 8, 154 - w);
+  ctRRect(x + 1, y + 3, w, 24, 12, CT_INK, 0.1f);
+  ctTri(x + w * 0.62f, y + 20, x + w * 0.62f + 12, y + 20, x + w * 0.62f + 8, y + 31, COL_WHITE, 0.97f);
+  ctRRect(x, y, w, 24, 12, COL_WHITE, 0.97f);
+  aaText(F_S, s.c_str(), x + 10, y + 17, CT_INK);
+}
+
+void ctHeartsAt(float x, float y, int n) {
+  for (int i = 0, k = 0; i < CT_HEARTS && k < n; i++) {
+    if (ctHearts[i].life > 0) continue;
+    CtHeart &h = ctHearts[i];
+    h.x = x + (float)random(-8, 9); h.y = y + (float)random(-6, 7);
+    h.vx = (float)random(-60, 61) / 100.0f; h.vy = -0.9f - (float)random(0, 70) / 100.0f; h.life = 1.0f;
+    k++;
+  }
+}
+void ctDrawHearts() {
+  for (int i = 0; i < CT_HEARTS; i++) {
+    CtHeart &h = ctHearts[i];
+    if (h.life <= 0) continue;
+    h.x += h.vx; h.y += h.vy; h.vy *= 0.985f; h.life -= 0.018f;
+    ctHeart(h.x, h.y, 4.5f, i % 3 == 1 ? c565(130, 186, 250) : CT_PINK, clamp01(h.life * 1.6f));
+  }
+}
+
+void ctWake() {
+  uint32_t now = millis();
+  ctHopAt = now; ctWaveAt = now; ctHappyUntil = now + 1500;
+  ctSay = CT_HELLO[random(0, 4)]; ctSayUntil = now + 1800;
+  ctNextAct = now + 6000;
+}
+void ctMoodStep(int dir) {
+  ct.mood = (ct.mood + CT_MOODS + dir) % CT_MOODS;
+  ctSaveState(); ctBioDirty = true;
+  sfx(4);
+  sendStatus(nullptr);
+}
+void ctStatStep() {
+  int n = ctCustom.length() ? CT_STATS + 1 : CT_STATS;
+  ct.stat = (ct.stat + 1) % n;
+  ctSaveState(); ctBioDirty = true;
+  sfx(0);
+  sendStatus(nullptr);
+}
+void ctShake() {
+  uint32_t now = millis();
+  ctHopAt = now; ctHappyUntil = now + 1500;
+  ctSay = CT_KIND[random(0, CT_KIND_N)]; ctSayUntil = now + 2600;
+  ctHeartsAt(120, 120, 6);
+  sfx(2);
+}
+
+// ── the drawer: every other screen as a row of soft bubbles ──
+#define CT_DRAWER_N 12
+const uint8_t CT_DRAWER_MODE[CT_DRAWER_N] = {M_BIO, M_CLOCK, M_MUSIC, M_JUKE, M_EYES, M_PET, M_TOY, M_TEXT, M_PHOTO, M_SING, M_CARD, M_TORCH};
+const char *CT_DRAWER_NAME[CT_DRAWER_N] = {"Bio", "Clock", "Music", "Jukebox", "Eyes", "Pet", "Dice", "Message", "Photo", "Sing", "ID card", "Torch"};
+const uint16_t CT_BUB[4] = { c565(246, 140, 190), c565(118, 172, 240), c565(168, 140, 236), c565(96, 196, 168) };
+int ctDrawerTop() { float e = clamp01(ctDrawerT); e = 1 - (1 - e) * (1 - e) * (1 - e); return 280 - (int)(254 * e); }
+void ctDrawerXY(int i, int yS, int &x, int &y) { x = 31 + (i % 4) * 59; y = yS + 70 + (i / 4) * 70; }
+void ctDrawDrawer() {
+  int yS = ctDrawerTop();
+  ctTint(CT_INK, (uint8_t)(clamp01(ctDrawerT) * 60));
+  ctRRect(0, yS, SCR_W, 320, 24, COL_WHITE, 0.9f);
+  ctRRect(100, yS + 8, 40, 5, 2.5f, CT_INK2, 0.55f);
+  aaTextC(F_M, "where to?", 120, yS + 38, CT_INK);
+  for (int i = 0; i < CT_DRAWER_N; i++) {
+    int x, y; ctDrawerXY(i, yS, x, y);
+    if (y - 20 > SCR_H) continue;
+    uint16_t col = CT_BUB[i % 4];
+    ctEllipse(x, y + 3, 20, 20, CT_INK, 0.12f);
+    ctEllipse(x, y, 20, 20, col, 1);
+    ctEllipse(x - 6, y - 8, 7, 4.5f, COL_WHITE, 0.45f);
+    if (CT_DRAWER_MODE[i] == M_BIO) {                            // a tiny you
+      ctEllipse(x, y + 1, 10, 9.5f, COL_WHITE, 1);
+      ctEllipse(x - 3.5f, y + 1, 1.3f, 1.7f, col, 1); ctEllipse(x + 3.5f, y + 1, 1.3f, 1.7f, col, 1);
+      ctArc(x, y + 2.5f, 3, 0.6f, 2.54f, 1.3f, col, 1);
+    } else {
+      int oi = orbOfMode(CT_DRAWER_MODE[i]);
+      if (oi >= 0) orbGlyph(oi, x, y, 24);
+    }
+    aaTextC(F_S, CT_DRAWER_NAME[i], x, y + 36, CT_INK);
+  }
+}
+void ctDrawerOpen(bool open) {
+  if (open == ctDrawer) return;
+  ctDrawer = open;
+  sfx(1);
+}
+
+// ── home ──
+void drawCottonHome() {
+  uint32_t now = millis();
+  float t = now / 1000.0f;
+  bool idle = !ctDrawer && now - lastInteraction > CT_DOZE_MS;
+  if (idle && !ctDozing) ctDozing = true;
+  if (!idle && ctDozing) { ctDozing = false; ctWake(); }
+  ctDozeT += ((ctDozing ? 1.0f : 0.0f) - ctDozeT) * 0.05f;
+  ctDrawerT += ((ctDrawer ? 1.0f : 0.0f) - ctDrawerT) * 0.28f;
+
+  buildAeroBg();
+  if (aeroBg && FB) memcpy(FB, aeroBg, FB_BYTES); else gfx->fillScreen(CT_PINKL);
+  for (int i = 0; i < 3; i++) {
+    CtCloud &c = ctClouds[i];
+    c.x += c.v * (ctDozing ? 0.4f : 1.0f);
+    if (c.x - 32 * c.s > SCR_W) c.x = -32 * c.s;
+    ctCloud(c.x, c.y, c.s, COL_WHITE, c565(214, 200, 240));
+  }
+  static const uint8_t TW[6][2] = {{22, 104}, {132, 24}, {150, 210}, {16, 176}, {226, 196}, {104, 76}};
+  for (int i = 0; i < 6; i++) {
+    int ph = (frameNo + i * 11) % 60, r = ph < 30 ? ph / 7 : (60 - ph) / 7;
+    if (r > 0) sparkle(TW[i][0], TW[i][1], r, COL_WHITE);
+  }
+  if (ctDozeT > 0.03f) {                                          // twilight while you nap
+    ctTint(c565(110, 92, 186), (uint8_t)(ctDozeT * 95));
+    static const uint8_t NS[7][2] = {{30, 30}, {90, 20}, {140, 50}, {210, 22}, {20, 140}, {60, 90}, {220, 150}};
+    for (int i = 0; i < 7; i++) ctStar(NS[i][0], NS[i][1], 2 + 1.6f * (0.5f + 0.5f * sinf(t * 2 + i)), COL_WHITE, ctDozeT * 0.9f);
+  }
+
+  // top row: link heart and battery
+  char b[12];
+  snprintf(b, sizeof(b), "%d%%", batPct);
+  int bw = aaWidth(F_S, b);
+  aaText(F_S, b, 226 - bw, 19, (!charging && batPct < 15) ? c565(220, 40, 80) : CT_INK);
+  if (charging) drawBolt(226 - bw - 8, 14, c565(40, 170, 90));
+  ctHeart(226 - bw - (charging ? 22 : 12), 14, 5, bleConnected ? CT_PINK : COL_WHITE, bleConnected ? 1 : 0.8f);
+
+  // time
+  struct tm tmv;
+  if (localNow(tmv)) {
+    int h = tmv.tm_hour;
+    if (!use24h) { h %= 12; if (h == 0) h = 12; }
+    snprintf(b, sizeof(b), "%d:%02d", h, tmv.tm_min);
+    aaText(F_L, b, 17, 47, COL_WHITE, 200);
+    aaText(F_L, b, 16, 46, CT_INK);
+    char d[24]; snprintf(d, sizeof(d), "%s %d %s", DAYS_T[tmv.tm_wday], tmv.tm_mday, MON_T[tmv.tm_mon]);
+    aaText(F_S, d, 18, 66, CT_INK2);
+  } else {
+    aaText(F_L, "hello!", 16, 46, CT_INK);
+    aaText(F_S, "open the app to sync", 18, 66, CT_INK2);
+  }
+
+  ctMoodWindow(162, 30, 62, 62);
+
+  // you, alive: breathing, blinking, glancing, waving, the odd hop
+  if (!ctDozing && !ctDrawer && now > ctNextAct) {
+    switch (random(0, 3)) {
+      case 0: ctLook = random(0, 2) ? 1 : -1; ctLookUntil = now + 1300; break;
+      case 1: ctWaveAt = now; break;
+      default: ctHopAt = now; break;
+    }
+    ctNextAct = now + 5000 + random(0, 7000);
+  }
+  if (now > ctNextBlink) { ctBlinkUntil = now + 130; ctNextBlink = now + 2200 + random(0, 3200); }
+  float hop = 0;
+  if (now - ctHopAt < 520) { float p = (now - ctHopAt) / 520.0f; hop = -sinf(p * 3.1416f) * 14; }
+  float bob = ctDozing ? sinf(t * 1.3f) * 2.2f : sinf(t * 2.4f) * 1.2f;
+  float wave = (now - ctWaveAt < 1700) ? 0.5f + 0.5f * sinf((now - ctWaveAt) * 0.013f) : 0;
+  uint8_t face = CT_MOOD_FACE[ct.mood % CT_MOODS];
+  if (ctDozeT > 0.5f) face = CF_DOZE;
+  else if (now < ctHappyUntil) face = CF_JOY;
+  ctAvatar(120, 150 + bob + hop, 1.0f, face, now < ctBlinkUntil, now < ctLookUntil ? ctLook : 0, ctDozing ? 0 : wave, true, 229);
+
+  if (ctDozeT > 0.3f)                                             // z z z
+    for (int k = 0; k < 3; k++) {
+      float ph = fmodf(t * 0.45f + k / 3.0f, 1.0f);
+      const char *z = k == 1 ? "Z" : "z";
+      aaText(k == 1 ? F_M : F_S, z, 82 - (int)(ph * 22 - sinf(ph * 9) * 3), 114 - (int)(ph * 38), COL_WHITE, (uint8_t)(sinf(ph * 3.1416f) * 255 * ctDozeT));
+    }
+  if (now < ctSayUntil && !ctDozing) ctSpeech(ctSay, 86, 74);
+
+  ctBadge(120, 236, true);
+  ctRRect(100, 268, 40, 5, 2.5f, COL_WHITE, 0.85f);
+  ctDrawHearts();
+  if (ctDrawerT > 0.01f) ctDrawDrawer();
+}
+
+void cottonTap(int x, int y, bool dbl) {
+  (void)dbl;
+  ctZoomX = x; ctZoomY = y;
+  if (ctDrawer) {
+    int yS = ctDrawerTop();
+    if (y < yS + 48) { ctDrawerOpen(false); return; }
+    for (int i = 0; i < CT_DRAWER_N; i++) {
+      int bx, by; ctDrawerXY(i, yS, bx, by);
+      if ((x - bx) * (x - bx) + (y - by) * (y - by) <= 30 * 30) { ctDrawer = false; ctDrawerT = 0; openModule(CT_DRAWER_MODE[i]); return; }
+    }
+    return;
+  }
+  if (x >= 152 && y >= 24 && y <= 128) { ctMoodStep(1); return; }
+  if (y >= 230 && y < 264 && abs(x - 120) < 90) { ctStatStep(); return; }
+  if (y >= 262) { ctDrawerOpen(true); return; }
+  if (abs(x - 120) < 46 && y >= 96 && y < 230) { openModule(M_BIO); return; }
+  if (x < 120 && y < 74) { openModule(M_CLOCK); return; }
+  ctHeartsAt(x, y, 3);
+  ctHappyUntil = millis() + 900;
+}
+
+// ── the bio page: a paper card about you ──
+int ctWrap(const String &s, int maxW, String *out, int maxLines) {
+  int n = 0; String line, word;
+  String src = s + " ";
+  for (size_t i = 0; i < src.length() && n < maxLines; i++) {
+    char ch = src[i];
+    if (ch == ' ' || ch == '\n') {
+      String test = line.length() ? line + " " + word : word;
+      if (aaWidth(F_S, test.c_str()) <= maxW) line = test;
+      else { if (line.length()) out[n++] = line; line = word; }
+      word = "";
+      if (ch == '\n' && n < maxLines) { out[n++] = line; line = ""; }
+    } else word += ch;
+  }
+  if (line.length() && n < maxLines) out[n++] = line;
+  return n;
+}
+void ctBuildBio() {
+  if (!homeBase || !aeroBg) return;
+  buildAeroBg();
+  uint16_t *screen = FB;
+  FB = homeBase;
+  memcpy(FB, aeroBg, FB_BYTES);
+  ctCloud(196, 18, 0.7f, COL_WHITE, c565(214, 200, 240));
+  ctRRect(14, 30, 214, 242, 22, CT_INK, 0.1f);
+  ctRRect(12, 26, 216, 242, 22, COL_WHITE, 0.96f);
+  ctEllipse(56, 76, 35, 35, CT_BLUEL, 1);
+  ctArc(56, 76, 35, 0, 6.2832f, 3, CT_PINKL, 1);
+
+  int nameMax = 120;
+  const AAFont &nf = aaWidth(P_M, ctName.c_str()) <= nameMax ? P_M : aaFit(ctName.c_str(), nameMax);
+  aaText(nf, aaClip(nf, ctName, nameMax).c_str(), 100, &nf == &P_M ? 70 : 66, CT_INK);
+  int ny = 88;
+  if (ctPron.length()) { aaText(F_S, ctPron.c_str(), 101, ny, CT_INK2); ny += 18; }
+  uint16_t sc = ctStatColor();
+  ctEllipse(105, ny - 5, 4, 4, sc, 1);
+  aaText(F_S, aaClip(F_S, String(ctStatText()), 104).c_str(), 113, ny, CT_INK);
+
+  char feel[32]; snprintf(feel, sizeof(feel), "feeling %s", CT_MOOD_NAME[ct.mood % CT_MOODS]);
+  int fw = aaWidth(F_S, feel), fx = 120 - fw / 2;
+  for (int x = 28; x < fx - 12; x += 8) ctEllipse(x, 125, 1.3f, 1.3f, CT_PINK, 0.7f);
+  for (int x = 212; x > fx + fw + 10; x -= 8) ctEllipse(x, 125, 1.3f, 1.3f, CT_PINK, 0.7f);
+  aaText(F_S, feel, fx, 130, CT_INK2);
+  String lines[5];
+  int n = ctWrap(ctBio, 190, lines, 5);
+  for (int i = 0; i < n; i++) aaText(F_S, lines[i].c_str(), 26, 152 + i * 17, CT_INK);
+
+  int cx = 24, cy = 222;
+  String likes = ctLikes + ",";
+  int k = 0;
+  for (int i = 0, st = 0; i < (int)likes.length(); i++) {
+    if (likes[i] != ',') continue;
+    String it = likes.substring(st, i); it.trim(); st = i + 1;
+    if (!it.length()) continue;
+    int w = aaWidth(F_S, it.c_str()) + 18;
+    if (cx + w > 218) { if (cy > 222) break; cx = 24; cy += 24; }
+    if (cx + w > 218) break;
+    ctRRect(cx, cy, w, 21, 10.5f, CT_BUB[k % 4], 0.32f);
+    aaText(F_S, it.c_str(), cx + 9, cy + 15, CT_INK);
+    cx += w + 6; k++;
+  }
+  FB = screen;
+  homeBaseVar = -1;                                              // the Aero home must rebuild its own picture
+  ctBioDirty = false;
+}
+void drawBio() {
+  uint32_t now = millis();
+  if (ctBioDirty || homeBaseVar != -1) ctBuildBio();
+  if (homeBase && FB) memcpy(FB, homeBase, FB_BYTES);
+  else { buildAeroBg(); if (aeroBg && FB) memcpy(FB, aeroBg, FB_BYTES); }
+  if (now > ctNextBlink) { ctBlinkUntil = now + 130; ctNextBlink = now + 2200 + random(0, 3200); }
+  uint8_t face = now < ctHappyUntil ? CF_JOY : CT_MOOD_FACE[ct.mood % CT_MOODS];
+  ctClip(21, 41, 92, 112);
+  ctAvatar(56, 82 + sinf(now / 420.0f) * 1.0f, 0.68f, face, now < ctBlinkUntil, 0, 0, false, 0);
+  ctNoClip();
+  static const uint8_t TW[4][2] = {{24, 36}, {218, 40}, {222, 250}, {18, 214}};
+  for (int i = 0; i < 4; i++) { float b = 0.5f + 0.5f * sinf(now / 380.0f + i * 1.7f); ctStar(TW[i][0], TW[i][1], 2.5f + 2.5f * b, CT_PINK, 0.4f + 0.5f * b); }
+  ctDrawHearts();
+}
+void ctBioTap(int x, int y) {
+  ctHeartsAt(x, y, 4);
+  ctHappyUntil = millis() + 1200;
+  sfx(4);
+}
+
+// A soft pink bubble grows out of where you tapped (or shrinks back into it).
+void cottonZoom(bool opening) {
+  if (!FB || !prevFb || sleeping) return;
+  memcpy(prevFb, FB, FB_BYTES);
+  int sx = opening ? ctZoomX : 120, sy = opening ? ctZoomY : 150;
+  const int steps = 7;
+  for (int s = 1; s <= steps; s++) {
+    float t = (float)s / steps;
+    t = 1.0f - (1.0f - t) * (1.0f - t);
+    if (!opening) t = 1.0f - t;
+    int r = 6 + (int)(200 * t), cx = sx + (int)((120 - sx) * t), cy = sy + (int)((140 - sy) * t);
+    memcpy(FB, prevFb, FB_BYTES);
+    gfx->fillCircle(cx, cy, r, CT_PINKL);
+    gfx->drawCircle(cx, cy, r, COL_WHITE);
+    gfx->drawCircle(cx, cy, r - 1, COL_WHITE);
+    gfx->flush();
+  }
+}
+
+// What a profile packet carries: [mood][status][tone][hair][hair colour][outfit][accessory][status colour]
+// then name 0x1F pronouns 0x1F bio 0x1F likes (comma separated) 0x1F custom status
+void ctApplyProfile(const uint8_t *p, uint16_t len) {
+  if (len < 8) return;
+  ct.mood = p[0] % CT_MOODS; ct.tone = p[2] % CT_TONES; ct.hair = p[3] % CT_HAIRS;
+  ct.hcol = p[4] % CT_HCOLS; ct.outfit = p[5] % CT_OUTFITS; ct.acc = p[6] % CT_ACCS; ct.statCol = p[7] % CT_STATS;
+  String s = asciiOnly(String((const char *)(p + 8), len - 8));
+  String f[5];
+  for (int i = 0, st = 0, k = 0; i <= (int)s.length() && k < 5; i++)
+    if (i == (int)s.length() || s[i] == '\x1F') { f[k++] = s.substring(st, i); st = i + 1; }
+  ctName = f[0].length() ? f[0].substring(0, 16) : String("me");
+  ctPron = f[1].substring(0, 14);
+  ctBio = f[2].substring(0, 140);
+  ctLikes = f[3].substring(0, 60);
+  ctCustom = f[4].substring(0, 22);
+  ct.stat = p[1] % (CT_STATS + 1);
+  if (ct.stat == CT_STATS && !ctCustom.length()) ct.stat = 0;
+  ctSaveAll();
+  ctBioDirty = true;
+}
+
+
 // ───────────── Status notifications ─────────────
 void notifyText(const char *s) {
   if (!statusChar || !bleConnected) return;
@@ -5627,10 +6445,10 @@ void sendStatus(const char *extra = nullptr) {
   char buf[300];
   unsigned long used = fsOK ? (unsigned long)FFat.usedBytes() : 0;
   unsigned long total = fsOK ? (unsigned long)FFat.totalBytes() : 0;
-  snprintf(buf, sizeof(buf), "b=%d;v=%.2f;c=%d;m=%d;fw=%s;fs=%lu,%lu;lk=%d,%d;imu=%d;toy=%d;th=%d;sk=%d;av=%d;st=%lu;eye=%d;jb=%d;q=%d%s%s",
+  snprintf(buf, sizeof(buf), "b=%d;v=%.2f;c=%d;m=%d;fw=%s;fs=%lu,%lu;lk=%d,%d;imu=%d;toy=%d;th=%d;sk=%d;av=%d;st=%lu;eye=%d;jb=%d;q=%d;mo=%d;ss=%d%s%s",
            batPct, batVolts, charging ? 1 : 0, mode, FW_VERSION, used, total,
            bgStyle, faceStyle, imuOK ? 1 : 0, toyKind, theme, skin, aeroVar, (unsigned long)stepsToday,
-           exprAuto ? 255 : exprSet, jbPlaying ? jbSong : -1, jbQLen,
+           exprAuto ? 255 : exprSet, jbPlaying ? jbSong : -1, jbQLen, ct.mood, ct.stat,
            extra ? ";" : "", extra ? extra : "");
   notifyText(buf);
 }
@@ -5899,6 +6717,18 @@ void handlePacket(const uint8_t *d, uint16_t n) {
       }
       break;
 
+    case CMD_PROFILE:
+      ctApplyProfile(p, len);
+      sendStatus();
+      break;
+
+    case CMD_MOOD:
+      if (len >= 1) ct.mood = p[0] % CT_MOODS;
+      if (len >= 2) { ct.stat = p[1] % (CT_STATS + 1); if (ct.stat == CT_STATS && !ctCustom.length()) ct.stat = 0; }
+      ctSaveState(); ctBioDirty = true;
+      sendStatus();
+      break;
+
     case CMD_EYES:
       if (len >= 1) {
         if (p[0] >= EXPR_COUNT) exprAuto = true; else setExpr(p[0], 10000);
@@ -6047,13 +6877,14 @@ void cycleAero(int dir) {
 
 void setSkin(uint8_t s) {
   skin = s % SKIN_COUNT;
+  ctDrawer = false; ctDrawerT = 0; ctBioDirty = true;
   if (skin == SKIN_QUEST && questInit()) { qLightUpdate(true); int l = qLocOfMode(mode); questPlace(l >= 0 ? l : qMod(qLoc, QW_NLOC)); }
   if (skin == SKIN_RONIN && roninInit()) { int l = qLocOfMode(mode); roninPlace(l >= 0 ? l : rLoc); }
   prefs.putUChar("skin", skin);
   if (skin == SKIN_AERO) { orbitFocus(max(0, orbOfMode(mode)), true); buildOrbSprites(); buildHomeBase(); }
   glitchFrames = skin == SKIN_DECK ? 5 : 0;
   snapAccent();
-  toast(skin == SKIN_RONIN ? "Ronin" : skin == SKIN_QUEST ? "Quest" : skin == SKIN_AERO ? "Aero" : "Deck", 900);
+  toast(skin == SKIN_COTTON ? "Cotton" : skin == SKIN_RONIN ? "Ronin" : skin == SKIN_QUEST ? "Quest" : skin == SKIN_AERO ? "Aero" : "Deck", 900);
   sfx(2);
   lastFrame = 0;
 }
@@ -6063,6 +6894,7 @@ void onSwipe(int dir) {
   if (swapSwipe) dir = -dir;
   switch (mode) {
     case M_DECK:
+      if (skin == SKIN_COTTON) { if (!ctDrawer) ctMoodStep(dir); break; }
       if (skin == SKIN_QUEST) { questGo(dir); break; }
       if (skin == SKIN_RONIN) break;
       if (skin == SKIN_DECK) {
@@ -6074,7 +6906,7 @@ void onSwipe(int dir) {
         sfx(1);
       }
       break;
-    case M_CLOCK: if (skin == SKIN_AERO) cycleAero(dir); else cycleBg(dir); break;
+    case M_CLOCK: if (skin == SKIN_AERO) cycleAero(dir); else if (skin != SKIN_COTTON) cycleBg(dir); break;
     case M_TEXT:
       textStyle = (textStyle + TEXT_STYLES + dir) % TEXT_STYLES;
       prefs.putUChar("tstyle", textStyle);
@@ -6099,7 +6931,7 @@ void onSwipe(int dir) {
       break;
     }
     case M_JUKE:
-      if (skin == SKIN_AERO) { jbSelId = stepSong((jbPlaying && millis() > jbSelUntil) ? jbSong : jbSelId, dir); jbSelUntil = millis() + 4000; sfx(0); }
+      if (AERO_LIKE) { jbSelId = stepSong((jbPlaying && millis() > jbSelUntil) ? jbSong : jbSelId, dir); jbSelUntil = millis() + 4000; sfx(0); }
       else { jbCat = (jbCat + catCount() + dir) % catCount(); sfx(1); }
       break;
     case M_TORCH: torchCol = (torchCol + 4 + dir) % 4; break;
@@ -6111,6 +6943,7 @@ void onSwipe(int dir) {
 // Swipe down closes whatever is open. On the home screen, up and down change brightness.
 void roninGo(int dir);
 void onVSwipe(int up) {
+  if (mode == M_DECK && skin == SKIN_COTTON) { ctDrawerOpen(up > 0); return; }
   if (mode == M_DECK && skin == SKIN_RONIN) { roninGo(up > 0 ? 1 : -1); return; }
   if (up < 0 && mode != M_DECK) { closeModule(); return; }
   if (mode == M_TORCH) return;
@@ -6123,6 +6956,7 @@ void onTap(bool dbl) {
   sfx(0);
   switch (mode) {
     case M_DECK:
+      if (skin == SKIN_COTTON) { cottonTap(tch.x0, tch.y0, dbl); break; }
       if (skin == SKIN_RONIN) {
         if (rMoveAt) roninGo(tch.y0 < 140 ? 1 : -1);
         else if (tch.y0 < 92) roninGo(1);
@@ -6187,7 +7021,7 @@ void onTap(bool dbl) {
       break;
     case M_JUKE:
       if (PIXEL_SKIN) { questJukeTap(tch.x0, tch.y0); break; }
-      if (skin == SKIN_AERO) {
+      if (AERO_LIKE) {
         int show = (jbPlaying && millis() > jbSelUntil) ? jbSong : jbSelId;
         if (tch.y0 < 148) { if (jbPlaying) jbStop(); else jbStartSong(jbSelId); }
         else if (tch.y0 < 200) { if (tch.x0 < 60) { jbSelId = stepSong(show, -1); jbSelUntil = millis() + 4000; } else if (tch.x0 > 180) { jbSelId = stepSong(show, 1); jbSelUntil = millis() + 4000; } }
@@ -6204,6 +7038,7 @@ void onTap(bool dbl) {
     case M_TORCH: torchCol = (torchCol + 1) % 4; chromeUntil = 0; break;
     case M_SING:  singTap(); break;
     case M_CHARGE: closeModule(); break;
+    case M_BIO:    ctBioTap(tch.x0, tch.y0); break;
     default: break;
   }
 }
@@ -6216,10 +7051,12 @@ void onShake() {
   touchActivity();
   switch (mode) {
     case M_DECK:
+      if (skin == SKIN_COTTON) { ctShake(); break; }
       if (skin == SKIN_QUEST) { questJump(); break; }
       if (skin == SKIN_RONIN) { roninSlash(); break; }
       // fall through
-    case M_CLOCK: if (skin == SKIN_AERO) cycleAero(1); else cycleBg(1); break;
+    case M_CLOCK: if (skin == SKIN_AERO) cycleAero(1); else if (skin != SKIN_COTTON) cycleBg(1); break;
+    case M_BIO: ctHeartsAt(120, 90, 6); ctHappyUntil = millis() + 1500; sfx(2); break;
     case M_PET:
       petDizzyUntil = millis() + 3000;
       toast("wheee!", 900);
@@ -6233,7 +7070,7 @@ void onShake() {
       break;
     case M_EYES: setExpr(E_DIZZY, 3000); sfx(3); break;
     case M_SING: singJumpAt = millis(); sfx(3); break;
-    case M_JUKE: { int16_t all[48]; int n = allSongs(all, 48); jbSelId = all[random(0, n)]; jbStop(); jbStartSong(jbSelId); toast(skin == SKIN_AERO ? "Shuffle" : "shuffle", 800); break; }
+    case M_JUKE: { int16_t all[48]; int n = allSongs(all, 48); jbSelId = all[random(0, n)]; jbStop(); jbStartSong(jbSelId); toast(AERO_LIKE ? "Shuffle" : "shuffle", 800); break; }
     default: break;
   }
 }
@@ -6254,6 +7091,7 @@ void handleTouch() {
       if (alarmUntil) { alarmUntil = 0; noTone(BUZZER); touchActivity(); tch.consumed = true; return; }
       if (sleeping) { touchActivity(); tch.consumed = true; return; }   // first touch only wakes
       if (idleEyesOn) { touchActivity(); tch.consumed = true; return; } // and wakes you out of the idle eyes
+      if (mode == M_DECK && skin == SKIN_COTTON && ctDozing) { touchActivity(); tch.consumed = true; return; }
       touchActivity();
     }
     tch.x = x; tch.y = y;
@@ -6329,6 +7167,7 @@ void handleButton() {
     if (alarmUntil) { alarmUntil = 0; noTone(BUZZER); touchActivity(); }
     else if (sleeping) touchActivity();
     else if (mode != M_DECK) { touchActivity(); closeModule(); }
+    else if (ctDrawer) { touchActivity(); ctDrawerOpen(false); }
     else { sleeping = true; analogWrite(LCD_BL, 0); }             // on the deck: screen off
   }
   wasDown = down;
@@ -6458,6 +7297,7 @@ void setup() {
   Wire.begin(I2C_SDA, I2C_SCL, 400000);
   prefs.begin("charm", false);
   loadPrefs();
+  ctLoad();
 
   if (!gfx->begin(80000000)) Serial.println("display init failed");
   gfx->fillScreen(COL_BLACK);
@@ -6470,6 +7310,10 @@ void setup() {
   snapAccent();
   if (PIXEL_SKIN) {
     gfx->fillScreen(skin == SKIN_RONIN ? c565(10, 6, 14) : c565(14, 18, 56));
+    gfx->flush();
+  } else if (skin == SKIN_COTTON) {
+    verticalGradient(c565(255, 214, 234), c565(196, 232, 255));
+    aaTextC(F_L, "Larp Charm", 120, 150, CT_INK);
     gfx->flush();
   } else if (skin) {
     verticalGradient(c565(30, 120, 230), c565(190, 236, 255));
@@ -6527,6 +7371,14 @@ void setup() {
 
   if (skin == SKIN_RONIN) roninBoot();
   else if (skin == SKIN_QUEST) questBoot();
+  else if (skin == SKIN_COTTON) {
+    buildAeroBg();
+    if (aeroBg) memcpy(FB, aeroBg, FB_BYTES);
+    ctAvatar(120, 120, 1.0f, CF_JOY, false, 0, 1.0f, true, 199);
+    String hi = String("hello, ") + ctName;
+    const AAFont &hf = aaWidth(P_M, hi.c_str()) <= 220 ? P_M : F_M;
+    aaTextC(hf, hi.c_str(), 120, 246, CT_INK);
+  }
   else if (skin) {
     buildOrbSprites();
     buildHomeBase();

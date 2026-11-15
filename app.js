@@ -1,9 +1,9 @@
-// ─────────── Protocol (must match firmware 5.x) ───────────
+// ─────────── Protocol (must match firmware 7.x) ───────────
 const SVC = '6e400001-c4a7-4d2e-9b3c-c4a2d7c0ffee';
 const RX  = '6e400002-c4a7-4d2e-9b3c-c4a2d7c0ffee';
 const ST  = '6e400003-c4a7-4d2e-9b3c-c4a2d7c0ffee';
-const CMD = {MODE:1, TEXT:2, TIME:3, NOWPLAYING:4, XFER_BEGIN:5, XFER_DATA:6, XFER_END:7, BRIGHT:8, PET:9, CARD:10, SETTINGS:11, PING:12, BUZZ:13, FEED:14, LOOK:18, TIMER:19, TOY:20, THEME:21, SKIN:22, EYES:23, TUNE:24, TORCH:25, SONG_LIST:26, SONG_DELETE:27};
-const MODE = {CLOCK:0, TEXT:1, PHOTO:2, SING:3, MUSIC:4, PET:5, TOY:6, CARD:7, DECK:8, EYES:9, JUKE:10, TORCH:11, CHARGE:12};
+const CMD = {MODE:1, TEXT:2, TIME:3, NOWPLAYING:4, XFER_BEGIN:5, XFER_DATA:6, XFER_END:7, BRIGHT:8, PET:9, CARD:10, SETTINGS:11, PING:12, BUZZ:13, FEED:14, LOOK:18, TIMER:19, TOY:20, THEME:21, SKIN:22, EYES:23, TUNE:24, TORCH:25, SONG_LIST:26, SONG_DELETE:27, PROFILE:28, MOOD:29};
+const MODE = {CLOCK:0, TEXT:1, PHOTO:2, SING:3, MUSIC:4, PET:5, TOY:6, CARD:7, DECK:8, EYES:9, JUKE:10, TORCH:11, CHARGE:12, BIO:13};
 const THEMES = ['#00E5FF', '#FF2BD6', '#FFB000', '#39FF14', '#FF3B30', '#C8DCFF'];
 const ui = window.ui = { mode: 8, bg: 9, face: 0, toy: 0, theme: 0, playing: false, artReady: false, skin: 0, aero: 0, expr: 255, torch: 0, jbSong: -1, jbQueue: 0, charging: false, bat: 76 };
 const CHUNK = 495, WINDOW = 16;
@@ -101,6 +101,7 @@ function onStatus(s){
   if (kv.sk !== undefined) setSkinUi(+kv.sk, kv.av !== undefined ? +kv.av : ui.aero);
   if (kv.st !== undefined) $('stepCount').textContent = (+kv.st).toLocaleString();
   if (kv.eye !== undefined) setExprUi(+kv.eye);
+  if (kv.mo !== undefined && kv.ss !== undefined) ctFromCharm(+kv.mo, +kv.ss);
   if (kv.jb !== undefined) { ui.jbSong = +kv.jb; ui.jbQueue = +(kv.q || 0); renderSongs(); }
   if (kv.imu !== undefined) $('imuNote').classList.toggle('hidden', kv.imu === '1');
   if (kv.fs) { const [u, t] = kv.fs.split(',').map(Number); state.fsUsed = u; state.fsTotal = t; renderStorage(); }
@@ -524,20 +525,20 @@ document.querySelectorAll('#timerPresets button').forEach(b => b.onclick = () =>
 $('startTimer').onclick = () => startTimer(+$('timerMin').value);
 $('cancelTimer').onclick = act(async () => { await write(packet(CMD.TIMER, [0, 0])); hud('Timer cancelled'); });
 
-// ─────────── Look: Deck, Aero, Quest or Ronin ───────────
+// ─────────── Look: Deck, Aero, Quest, Ronin or Cotton ───────────
 const AERO_ACC = ['#0084FF', '#00A8D6', '#E840A8'];
 function setSkinUi(sk, av){
   ui.skin = sk; ui.aero = av;
   document.querySelectorAll('#skins .lookcard').forEach(b => b.classList.toggle('on', +b.dataset.v === sk));
   document.querySelectorAll('#aeroSeg button').forEach(b => b.classList.toggle('on', +b.dataset.v === av));
   $('aeroStyles').classList.toggle('hidden', sk !== 1);
-  document.documentElement.style.setProperty('--acc', sk === 1 ? AERO_ACC[av] : sk === 2 ? '#FAD25A' : sk === 3 ? '#E64638' : THEMES[ui.theme]);
+  document.documentElement.style.setProperty('--acc', sk === 1 ? AERO_ACC[av] : sk === 2 ? '#FAD25A' : sk === 3 ? '#E64638' : sk === 4 ? '#FF78AC' : THEMES[ui.theme]);
   localStorage.setItem('o_skin', sk); localStorage.setItem('o_aero', av);
 }
 function sendSkin(){ if (window.kickCharm) kickCharm(3); if (rxChar) write(packet(CMD.SKIN, [ui.skin, ui.aero])).catch(() => {}); }
 document.querySelectorAll('#skins .lookcard').forEach(b => b.onclick = () => { setSkinUi(+b.dataset.v, ui.aero); sendSkin(); });
 document.querySelectorAll('#aeroSeg button').forEach(b => b.onclick = () => { setSkinUi(1, +b.dataset.v); sendSkin(); });
-setSkinUi(+(localStorage.getItem('o_skin') || 0) % 4, +(localStorage.getItem('o_aero') || 0));
+setSkinUi(+(localStorage.getItem('o_skin') ?? 4) % 5, +(localStorage.getItem('o_aero') || 0));
 
 // ─────────── Eyes ───────────
 function setExprUi(e){
@@ -696,3 +697,66 @@ $('midiSend').onclick = act(async () => {
   try { await sendBlob(4, out, 0, f => pr.set(f, `Sending ${Math.round(f * 100)}%`)); pr.set(1, 'On your charm, in My songs.'); await refreshMySongs(); }
   catch (e) { pr.set(0, e.message); throw e; } finally { pr.hide(2500); }
 });
+
+// ─────────── Me: the Cotton look's little you, mood, status and bio ───────────
+const ctProfile = window.ctProfile = (() => {
+  const d = Cotton.defaults();
+  try { return Object.assign(d, JSON.parse(localStorage.getItem('ct_profile') || '{}')); } catch (_) { return d; }
+})();
+function ctStore(){ try { localStorage.setItem('ct_profile', JSON.stringify(ctProfile)); } catch (_) {} }
+function ctPicks(id, colors, key){
+  const box = $(id); box.innerHTML = '';
+  colors.forEach((c, i) => { const b = document.createElement('button'); b.className = 'sw'; b.style.background = c; b.dataset.v = i; b.title = c; b.onclick = () => { ctProfile[key] = i; ctSync(); }; box.append(b); });
+}
+function ctSegs(id, names, key, after){
+  const box = $(id); box.innerHTML = '';
+  names.forEach((n, i) => { const b = document.createElement('button'); b.textContent = n; b.dataset.v = i; b.onclick = () => { ctProfile[key] = i; ctSync(); if (after) after(); }; box.append(b); });
+}
+const ctMoodLabel = m => m.charAt(0).toUpperCase() + m.slice(1);
+ctSegs('ctMood', Cotton.MOODS.map(ctMoodLabel), 'mood', () => ctSendMood());
+ctSegs('ctStat', [...Cotton.STATUS.map(ctMoodLabel), 'Custom'], 'stat', () => ctSendMood());
+ctPicks('ctStatCol', Cotton.STATUS_COL, 'statCol');
+ctPicks('ctTone', Cotton.TONES, 'tone');
+ctSegs('ctHair', Cotton.HAIRS, 'hair');
+ctPicks('ctHcol', Cotton.HCOLS, 'hcol');
+ctPicks('ctOutfit', Cotton.OUTFITS, 'outfit');
+ctSegs('ctAcc', Cotton.ACCS, 'acc');
+const ctText = { ctName: 'name', ctPron: 'pron', ctBio: 'bio', ctCustom: 'custom' };
+Object.entries(ctText).forEach(([id, key]) => { $(id).value = ctProfile[key] || ''; $(id).addEventListener('input', () => { ctProfile[key] = $(id).value; ctSync(); }); });
+const likeIds = ['ctLike0', 'ctLike1', 'ctLike2', 'ctLike3'];
+String(ctProfile.likes || '').split(',').forEach((l, i) => { if (likeIds[i]) $(likeIds[i]).value = l.trim(); });
+likeIds.forEach(id => $(id).addEventListener('input', () => { ctProfile.likes = likeIds.map(k => $(k).value.replace(/,/g, ' ').trim()).filter(Boolean).join(','); ctSync(); }));
+
+function ctSync(){
+  const mark = (id, v) => $(id).querySelectorAll('button').forEach(b => b.classList.toggle('on', +b.dataset.v === v));
+  mark('ctMood', ctProfile.mood); mark('ctStat', ctProfile.stat); mark('ctStatCol', ctProfile.statCol);
+  mark('ctTone', ctProfile.tone); mark('ctHair', ctProfile.hair); mark('ctHcol', ctProfile.hcol); mark('ctOutfit', ctProfile.outfit); mark('ctAcc', ctProfile.acc);
+  $('ctCustomRow').classList.toggle('hidden', ctProfile.stat !== 8);
+  ctStore();
+  const lk = $('ctLookCv'); if (lk) Cotton.portrait(lk.getContext('2d'), ctProfile, lk.width, lk.height);
+}
+function ctFromCharm(mood, stat){ if (mood === ctProfile.mood && stat === ctProfile.stat) return; ctProfile.mood = mood; ctProfile.stat = stat; ctSync(); }
+function ctSendMood(){
+  if (ctProfile.stat === 8 && !ctProfile.custom.trim()) return;
+  if (rxChar) write(packet(CMD.MOOD, [ctProfile.mood, ctProfile.stat])).catch(() => {});
+}
+function ctPacket(){
+  const p = ctProfile, stat = p.stat === 8 && !p.custom.trim() ? 0 : p.stat;
+  const text = [p.name.trim() || 'me', p.pron.trim(), p.bio.trim(), p.likes, p.custom.trim()].map(t => ascii(t).replace(/\x1F/g, ' ')).join('\x1F');
+  return packet(CMD.PROFILE, [p.mood, stat, p.tone, p.hair, p.hcol, p.outfit, p.acc, p.statCol], text);
+}
+$('ctSend').onclick = act(async () => { await write(ctPacket()); hud('Saved on your charm'); });
+$('ctShowBio').onclick = act(async () => { await write(ctPacket()); gotoMode(MODE.BIO); });
+$('ctUseLook').onclick = () => { setSkinUi(4, ui.aero); sendSkin(); gotoMode(MODE.DECK); };
+// taps on the preview change the mood and status the same way they do on the charm
+window.ctStep = what => {
+  if (what === 'mood') ctProfile.mood = (ctProfile.mood + 1) % 9;
+  else { const n = ctProfile.custom.trim() ? 9 : 8; ctProfile.stat = (ctProfile.stat + 1) % n; }
+  ctSync(); ctSendMood();
+};
+(function ctPortraitLoop(){
+  const cv = $('ctCv'), r = cv.getBoundingClientRect();
+  if (r.bottom > 0 && r.top < innerHeight && r.width) Cotton.portrait(cv.getContext('2d'), ctProfile, cv.width, cv.height);
+  requestAnimationFrame(ctPortraitLoop);
+})();
+ctSync();

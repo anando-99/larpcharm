@@ -2,16 +2,21 @@
 
 **A wearable bag charm with a touchscreen, plus a Web Bluetooth app that controls it from the browser.**
 
-Larp Charm runs on a Waveshare ESP32-S3-Touch-LCD-1.69 (240×280 IPS, capacitive touch, 6-axis IMU, buzzer, LiPo). The firmware is a small single-sketch "OS" with four switchable looks and a dozen apps. The companion web app pairs over Bluetooth LE: no install, no backend, no native app. It also runs a pixel-accurate live copy of the charm's screen in the page.
+Larp Charm runs on a Waveshare ESP32-S3-Touch-LCD-1.69 (240×280 IPS, capacitive touch, 6-axis IMU, buzzer, LiPo). The firmware is a small single-sketch "OS" with five switchable looks and a dozen apps. The companion web app pairs over Bluetooth LE: no install, no backend, no native app. It also runs a pixel-accurate live copy of the charm's screen in the page.
 
 **Live web app: [anando-99.github.io/larpcharm](https://anando-99.github.io/larpcharm/)**
 
 ![Web app with the live charm preview](docs/web-app.png)
 
+![The Cotton look on the charm: home, a mood change, dozing off, the drawer and the bio page](docs/cotton.png)
+
+<sub>Real firmware output: these frames come from the charm's own drawing code, run on a desktop by <code>firmware/tools/preview</code>.</sub>
+
 ## Highlights
 
-- **Custom BLE protocol.** A Nordic-UART-style GATT service with 27 binary commands, chunked file transfer (JPEG photos, album art, songs, sing-along shows) and a notify channel for battery, version and storage status.
-- **Four complete UI skins, all drawn in firmware:**
+- **Custom BLE protocol.** A Nordic-UART-style GATT service with 29 binary commands, chunked file transfer (JPEG photos, album art, songs, sing-along shows) and a notify channel for battery, version and storage status.
+- **Five complete UI skins, all drawn in firmware:**
+  - **Cotton** (the default): a personal, pastel look. A chibi avatar of you (skin tone, hair style and colour, outfit, accessory) lives on a cotton-candy sky. It breathes, blinks, glances around and waves, and dozes off under a twilight sky when left alone. Your mood shows as the weather in a little window, your status as a badge, and tapping yourself opens a bio card with your name, pronouns, bio and likes. Swipe up for a drawer of every other screen. All of it is anti-aliased vector drawing (signed-distance shapes) straight into the RGB565 frame buffer.
   - **Deck**: a cyberdeck dashboard with live tiles for the clock, now playing, pet, motion and message.
   - **Aero**: a glossy Y2K ring of orbs that you spin by dragging or by tilting the charm (IMU).
   - **Quest**: a scrolling pixel-art JRPG village with parallax layers, lit by the real time of day.
@@ -30,6 +35,7 @@ Larp Charm runs on a Waveshare ESP32-S3-Touch-LCD-1.69 (240×280 IPS, capacitive
 │ app.js       BLE connection, command packets, file transfer, Spotify PKCE  │
 │ charm.js     live 240×280 simulator of the charm's screen                  │
 │ sing.js      sing-along renderer (port of the firmware's)                  │
+│ cotton.js    Cotton look and avatar editor (port of the firmware's)        │
 │ songs.js / sing-font.js   generated from the same sources as the firmware  │
 └───────────────────────────────────┬────────────────────────────────────────┘
                                     │ Web Bluetooth (GATT write / notify)
@@ -49,17 +55,19 @@ Larp Charm runs on a Waveshare ESP32-S3-Touch-LCD-1.69 (240×280 IPS, capacitive
 | `6e400002-…` | RX: app → charm, `[cmd][payload…]` |
 | `6e400003-…` | Status: charm → app, read and notify (`key=value` text) |
 
-Commands cover mode switching, text, time sync, now playing, chunked transfer (`XFER_BEGIN/DATA/END`), brightness, pet, ID card, settings, themes, skins, eyes, jukebox, torch and song management. The full table, with payload layouts, is the `enum Cmd` in [`LarpCharm.ino`](firmware/LarpCharm/LarpCharm.ino).
+Commands cover mode switching, text, time sync, now playing, chunked transfer (`XFER_BEGIN/DATA/END`), brightness, pet, ID card, settings, themes, skins, eyes, jukebox, torch, song management, and the Cotton profile (`PROFILE`: avatar, name, bio, likes) and quick mood/status updates (`MOOD`). The charm reports mood and status changes made on the device back to the app. The full table, with payload layouts, is the `enum Cmd` in [`LarpCharm.ino`](firmware/LarpCharm/LarpCharm.ino).
 
 ## Repository layout
 
 ```
-index.html, app.js, charm.js, sing.js   web app (served by GitHub Pages)
+index.html, app.js, charm.js            web app (served by GitHub Pages)
+sing.js, cotton.js                      browser ports of firmware renderers
 songs.js, sing-font.js                  generated data shared with the firmware
 assets/                                 web app images
 docs/                                   README media
 firmware/LarpCharm/                     Arduino sketch and generated headers
 firmware/tools/                         generators: fonts, melodies, pixel art
+firmware/tools/preview/                 renders firmware screens on a desktop
 ```
 
 ## Getting started
@@ -89,17 +97,18 @@ arduino-cli compile --upload -p <port> \
   firmware/LarpCharm
 ```
 
-The web app and the firmware are versioned together; this app expects firmware **6.1** (shown on the charm's status screen and in the app once connected).
+The web app and the firmware are versioned together; this app expects firmware **7.0** (shown on the charm's status screen and in the app once connected).
 
 ## Using the charm
 
 | Gesture | Action |
 | --- | --- |
-| Tap | Open a block / interact |
+| Tap | Open a block / interact. Cotton home: tap yourself for your bio, the window for the next mood, the badge for the next status |
+| Swipe up (Cotton home) | Open the drawer with every screen |
 | Swipe down, or the side button | Close / back home |
-| Swipe left or right | Theme, backdrop, next or previous track, depending on the screen |
-| Press and hold on home | Switch look (Deck → Aero → Quest → Ronin) |
-| Shake | Wake, roll dice, shuffle, make the pet dizzy |
+| Swipe left or right | Mood (Cotton), theme, backdrop, next or previous track, depending on the screen |
+| Press and hold on home | Switch look (Deck → Aero → Quest → Ronin → Cotton) |
+| Shake | Wake, roll dice, shuffle, make the pet dizzy. Cotton: a hop, hearts and a kind word |
 | Hold PWR for 2 s | Power off (on battery) |
 
 ## Asset pipeline
@@ -114,6 +123,7 @@ The generated files are checked in, so you only need these scripts to change the
 | `firmware/tools/quest/questart.py out.h` | `questart.h` (Quest art and pixel fonts) |
 | `firmware/tools/quest/roninart.py out.h` | `roninart.h` (Ronin art) |
 | `firmware/tools/quest/preview.py day\|night` | a PNG preview of the Quest world |
+| `firmware/tools/preview/` (`extract.py` + `preview.cpp`) | compiles the firmware's Cotton drawing code for the desktop and renders every screen (needs a C++17 compiler) |
 
 Font files are not in the repo. Download them from Google Fonts (SIL Open Font Licence) into a `fonts/` folder next to the script. See [`firmware/tools/quest/README.md`](firmware/tools/quest/README.md).
 
