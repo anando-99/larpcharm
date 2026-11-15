@@ -2,8 +2,8 @@
 const SVC = '6e400001-c4a7-4d2e-9b3c-c4a2d7c0ffee';
 const RX  = '6e400002-c4a7-4d2e-9b3c-c4a2d7c0ffee';
 const ST  = '6e400003-c4a7-4d2e-9b3c-c4a2d7c0ffee';
-const CMD = {MODE:1, TEXT:2, TIME:3, NOWPLAYING:4, XFER_BEGIN:5, XFER_DATA:6, XFER_END:7, BRIGHT:8, PET:9, CARD:10, SETTINGS:11, PING:12, BUZZ:13, FEED:14, LOOK:18, TIMER:19, TOY:20, THEME:21, SKIN:22, EYES:23, TUNE:24, TORCH:25, SONG_LIST:26, SONG_DELETE:27, CC:30};
-const MODE = {CLOCK:0, TEXT:1, PHOTO:2, SING:3, MUSIC:4, PET:5, TOY:6, CARD:7, DECK:8, EYES:9, JUKE:10, TORCH:11, CHARGE:12, TERM:13, CLAUDE:14};
+const CMD = {MODE:1, TEXT:2, TIME:3, NOWPLAYING:4, XFER_BEGIN:5, XFER_DATA:6, XFER_END:7, BRIGHT:8, PET:9, CARD:10, SETTINGS:11, PING:12, BUZZ:13, FEED:14, LOOK:18, TIMER:19, TOY:20, THEME:21, SKIN:22, EYES:23, TUNE:24, TORCH:25, SONG_LIST:26, SONG_DELETE:27, CC:30, WEATHER:31};
+const MODE = {CLOCK:0, TEXT:1, PHOTO:2, SING:3, MUSIC:4, PET:5, TOY:6, CARD:7, DECK:8, EYES:9, JUKE:10, TORCH:11, CHARGE:12, TERM:13, CLAUDE:14, WEATHER:15};
 const THEMES = ['#00E5FF', '#FF2BD6', '#FFB000', '#39FF14', '#FF3B30', '#C8DCFF'];
 const klog = m => { if (window.charmLog) window.charmLog(m); };       // lines for the preview's dmesg pane
 const ui = window.ui = { mode: 8, bg: 9, face: 0, toy: 0, theme: 0, playing: false, artReady: false, expr: 255, torch: 0, jbSong: -1, jbQueue: 0, charging: false, bat: 76 };
@@ -61,7 +61,7 @@ async function connectGatt(){
   await syncTime();
   await write(packet(CMD.PING));
   await refreshMySongs();
-  ccResync(); ccSetRemote();
+  ccResync(); ccSetRemote(); wxSend();
   hud('Connected to ' + (device.name || 'Larp Charm'));
   klog('ble: link up');
   if (spotifyToken()) startSpotifyLoop();
@@ -786,7 +786,7 @@ if (/^(localhost|127\.0\.0\.1)$/.test(location.hostname) || localStorage.getItem
 setInterval(() => { if (ccB.st && rxChar) ccRelay(ccB.st); }, 10000);
 
 // ─────────── the command line at the bottom of the page ───────────
-const SCREENS = { home: 8, deck: 8, clock: 0, msg: 1, message: 1, photo: 2, img: 2, sing: 3, music: 4, np: 4, pet: 5, dice: 6, rng: 6, id: 7, card: 7, eyes: 9, jukebox: 10, jbx: 10, torch: 11, tty: 13, term: 13, claude: 14, cc: 14 };
+const SCREENS = { weather: 15, wx: 15, home: 8, deck: 8, clock: 0, msg: 1, message: 1, photo: 2, img: 2, sing: 3, music: 4, np: 4, pet: 5, dice: 6, rng: 6, id: 7, card: 7, eyes: 9, jukebox: 10, jbx: 10, torch: 11, tty: 13, term: 13, claude: 14, cc: 14 };
 const THEME_NAMES = ['ice', 'neon', 'amber', 'phosphor', 'redline', 'ghost'];
 const cmdIn = $('cmdIn'), cmdOut = $('cmdOut');
 const cmdHist = []; let cmdPos = 0, cmdClearT = 0;
@@ -820,6 +820,11 @@ const COMMANDS = {
     if (!(i >= 0 && i < p.length)) return say(...p.map((n, k) => `  ${k}  ${n}`));
     await ccCmd({ op: 'launch', index: i }); say(`launching ${p[i]}`);
   }],
+  weather: ['weather [city]  look up and show the weather', async a => {
+    if (a.length) { const r = await wxGeocode(a.join(' ')); if (!r.length) return say(`no place called ${a.join(' ')}`); wxSetPlace(r[0]); }
+    if (!wxS.place) return say('usage: weather <city>');
+    await wxFetch(); if (rxChar) gotoMode(MODE.WEATHER); say(...$('wxOut').textContent.split('\n'));
+  }],
   status: ['charm and claude status', () => {
     const st = ccB.st;
     say(`charm   ${rxChar ? 'connected' : 'not connected'}${rxChar ? `, ${ui.bat}%` : ''}`, `bridge  ${ccB.up ? 'linked' : 'not running'}`,
@@ -849,3 +854,61 @@ setInterval(() => {
 }, 1000);
 window.ccAnswerFromPreview = allow => { if (ccB.st && ccB.st.perm) ccCmd({ op: 'perm', id: ccB.st.perm.id, decision: allow ? 'allow' : 'deny' }).catch(() => {}); };
 window.ccLaunchFromPreview = i => ccCmd({ op: 'launch', index: i }).then(() => hud('Launching on this computer')).catch(() => {});
+
+// ─────────── weather: Open-Meteo (free, no key), sent to the charm over Bluetooth ───────────
+const WX_NAMES = ['clear', 'partly cloudy', 'cloudy', 'fog', 'drizzle', 'rain', 'snow', 'thunderstorm'];
+const wmo = c => c === 0 ? 0 : c <= 2 ? 1 : c === 3 ? 2 : c <= 48 ? 3 : c <= 57 ? 4 : c <= 67 ? 5 : c <= 77 ? 6 : c <= 82 ? 5 : c <= 86 ? 6 : 7;
+const wxS = { place: (() => { try { return JSON.parse(localStorage.getItem('o_wxPlace')); } catch (_) { return null; } })(), fahr: localStorage.getItem('o_wxF') === '1', data: null };
+window.wxData = () => wxS.data;
+async function wxGeocode(q){
+  const r = await fetch(`https://geocoding-api.open-meteo.com/v1/search?count=5&language=en&format=json&name=${encodeURIComponent(q)}`);
+  const j = await r.json();
+  return (j.results || []).map(p => ({ name: p.name, country: p.country_code || '', region: p.admin1 || '', lat: p.latitude, lon: p.longitude }));
+}
+function wxSetPlace(p){ wxS.place = p; localStorage.setItem('o_wxPlace', JSON.stringify(p)); $('wxResults').innerHTML = ''; $('wxQ').value = p.name; }
+async function wxFetch(){
+  const p = wxS.place; if (!p) return;
+  const u = `https://api.open-meteo.com/v1/forecast?latitude=${p.lat}&longitude=${p.lon}&current=temperature_2m,apparent_temperature,relative_humidity_2m,is_day,weather_code,wind_speed_10m&hourly=temperature_2m,weather_code&daily=temperature_2m_max,temperature_2m_min,precipitation_probability_max&timezone=auto&forecast_days=2&temperature_unit=${wxS.fahr ? 'fahrenheit' : 'celsius'}`;
+  const j = await (await fetch(u)).json();
+  const c = j.current, now = c.time.slice(0, 13);
+  const start = j.hourly.time.findIndex(t => t.slice(0, 13) > now);
+  const hours = [0, 1, 2, 3].map(i => start + i).filter(i => i >= 0 && i < j.hourly.time.length).map(i => ({ h: +j.hourly.time[i].slice(11, 13), cond: wmo(j.hourly.weather_code[i]), t: Math.round(j.hourly.temperature_2m[i]) }));
+  wxS.data = { cond: wmo(c.weather_code), isDay: !!c.is_day, t: Math.round(c.temperature_2m), feels: Math.round(c.apparent_temperature), hi: Math.round(j.daily.temperature_2m_max[0]), lo: Math.round(j.daily.temperature_2m_min[0]),
+    hum: Math.round(c.relative_humidity_2m), wind: Math.round(c.wind_speed_10m), rain: j.daily.precipitation_probability_max[0] | 0, fahr: wxS.fahr, hours, place: p.name, at: Date.now(), localTime: c.time.slice(11, 16) };
+  wxRender(); wxSend();
+  klog(`wx: ${wxS.data.t}${wxS.fahr ? 'F' : 'C'} ${WX_NAMES[wxS.data.cond]}, ${p.name}`);
+}
+function wxRender(){
+  const d = wxS.data, U = wxS.fahr ? '°F' : '°C';
+  if (!d) { $('wxOut').textContent = wxS.place ? `${wxS.place.name}: fetching...` : 'no place yet. search for a city or use your location.'; return; }
+  $('wxOut').textContent = [`${wxS.place.name}${wxS.place.country ? ', ' + wxS.place.country : ''}   (local time ${d.localTime})`,
+    `${WX_NAMES[d.cond]}${d.isDay ? '' : ' (night)'}  ${d.t}${U}, feels ${d.feels}${U}`,
+    `H ${d.hi}  L ${d.lo}   humidity ${d.hum}%   wind ${d.wind} km/h   rain ${d.rain}%`,
+    'next: ' + d.hours.map(h => `${String(h.h).padStart(2, '0')}h ${h.t}${U} ${WX_NAMES[h.cond]}`).join('  ·  ')].join('\n');
+}
+function wxSend(){
+  const d = wxS.data; if (!d || !rxChar) return;
+  const i8 = v => Math.max(-128, Math.min(127, v)) & 255;
+  const head = [d.cond, d.isDay ? 1 : 0, i8(d.t), i8(d.feels), i8(d.hi), i8(d.lo), Math.min(255, d.hum), Math.min(255, d.wind), Math.min(100, d.rain), d.fahr ? 1 : 0, d.hours.length];
+  d.hours.forEach(h => head.push(h.h, h.cond, i8(h.t)));
+  write(packet(CMD.WEATHER, head, ascii(d.place).slice(0, 22))).catch(() => {});
+}
+$('wxFind').onclick = act(async () => {
+  const q = $('wxQ').value.trim(); if (!q) return;
+  const r = await wxGeocode(q), box = $('wxResults'); box.innerHTML = '';
+  if (!r.length) { hud('No place by that name'); return; }
+  if (r.length === 1) { wxSetPlace(r[0]); await wxFetch(); return; }
+  r.forEach(p => { const b = document.createElement('button'); b.className = 'btn plain sm'; b.textContent = [p.name, p.region, p.country].filter(Boolean).join(', '); b.onclick = act(async () => { wxSetPlace(p); await wxFetch(); }); box.append(b); });
+});
+$('wxQ').addEventListener('keydown', e => { if (e.key === 'Enter') $('wxFind').click(); });
+$('wxHere').onclick = act(() => new Promise((ok, bad) => navigator.geolocation.getCurrentPosition(async pos => {
+  wxSetPlace({ name: 'my location', country: '', region: '', lat: +pos.coords.latitude.toFixed(3), lon: +pos.coords.longitude.toFixed(3) });
+  try { await wxFetch(); ok(); } catch (e) { bad(e); }
+}, () => bad(new Error('Location not allowed')), { timeout: 10000 })));
+$('wxUnit').querySelectorAll('button').forEach(b => b.classList.toggle('on', b.dataset.v === (wxS.fahr ? 'f' : 'c')));
+seg('wxUnit', v => { wxS.fahr = v === 'f'; localStorage.setItem('o_wxF', wxS.fahr ? '1' : '0'); wxFetch().catch(() => {}); });
+$('wxShow').onclick = act(async () => { if (!wxS.data) await wxFetch(); wxSend(); gotoMode(MODE.WEATHER); });
+$('wxRefresh').onclick = act(wxFetch);
+wxRender();
+if (wxS.place) wxFetch().catch(() => {});
+setInterval(() => { if (wxS.place) wxFetch().catch(() => {}); }, 15 * 60000);

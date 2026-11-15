@@ -284,6 +284,7 @@ code{font-size:12px;background:var(--bg);border:1px solid var(--line);padding:1p
         <button class="tile" data-m="8" data-k="~">home</button>
         <button class="tile" data-m="14" data-k="*">claude</button>
         <button class="tile" data-m="13" data-k="$">tty</button>
+        <button class="tile" data-m="15" data-k="w">weather</button>
         <button class="tile" data-m="0" data-k="·">clock</button>
         <button class="tile" data-m="4" data-k="·">music</button>
         <button class="tile" data-m="5" data-k="·">pet</button>
@@ -302,6 +303,7 @@ code{font-size:12px;background:var(--bg);border:1px solid var(--line);padding:1p
   <div>
     <nav class="tabs" role="tablist" aria-label="Controls">
       <button class="tab" role="tab" data-tab="claude" data-k="0">claude</button>
+      <button class="tab" role="tab" data-tab="weather" data-k="w">weather</button>
       <button class="tab" role="tab" data-tab="look" data-k="1">look</button>
       <button class="tab" role="tab" data-tab="text" data-k="2">msg</button>
       <button class="tab" role="tab" data-tab="photo" data-k="3">photo</button>
@@ -333,6 +335,19 @@ $ node larp-bridge/bridge.mjs    # keep it running
 # the charm. Its claude screen follows your session, asks
 # for permissions, and launches presets on this computer.</pre>
       </div>
+    </section>
+
+    <!-- WEATHER -->
+    <section class="panel" role="tabpanel" id="weather" data-cmd="weather --here">
+      <div class="row">
+        <div class="field"><label for="wxQ">place</label><input type="text" id="wxQ" placeholder="a city, e.g. Chennai" autocomplete="off" spellcheck="false"></div>
+      </div>
+      <div class="actions"><button class="btn" id="wxFind">search</button><button class="btn plain" id="wxHere">use my location</button>
+        <div class="seg" id="wxUnit"><button data-v="c" class="on">°c</button><button data-v="f">°f</button></div></div>
+      <div class="actions" id="wxResults"></div>
+      <pre class="term" id="wxOut"></pre>
+      <div class="actions"><button class="btn" id="wxShow">show on charm</button><button class="btn plain" id="wxRefresh">refresh</button></div>
+      <p class="meta">weather by open-meteo.com. refreshes every 15 min while this page is open; the charm keeps the last one.</p>
     </section>
 
     <!-- LOOK -->
@@ -607,6 +622,7 @@ Merry Christmas!</textarea><p class="meta" id="singInfo"></p></div>
 <script src="sing-font.js"></script>
 <script src="sing.js"></script>
 <script src="app.js"></script>
+<script src="pup.js"></script>
 <script src="charm.js"></script>
 </body>
 </html>

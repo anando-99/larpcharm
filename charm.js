@@ -133,10 +133,10 @@
     const a = glyphs(col, size); s = String(s);
     for (let i = 0; i < s.length; i++) { const ch = s.charCodeAt(i) & 255; c.drawImage(a, ch * 6 * size, 0, 6 * size, 8 * size, x + i * 6 * size, y, 6 * size, 8 * size); }
   }
-  const TX = [2, 2, 152, 2, 92, 10, 41, 72, 104, 135, 167, 198], TY = [15, 81, 81, 141, 141, 258, 258, 258, 258, 258, 258, 258], TW = [236, 146, 86, 86, 146, 31, 31, 32, 31, 32, 31, 32], TH = [62, 56, 56, 54, 54, 22, 22, 22, 22, 22, 22, 22];
-  const TMODE = [0, 4, 5, 6, 1, 2, 3, 7, 9, 10, 13, 14];
-  const TCMD = ['date', 'np', 'ps pet', 'imu --scope', 'cat motd', 'img', 'sng', 'id', 'eye', 'jbx', 'tty', 'cc'];
-  const TOPEN = ['clock', 'audio', 'pet', 'rng', 'motd', 'img', 'sing', 'id', 'eyes', 'jukebox', 'tty', 'claude'];
+  const TX = [2, 2, 152, 2, 92, 10, 37, 65, 92, 120, 147, 175, 202], TY = [15, 81, 81, 141, 141, 258, 258, 258, 258, 258, 258, 258, 258], TW = [236, 146, 86, 86, 146, 27, 28, 27, 28, 27, 28, 27, 28], TH = [62, 56, 56, 54, 54, 22, 22, 22, 22, 22, 22, 22, 22];
+  const TMODE = [0, 4, 5, 6, 1, 2, 3, 7, 9, 10, 13, 14, 15];
+  const TCMD = ['date', 'np', 'ps pet', 'imu --scope', 'cat motd', 'img', 'sng', 'id', 'eye', 'jbx', 'tty', 'cc', 'wx'];
+  const TOPEN = ['clock', 'audio', 'pet', 'rng', 'motd', 'img', 'sing', 'id', 'eyes', 'jukebox', 'tty', 'claude', 'weather'];
   const DAYS = ['SUN', 'MON', 'TUE', 'WED', 'THU', 'FRI', 'SAT'], MON = ['JAN', 'FEB', 'MAR', 'APR', 'MAY', 'JUN', 'JUL', 'AUG', 'SEP', 'OCT', 'NOV', 'DEC'];
   const SPR = [
     ['K..........K', 'KK........KK', 'KBK......KBK', 'KBBKKKKKKBBK', 'KBBBBBBBBBBK', 'KBBKBBBBKBBK', 'KBBKBBBBKBBK', 'KBPBBKKBBPBK', 'KBBBBBBBBBBK', '.KBBBBBBBBK.', '..KBBBBBBK..', '...KKKKKK...'],
@@ -150,7 +150,7 @@
   const boot = performance.now();
   const klog = [];
   const charmLog = window.charmLog = msg => { klog.push({ t: performance.now() - boot, s: String(msg).replace(/[^\x20-\x7e]/g, '?').slice(0, 31) }); if (klog.length > 8) klog.shift(); };
-  ['kernel: larp-os 8.2 up', 'imu: qmi8658 online', 'fs: ffat mounted', 'rtc: clock ok'].forEach(charmLog);
+  ['kernel: larp-os 8.5 up', 'imu: qmi8658 online', 'fs: ffat mounted', 'rtc: clock ok'].forEach(charmLog);
   const typing = { cmd: '', at: 0, tile: -1 };
   const scope = new Array(74).fill(0); let scopeHead = 0, lastTilt = 0;
   const bar = (f, n, fill, head, empty) => { const k = Math.round(Math.max(0, Math.min(1, f)) * (n - 2)); let s = '['; for (let i = 0; i < n - 2; i++) s += i < k - 1 ? fill : i === k - 1 ? head : empty; return s + ']'; };
@@ -224,7 +224,7 @@
     });
     // tmux status bar
     R(0, 258, W, 22, ACC);
-    for (let i = 0; i < 7; i++) {
+    for (let i = 0; i < 8; i++) {
       const k = 5 + i, wx = TX[k], a = act === k;
       if (a) R(wx, 258, TW[k], 22, TTY_BG);
       if (i) R(wx, 261, 1, 16, a ? ACC : TTY_BG);
@@ -761,7 +761,142 @@
     if (cb.t > 0.01) drawCcPop(cb.t);
   }
 
-  const scenes = { 0: clock, 1: text, 2: photo, 3: sing, 4: music, 5: pet, 6: toy, 7: card, 8: deck, 9: eyes, 10: jukeDeck, 11: torch, 12: chargeDeck, 13: tty, 14: claude };
+
+  // ── weather: Biscuit the pixel pup, dressed for it (same scene and sprite as the firmware's drawWeather) ──
+  const WXN = ['clear', 'partly cloudy', 'cloudy', 'fog', 'drizzle', 'rain', 'snow', 'thunderstorm'];
+  const OL = '#221828';
+  const wxb = { sayUntil: 0, say: '', hop: -1e9, heart: -1e9, turn: 0,
+    drops: Array.from({ length: 36 }, () => ({ x: Math.random() * 240, y: Math.random() * 520 - 280, v: 5 + Math.random() * 5 | 0 })) };
+  const mixc = (a, b, t) => { const A = rgb(a), B = rgb(b); return `rgb(${A.map((v, i) => Math.round(v + (B[i] - v) * t)).join(',')})`; };
+  function wxIcon(cond, x, y, s, day) {
+    if (cond <= 1) { if (day) circle(x - (cond ? s / 3 : 0), y - (cond ? s / 3 : 0), s / 2, '#ffce3c', true); else { circle(x - s / 4, y - s / 4, s / 2, '#f0ecc8', true); circle(x, y - s / 2, s / 2, '#0a0e1e', true); } }
+    if (cond) { const cc = cond >= 5 || cond === 2 ? '#969cb0' : '#ecf0f8'; circle(x - s / 3, y + s / 8, s / 3, cc, true); circle(x + s / 4, y, s / 2.5, cc, true); c.fillStyle = cc; c.beginPath(); c.roundRect(x - s / 1.6, y + s / 8, s * 1.2, s / 3, s / 6); c.fill(); }
+    if (cond === 4 || cond === 5 || cond === 7) { c.strokeStyle = '#5aaaff'; c.lineWidth = 1; for (let i = -1; i <= 1; i++) { c.beginPath(); c.moveTo(x + i * s / 3, y + s / 2); c.lineTo(x + i * s / 3 - 2, y + s / 2 + s / 3); c.stroke(); } }
+    if (cond === 6) for (let i = -1; i <= 1; i++) R(x + i * s / 3 - 1, y + s / 2 + 1, 2, 2, '#fff');
+    if (cond === 3) for (let i = 0; i < 3; i++) R(x - s / 2 + (i % 2) * 2, y - s / 4 + i * s / 4, s - 2, 1, '#ecf0f8');
+  }
+  // the pup sprite: 8 outfits decoded once into small canvases (and mirrored copies, for when it looks the other way)
+  let pupCache = null;
+  function pupFrames() {
+    if (pupCache || !window.PUP) return pupCache;
+    const P = window.PUP, raw = Uint8Array.from(atob(P.px), ch => ch.charCodeAt(0)), pal = P.pal.map(rgb);
+    pupCache = [];
+    for (let f = 0; f < P.n; f++) {
+      const pair = [0, 1].map(fl => {
+        const cv2 = document.createElement('canvas'); cv2.width = P.w; cv2.height = P.h;
+        const g = cv2.getContext('2d'), im = g.createImageData(P.w, P.h);
+        for (let y = 0; y < P.h; y++) for (let x = 0; x < P.w; x++) {
+          const i = raw[f * P.w * P.h + y * P.w + (fl ? P.w - 1 - x : x)]; if (!i) continue;
+          const o = (y * P.w + x) * 4, col = pal[i - 1]; im.data[o] = col[0]; im.data[o + 1] = col[1]; im.data[o + 2] = col[2]; im.data[o + 3] = 255;
+        }
+        g.putImageData(im, 0, 0); return cv2;
+      });
+      pupCache.push(pair);
+    }
+    return pupCache;
+  }
+  function weather() {
+    const d = window.wxData && window.wxData(), now = performance.now();
+    const W0 = d || { cond: 1, isDay: true, t: 21, feels: 21, hi: 24, lo: 16, hum: 60, wind: 10, fahr: false, hours: [], place: '' };
+    const cC = W0.fahr ? (W0.t - 32) * 5 / 9 : W0.t;
+    let band = !d ? 2 : cC >= 28 ? 4 : cC >= 20 ? 3 : cC >= 12 ? 2 : cC >= 4 ? 1 : 0;
+    const cband = band, cond = W0.cond, day = W0.isDay, wet = cond === 4 || cond === 5 || cond === 7, snow = cond === 6, wind = W0.wind || 0;
+    const flash = cond === 7 && now % 3100 < 140;
+    // sky
+    let top, bot;
+    if (!day) { top = '#060a1e'; bot = cond <= 1 ? '#1e285a' : '#282c46'; }
+    else if (cond === 7) { top = '#282240'; bot = '#605c78'; } else if (wet) { top = '#50607c'; bot = '#96a4ba'; }
+    else if (snow) { top = '#96a6c4'; bot = '#dce4f0'; } else if (cond === 3) { top = '#969ca6'; bot = '#c8ccd2'; }
+    else if (cond === 2) { top = '#6e8cb4'; bot = '#becee2'; } else { top = '#2882f0'; bot = band >= 3 ? '#ffce8c' : '#aadcff'; }
+    if (flash) { top = '#dcdcff'; bot = '#fff'; }
+    c.fillStyle = (() => { const g = c.createLinearGradient(0, 0, 0, 236); g.addColorStop(0, top); g.addColorStop(1, bot); return g; })(); c.fillRect(0, 0, W, 236);
+    if (cond === 4 && day) ['#fa788c', '#ffbe6e', '#faec82', '#82dc96', '#78aafa'].forEach((col, k) => { c.strokeStyle = col; c.globalAlpha = .55; c.lineWidth = 4; c.beginPath(); c.arc(178, 236, 106 - k * 4, Math.PI, 0); c.stroke(); c.globalAlpha = 1; });
+    if (cond <= 1) {
+      if (day) { c.strokeStyle = '#ffdc5a'; c.lineWidth = 1.5; for (let k = 0; k < 10; k++) { const a = now / 2400 + k * 0.628; c.beginPath(); c.moveTo(196 + Math.cos(a) * 26, 52 + Math.sin(a) * 26); c.lineTo(196 + Math.cos(a) * 36, 52 + Math.sin(a) * 36); c.stroke(); } circle(196, 52, 21, '#ffd646', true); circle(190, 46, 6, '#fff0a0', true); }
+      else {
+        for (let i = 0; i < 22; i++) { const x = (i * 53 + 17) % 230 + 5, y = (i * 37 + 11) % 160 + 8; R(x, y, (now / 400 + i | 0) % 7 ? 1 : 2, 1, '#fff'); }
+        circle(196, 50, 19, '#f4eec8', true); circle(206, 42, 17, top, true);
+        const sp = now % 9000; if (sp < 700) { const x = 60 + sp / 5, y = 20 + sp / 14; c.strokeStyle = '#fff'; c.lineWidth = 1; c.beginPath(); c.moveTo(x, y); c.lineTo(x - 34, y - 17); c.stroke(); }
+      }
+    }
+    if (day && cond <= 2 && !wet) {
+      c.strokeStyle = '#28283c'; c.lineWidth = 1;
+      for (let i = 0; i < 3; i++) { const x = ((now / 36 + i * 97) % 320) - 40, y = 104 + i * 12 + Math.sin(now / 500 + i) * 4, f = (now / 160 + i | 0) % 2 ? 3 : -2; c.beginPath(); c.moveTo(x - 4, y - f); c.lineTo(x, y); c.lineTo(x + 4, y - f); c.stroke(); }
+      const pl = now % 40000; if (pl < 9000 && cond <= 1) { const x = 260 - pl / 30, y = 118; c.strokeStyle = 'rgba(255,255,255,.6)'; c.beginPath(); c.moveTo(x + 10, y + 1); c.lineTo(x + 50, y + 1); c.stroke(); R(x, y - 1, 11, 3, '#fff'); R(x + 5, y - 4, 2, 4, '#fff'); }
+    }
+    if (cond !== 0 && cond !== 3) {
+      const cc = flash ? '#fff' : wet || cond === 2 ? (day ? '#aab0c4' : '#464a64') : (day ? '#fff' : '#5a6082');
+      for (let i = 0; i < 3; i++) { if (cond === 1 && i === 1) continue; const x = ((now / (60 + i * 25) + i * 90) % 300) - 40, y = 30 + i * 26 + (i === 1 ? 40 : 0); circle(x, y, 14, cc, true); circle(x + 16, y - 7, 18, cc, true); circle(x + 34, y, 13, cc, true); c.fillStyle = cc; c.beginPath(); c.roundRect(x - 10, y, 56, 13, 6); c.fill(); }
+    }
+    if (flash) { c.strokeStyle = '#ffec78'; c.lineWidth = 3; c.beginPath(); let x = 170, y = 50; c.moveTo(x, y); for (let k = 0; k < 6; k++) { x += k % 2 ? -10 : 8; y += 16; c.lineTo(x, y); } c.stroke(); }
+    // hills
+    const hFar = mixc(bot, snow ? '#ffffff' : day ? '#5a966e' : '#142832', .43), hNear = mixc(bot, snow ? '#e6ecf6' : day ? '#50a05a' : '#102c22', .67);
+    c.fillStyle = hFar; c.beginPath(); c.moveTo(0, 236); for (let x = 0; x <= W; x += 3) c.lineTo(x, 196 + 10 * Math.sin(x * 0.025 + 0.5) + 6 * Math.sin(x * 0.06)); c.lineTo(W, 236); c.fill();
+    c.fillStyle = hNear; c.beginPath(); c.moveTo(0, 236); for (let x = 0; x <= W; x += 3) c.lineTo(x, 214 + 8 * Math.sin(x * 0.035 + 2)); c.lineTo(W, 236); c.fill();
+    const g1 = snow ? '#ecf2fa' : wet ? '#345c40' : day ? '#6cbe5c' : '#1a3c28', g2 = snow ? '#c8d6e8' : wet ? '#244230' : day ? '#469646' : '#10281c';
+    c.fillStyle = g1; c.beginPath(); c.moveTo(0, H); for (let x = 0; x <= W; x += 4) c.lineTo(x, 232 + 3 * Math.sin(x * 0.05 + 1)); c.lineTo(W, H); c.fill(); R(0, 252, W, H - 252, g2);
+    // the tree
+    const sway = Math.sin(now / 900) * (1.5 + wind / 12), leaf = snow ? '#ecf2fa' : !day ? '#1e4632' : cond === 0 && cband <= 1 ? '#dc823c' : '#46a050';
+    R(30, 182, 10, 54, OL); R(32, 182, 6, 54, '#6e4a32');
+    [[-12, 6], [10, 4], [-1, -12]].forEach(([dx, dy]) => circle(35 + dx + sway, 176 + dy, 17, OL, true));
+    [[-12, 6], [10, 4], [-1, -12]].forEach(([dx, dy]) => circle(35 + dx + sway, 176 + dy, 15, leaf, true));
+    if (!snow && day) for (let k = 0; k < 4; k++) circle(30 + k * 6 + sway, 168 + (k % 2) * 10, 2, '#fa788c', true);
+    if (!snow) [64, 86, 168, 184, 212, 98, 226].forEach((fx, i) => { const x = fx + Math.sin(now / 700 + i) * (1 + wind / 15), y = 240 + (i % 3) * 4; c.strokeStyle = '#286e32'; c.lineWidth = 1; c.beginPath(); c.moveTo(fx, y + 6); c.lineTo(x, y); c.stroke(); const fc = ['#fa78a0', '#ffdc5a', '#fff', '#968cfa'][i % 4]; [[2, 2], [-2, 2], [2, -2], [-2, -2]].forEach(([a, b]) => circle(x + a, y + b, 1.2, day ? fc : mixc(fc, '#000000', .55), true)); R(x, y, 1, 1, '#ffc83c'); });
+    if (day && cband >= 3 && cond <= 1) for (let i = 0; i < 2; i++) { const x = 80 + i * 90 + Math.sin(now / 1100 + i * 2) * 26, y = 216 + Math.sin(now / 300 + i) * 6, f = (now / 90 + i | 0) % 2 ? 3 : 1; R(x - f, y - 2, f, 4, '#faa03c'); R(x + 1, y - 2, f, 4, '#faa03c'); }
+    if (!day && cband >= 2 && !wet && !snow) for (let i = 0; i < 6; i++) { const x = 20 + i * 38 + Math.sin(now / 1500 + i * 1.7) * 14, y = 200 + Math.sin(now / 1100 + i) * 18; circle(x, y, 2.2, `rgba(220,255,120,${0.5 + 0.5 * Math.sin(now / 300 + i * 2)})`, true); }
+    if (wet) { c.fillStyle = '#4678aa'; c.beginPath(); c.ellipse(70, 246, 22, 4, 0, 0, 7); c.ellipse(196, 250, 16, 3, 0, 0, 7); c.fill(); c.strokeStyle = 'rgba(170,210,255,.7)'; for (let k = 0; k < 2; k++) { const r = (now / 60 + k * 9) % 18; c.beginPath(); c.ellipse(70, 246, Math.max(.1, r), Math.max(.1, r / 5), 0, 0, 7); c.stroke(); } }
+    if (snow) { const sx = 206; circle(sx, 228, 13, OL, true); circle(sx, 228, 11, '#fff', true); circle(sx, 208, 9, OL, true); circle(sx, 208, 7, '#fff', true); R(sx - 2, 205, 2, 2, OL); R(sx + 2, 205, 2, 2, OL); c.fillStyle = '#fa8c28'; c.beginPath(); c.moveTo(sx, 208); c.lineTo(sx, 211); c.lineTo(sx + 7, 209); c.fill(); R(sx - 8, 214, 16, 3, '#e6465a'); R(sx - 6, 196, 12, 4, OL); R(sx - 4, 190, 8, 7, OL); }
+    if (wet || snow) wxb.drops.slice(0, cond === 4 ? 16 : 36).forEach((p, i) => {
+      p.y += snow ? (p.v >> 2) + 1 : p.v; if (snow) p.x += Math.sin((now + i * 400) / 700) * 1.2; if (p.y > 240) { p.y = -Math.random() * 40; p.x = Math.random() * 240; }
+      if (snow) R(p.x, p.y, 3, 3, '#fff'); else { c.strokeStyle = '#aac8ff'; c.lineWidth = 1; c.beginPath(); c.moveTo(p.x, p.y); c.lineTo(p.x - 2, p.y + 7); c.stroke(); }
+    });
+    if (wind >= 20 && !snow) for (let i = 0; i < 4; i++) { const x = ((now / (14 - i) + i * 70) % 300) - 30, y = 150 + i * 18 + Math.sin(now / 260 + i) * 8; c.fillStyle = i % 2 ? '#dc8c3c' : '#78aa46'; c.beginPath(); c.ellipse(x, y, 3, 2, 0, 0, 7); c.fill(); }
+    if (cond === 3) for (let b = 0; b < 4; b++) R(0, 70 + b * 44 + Math.sin(now / 1500 + b) * 6, W, 16, 'rgba(255,255,255,.43)');
+    // readout
+    dim(10, 11, 140, d ? 87 : 44, .25);
+    if (d) {
+      const sh = '#0a0e1e'; G(d.place.slice(0, 20), 17, 17, 1, sh); G(d.place.slice(0, 20), 16, 16, 1, '#fff');
+      const t = String(d.t); G(t, 18, 30, 4, sh); G(t, 16, 28, 4, '#fff');
+      c.strokeStyle = '#fff'; c.lineWidth = 1.5; c.beginPath(); c.arc(16 + t.length * 24 + 5, 33, 2.5, 0, 7); c.stroke(); G(d.fahr ? 'F' : 'C', 16 + t.length * 24 + 11, 30, 2, '#fff');
+      G(WXN[cond], 16, 62, 1, '#fff'); G(`H ${d.hi}  L ${d.lo}  feels ${d.feels}`, 16, 74, 1, '#fff'); G(`hum ${d.hum}%  wind ${d.wind}km/h`, 16, 86, 1, '#fff');
+    } else { G('no weather yet', 16, 18, 1, '#fff'); G('pick a place in the', 16, 32, 1, '#fff'); G('app: weather tab', 16, 44, 1, '#fff'); }
+    // Biscuit (pup.js holds the same sprite pixels as the firmware's pup_sprite.h)
+    const f = wet ? 5 : snow ? 6 : !day && band >= 2 ? 7 : 4 - band;
+    const scared = cond === 7, sleepy = f === 7, cold = f === 4 || f === 6, cx = 132, gy = 238;
+    const ht = now - wxb.hop, hop = ht < 420 ? Math.sin(ht / 420 * Math.PI) * 18 | 0 : 0;
+    let squash = ht >= 420 && ht < 560 ? 4 - ((ht - 420) / 35 | 0) : 0;
+    if (!hop && !squash) squash = Math.sin(now / (sleepy ? 900 : 520)) > 0.6 ? 1 : 0;
+    const lean = scared ? Math.sin(now / 45) * 1.5 : Math.max(-4, Math.min(4, tiltX * 4)) + Math.sin(now / 1400) * 1.5;
+    const shiver = (cold || scared) && (now / 70 | 0) % 2 ? 1 : 0;
+    if (!sleepy && now > wxb.turn + 5200 && Math.random() < 1 / 160) wxb.turn = now;
+    const flip = now - wxb.turn < 1600;
+    c.fillStyle = 'rgba(34,24,40,.47)'; c.beginPath(); c.ellipse(cx, gy, 24 - hop / 2, 3.5, 0, 0, 7); c.fill();
+    const spr = pupFrames();
+    if (spr) {
+      const src = spr[f][flip ? 1 : 0], P = window.PUP, h = P.h - squash, x0 = cx - (P.w >> 1) + shiver, y0 = gy - hop - h;
+      const sm = c.imageSmoothingEnabled; c.imageSmoothingEnabled = false;
+      for (let dy = 0; dy < h; dy++) c.drawImage(src, 0, dy * P.h / h | 0, P.w, 1, x0 + Math.round(lean * (h - dy) / h), y0 + dy, P.w, 1);
+      c.imageSmoothingEnabled = sm;
+    }
+    const ptop = gy - hop - 70 + squash;
+    if (sleepy) for (let i = 0; i < 2; i++) { const pz = (now / 1600 + i * 0.5) % 1; G(i ? 'z' : 'Z', cx + 24 + pz * 10 | 0, ptop + 4 - pz * 24 | 0, 1 + i, '#fff'); }
+    if (cold) for (let i = 0; i < 3; i++) { const pz = (now / 1400 + i * 0.33) % 1; circle(cx - 12 - pz * 20, ptop + 40 - pz * 12, 1 + pz * 4, `rgba(255,255,255,${1 - pz})`, true); }
+    if (f === 0 && day) for (const k of [-1, 1]) circle(cx + k * 22, ptop + 14 + ((now / 120 | 0) + (k > 0 ? 4 : 0)) % 9, 1, '#8cc8ff', true);
+    if (scared && (now / 400 | 0) % 2) G('!', cx + 26, ptop - 2, 2, '#ffdc50');
+    if (now - wxb.heart < 1500) { const pz = (now - wxb.heart) / 1500; for (const k of [-1, 1]) { const hx = cx + k * (18 + pz * 8), hy = ptop + 10 - pz * 26; c.fillStyle = '#ff6e96'; circle(hx - 2, hy, 2, '#ff6e96', true); circle(hx + 2, hy, 2, '#ff6e96', true); c.beginPath(); c.moveTo(hx - 4, hy + 1); c.lineTo(hx + 4, hy + 1); c.lineTo(hx, hy + 5); c.fill(); } }
+    // the next few hours
+    if (d && d.hours.length) {
+      dim(18, 254, 204, 24, .5);
+      d.hours.forEach((h, i) => { const x = 30 + i * 51; G(String(h.h).padStart(2, '0'), x - 4, 258, 1, '#fff'); wxIcon(h.cond, x + 18, 263, 12, h.h >= 6 && h.h < 19); G(String(h.t), x - 4, 268, 1, '#ffdc78'); });
+    }
+    if (now < wxb.sayUntil) { const w = wxb.say.length * 6 + 14, x = Math.max(10, Math.min(230 - w, 132 - w / 2)), y = 136; c.fillStyle = '#fff'; c.beginPath(); c.roundRect(x, y, w, 18, 6); c.fill(); c.strokeStyle = OL; c.lineWidth = 1; c.stroke(); G(wxb.say, x + 7, y + 5, 1, OL); }
+  }
+  window.wxPreviewTap = () => {
+    const d = window.wxData && window.wxData(), cC = d ? (d.fahr ? (d.t - 32) * 5 / 9 : d.t) : 18, band = cC >= 28 ? 4 : cC >= 20 ? 3 : cC >= 12 ? 2 : cC >= 4 ? 1 : 0;
+    wxb.say = !d ? 'arf? where am i?' : d.cond === 7 ? 'awoo! thunder!' : d.cond === 5 || d.cond === 4 ? 'arf! puddles!' : d.cond === 6 ? 'arf! snow day!!' : d.cond === 3 ? "arf? can't see" : !d.isDay ? '*yawn* night...' : band === 4 ? 'arf! so hot...' : ['arf! brrrr!', 'arf! coat weather', 'arf! hoodie time', 'arf! walkies?'][band];
+    wxb.sayUntil = performance.now() + 2200; wxb.hop = wxb.heart = performance.now();
+  };
+  const scenes = { 0: clock, 1: text, 2: photo, 3: sing, 4: music, 5: pet, 6: toy, 7: card, 8: deck, 9: eyes, 10: jukeDeck, 11: torch, 12: chargeDeck, 13: tty, 14: claude, 15: weather };
   // Quest: frames rendered by the firmware itself (desktop simulator), packed in one sheet.
   // d00..d10 day village, n00..n10 night village, then the screens behind the doors.
   // ── tap a block to open it, tap again to go back ──
@@ -784,6 +919,7 @@
   function tapAt(e) {
     const r = cv.getBoundingClientRect(), x = (e.clientX - r.left) * W / r.width, y = (e.clientY - r.top) * H / r.height;
     if (ui.mode === 6 && ui.toy >= 3) return window.toyPreviewTap(x, y, performance.now());
+    if (ui.mode === 15) return window.wxPreviewTap();
     if (ui.mode === 13) { const n = performance.now(); window.ttyPoke(n - (tapAt.last || 0) < 350); tapAt.last = n; return; }   // poke the face
     if (ui.mode === 14) {
       const n = performance.now(), dbl = n - (tapAt.last || 0) < 350; tapAt.last = n;
@@ -793,7 +929,7 @@
       return window.ccPoke();
     }
     if (ui.mode !== 8) return window.charmGoto(8);
-    for (let i = 0; i < 12; i++) if (x >= TX[i] - 2 && x < TX[i] + TW[i] + 2 && y >= TY[i] - 2 && y < (i >= 5 ? H : TY[i] + TH[i] + 3)) return deckRun(i);
+    for (let i = 0; i < 13; i++) if (x >= TX[i] - 2 && x < TX[i] + TW[i] + 2 && y >= TY[i] - 2 && y < (i >= 5 ? H : TY[i] + TH[i] + 3)) return deckRun(i);
   }
 
   let shownMode = ui.mode, zoom = null;       // zoom: { ti, s, opening }
