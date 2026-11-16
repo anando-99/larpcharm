@@ -111,6 +111,7 @@ function onStatus(s){
   if (kv.fs) { const [u, t] = kv.fs.split(',').map(Number); state.fsUsed = u; state.fsTotal = t; renderStorage(); }
   if (kv.songs === 'end' && songCollect) { mySongs = songCollect; songCollect = null; renderMySongs(); }
   if (kv.songs === 'changed') refreshMySongs();
+  if (kv.art === 'need') { lastTrack = null; lastSent = 0; setTimeout(pollSpotify, 300); }   // the charm lost the cover (it restarted): send it again
   if (kv.xfer && xferWaiter) {
     const w = xferWaiter; xferWaiter = null;
     if (kv.xfer === 'ok') w.resolve();
@@ -342,7 +343,7 @@ async function ensureToken(){
 })();
 let spTimer = null, lastTrack = null, lastPlaying = null, lastSent = 0;
 const REPEAT = { off: 0, context: 1, track: 2 };
-function startSpotifyLoop(){ clearInterval(spTimer); spTimer = setInterval(pollSpotify, 5000); pollSpotify(); }
+function startSpotifyLoop(){ lastTrack = null; lastPlaying = null; clearInterval(spTimer); spTimer = setInterval(pollSpotify, 5000); pollSpotify(); }
 async function pollSpotify(){
   if (!$('spLive').checked || !rxChar || document.hidden) return;
   try {

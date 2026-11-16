@@ -1,4 +1,4 @@
-// A working copy of the charm's screen. It draws the same deck and blocks as firmware 8.8,
+// A working copy of the charm's screen. It draws the same deck and blocks as firmware 8.9,
 // follows the controls on this page, and opens a block when you tap it.
 (() => {
   const $ = id => document.getElementById(id);
@@ -152,7 +152,7 @@
   const boot = performance.now();
   const klog = [];
   const charmLog = window.charmLog = msg => { klog.push({ t: performance.now() - boot, s: String(msg).replace(/[^\x20-\x7e]/g, '?').slice(0, 31) }); if (klog.length > 8) klog.shift(); };
-  ['kernel: larp-os 8.8 up', 'imu: qmi8658 online', 'fs: ffat mounted', 'rtc: clock ok'].forEach(charmLog);
+  ['kernel: larp-os 8.9 up', 'imu: qmi8658 online', 'fs: ffat mounted', 'rtc: clock ok'].forEach(charmLog);
   const typing = { cmd: '', at: 0, tile: -1 };
   const scope = new Array(74).fill(0); let scopeHead = 0, lastTilt = 0;
   const bar = (f, n, fill, head, empty) => { const k = Math.round(Math.max(0, Math.min(1, f)) * (n - 2)); let s = '['; for (let i = 0; i < n - 2; i++) s += i < k - 1 ? fill : i === k - 1 ? head : empty; return s + ']'; };
@@ -845,234 +845,129 @@
   }
 
 
-  // ── weather: a pixel-art kid in the Japanese countryside (same art and scene as the firmware's drawWeather) ──
-  // wxart.js carries the art (made by firmware/tools/mkwxart.py, the same pixels as wx_art.h).
+  // ── weather: `curl wttr.in` (same sprites and layout as the firmware's drawWeather) ──
   const WXN = ['clear', 'partly cloudy', 'cloudy', 'fog', 'drizzle', 'rain', 'snow', 'thunderstorm'];
-  const OL = '#221828';
-  const WXB = { SUMMER: 0, SPRING: 1, AUTUMN: 2, WINTER: 3, NIGHT: 4 }, WXG = { NIGHT: 1, OVERCAST: 2, RAIN: 4, FOG: 8, FLASH: 16, DUSK: 32 };
-  const WX_KX = 124, WX_GY = 252;
-  const mixc = (a, b, t) => { const A = rgb(a), B = rgb(b); return `rgb(${A.map((v, i) => Math.round(v + (B[i] - v) * t)).join(',')})`; };
-  function wxIcon(cond, x, y, s, day) {
-    if (cond <= 1) { if (day) circle(x - (cond ? s / 3 : 0), y - (cond ? s / 3 : 0), s / 2, '#ffce3c', true); else { circle(x - s / 4, y - s / 4, s / 2, '#f0ecc8', true); circle(x, y - s / 2, s / 2, '#0a0e1e', true); } }
-    if (cond) { const cc = cond >= 5 || cond === 2 ? '#969cb0' : '#ecf0f8'; circle(x - s / 3, y + s / 8, s / 3, cc, true); circle(x + s / 4, y, s / 2.5, cc, true); c.fillStyle = cc; c.beginPath(); c.roundRect(x - s / 1.6, y + s / 8, s * 1.2, s / 3, s / 6); c.fill(); }
-    if (cond === 4 || cond === 5 || cond === 7) { c.strokeStyle = '#5aaaff'; c.lineWidth = 1; for (let i = -1; i <= 1; i++) { c.beginPath(); c.moveTo(x + i * s / 3, y + s / 2); c.lineTo(x + i * s / 3 - 2, y + s / 2 + s / 3); c.stroke(); } }
-    if (cond === 6) for (let i = -1; i <= 1; i++) R(x + i * s / 3 - 1, y + s / 2 + 1, 2, 2, '#fff');
-    if (cond === 3) for (let i = 0; i < 3; i++) R(x - s / 2 + (i % 2) * 2, y - s / 4 + i * s / 4, s - 2, 1, '#ecf0f8');
-  }  const wxb = { sayUntil: 0, say: '', hop: -1e9, heart: -1e9, turn: 0, spin: 0 };
-  const wxH = (i, k) => { let x = (Math.imul(i, 2654435761) ^ Math.imul(k, 40503)) >>> 0; x ^= x >>> 15; x = Math.imul(x, 2246822519) >>> 0; x ^= x >>> 13; return x >>> 0; };
-  const P = (x, y, col) => R(x | 0, y | 0, 1, 1, col);
-  const PM = (x, y, col, a) => { if (a <= 0) return; c.globalAlpha = Math.min(1, a / 255); R(x | 0, y | 0, 1, 1, col); c.globalAlpha = 1; };
-  const glow = (x, y, r, col, a) => { const g = c.createRadialGradient(x, y, 0, x, y, r); g.addColorStop(0, col); g.addColorStop(1, 'rgba(0,0,0,0)'); c.globalAlpha = Math.min(1, a / 255); c.fillStyle = g; c.fillRect(x - r, y - r, 2 * r, 2 * r); c.globalAlpha = 1; };
-  const hex = (r, g, b) => `rgb(${r | 0},${g | 0},${b | 0})`;
-  function wxGrade(r, g, b, gr) {
-    let L;
-    if (gr & WXG.OVERCAST) { L = .3 * r + .59 * g + .11 * b; r = (r + (L - r) * .35) * .86; g = (g + (L - g) * .35) * .88; b = (b + (L - b) * .3) * .93; }
-    if (gr & WXG.RAIN) { L = .3 * r + .59 * g + .11 * b; r = (r + (L - r) * .45) * .66; g = (g + (L - g) * .45) * .7; b = (b + (L - b) * .4) * .78 + 10; }
-    if (gr & WXG.FOG) { L = .3 * r + .59 * g + .11 * b; r += (L - r) * .3; g += (L - g) * .3; b += (L - b) * .3; r += (206 - r) * .42; g += (210 - g) * .42; b += (216 - b) * .42; }
-    if (gr & WXG.NIGHT) { r *= .3; g *= .36; b = b * .55 + 16; }
-    if (gr & WXG.DUSK) { r *= .72; g *= .76; b = b * .88 + 10; }
-    if (gr & WXG.FLASH) { r += (255 - r) * .55; g += (255 - g) * .55; b += (255 - b) * .6; }
-    const k = v => Math.max(0, Math.min(255, Math.round(v)));
-    return [k(r), k(g), k(b)];
-  }
-  // the art as images, recoloured per grade and cached
-  const wxImgs = {}, wxCache = new Map();
-  function wxArt(name, src, gr) {
-    const key = name + ':' + gr;
-    if (wxCache.has(key)) return wxCache.get(key);
-    let im = wxImgs[name];
-    if (!im) { im = wxImgs[name] = new Image(); im.src = src; }
-    if (!im.complete || !im.naturalWidth) return null;
-    const cv2 = document.createElement('canvas'); cv2.width = im.naturalWidth; cv2.height = im.naturalHeight;
-    const g = cv2.getContext('2d'); g.drawImage(im, 0, 0);
-    if (gr) {
-      const d = g.getImageData(0, 0, cv2.width, cv2.height), a = d.data;
-      for (let i = 0; i < a.length; i += 4) if (a[i + 3]) { const v = wxGrade(a[i], a[i + 1], a[i + 2], gr); a[i] = v[0]; a[i + 1] = v[1]; a[i + 2] = v[2]; }
-      g.putImageData(d, 0, 0);
-    }
-    wxCache.set(key, cv2); return cv2;
-  }
-  function wxLook(d, now) {
-    const cC = d ? (d.fahr ? (d.t - 32) * 5 / 9 : d.t) : 16;
-    const L = { band: !d ? 2 : cC >= 28 ? 4 : cC >= 20 ? 3 : cC >= 12 ? 2 : cC >= 4 ? 1 : 0, day: !d || d.isDay, cond: d ? d.cond : 1, wind: d ? d.wind || 0 : 8, have: !!d };
-    L.wet = !!d && (L.cond === 4 || L.cond === 5 || L.cond === 7); L.snow = !!d && L.cond === 6;
-    const ph = now % 3100; L.flash = !!d && L.cond === 7 && (ph < 140 || (ph > 220 && ph < 290));
-    L.bg = L.snow || L.band === 0 ? WXB.WINTER : L.band === 1 ? WXB.AUTUMN : L.band === 2 ? WXB.SPRING : WXB.SUMMER;
-    L.grade = 0;
-    if (!L.day) { if (L.bg === WXB.SUMMER && !L.wet && L.cond <= 2) L.bg = WXB.NIGHT; else L.grade |= WXG.NIGHT; }
-    if (L.wet) L.grade |= WXG.RAIN; else if (d && (L.cond === 2 || L.snow)) L.grade |= WXG.OVERCAST; else if (d && L.cond === 3) L.grade |= WXG.FOG;
-    if (L.flash) L.grade |= WXG.FLASH;
-    return L;
-  }
-  function wxSkyPiece(k, x, y, gr) { const A = window.WXART, s = wxArt('sky', A.sky.src, gr); if (s) c.drawImage(s, A.sky.x[k], 0, A.sky.w[k], A.sky.h[k], x | 0, y | 0, A.sky.w[k], A.sky.h[k]); }
-  function wxSky(L, now) {
-    const A = window.WXART, cd = L.cond;
-    let t, b;
-    if (L.flash) [t, b] = [[214, 214, 255], [255, 255, 255]];
-    else if (!L.day) [t, b] = L.wet ? [[8, 10, 20], [30, 34, 52]] : cd <= 1 ? [[4, 8, 26], [30, 42, 92]] : [[14, 16, 30], [44, 48, 70]];
-    else if (cd === 7) [t, b] = [[42, 36, 68], [98, 94, 124]];
-    else if (L.wet) [t, b] = [[72, 88, 114], [140, 152, 172]];
-    else if (L.snow) [t, b] = [[148, 164, 194], [218, 226, 240]];
-    else if (cd === 3) [t, b] = [[150, 156, 168], [206, 210, 216]];
-    else if (cd === 2) [t, b] = [[108, 132, 168], [188, 200, 218]];
-    else if (L.band >= 4) [t, b] = [[52, 128, 230], [255, 214, 150]];
-    else [t, b] = [[52, 128, 230], [160, 214, 255]];
-    const sky = A.bg[L.bg].y0 + 40;
-    for (let y = 0; y < sky; y += 4) { const k = y / sky; R(0, y, W, 4, hex(t[0] + (b[0] - t[0]) * k, t[1] + (b[1] - t[1]) * k, t[2] + (b[2] - t[2]) * k)); }
-    R(0, sky, W, H - sky, hex(...b));
-    if (!L.day && cd <= 1) {
-      for (let i = 0; i < 30; i++) {
-        const x = wxH(i, 1) % W, y = wxH(i, 2) % (sky - 8), tw = ((now / 300 | 0) + wxH(i, 3)) % 9;
-        P(x, y, tw === 0 ? '#5a648c' : i % 5 === 0 ? '#fff0c8' : '#fff');
-        if (i % 7 === 0 && tw > 5) for (const [dx, dy] of [[-1, 0], [1, 0], [0, -1], [0, 1]]) P(x + dx, y + dy, '#7882b4');
+  const WXS = {"SUN_A": [["    \\   /    ", "     .-.     ", "  -- (   ) --", "     `-'     ", "    /   \\    "], ["    y   y    ", "     yyy     ", "  yy yyyyy yy", "     yyy     ", "    y   y    "]], "SUN_B": [["      .      ", "   \\ .-. /   ", "  - (   ) -  ", "   / `-' \\   ", "      '      "], ["      y      ", "   y yyy y   ", "  y yyyyy y  ", "   y yyy y   ", "      y      "]], "MOON": [["  .     .--. ", "       /  .' ", "   *  |  (   ", "       \\  '. ", " .      '--' "], ["  d     mmmm ", "       m  mm ", "   d  m  m   ", "       m  mm ", " d      mmmm "]], "PARTLY": [["   \\  /      ", " _ /\"\".-.    ", "   \\_(   ).  ", "   /(___(__) ", "             "], ["   y  y      ", " y yyywww    ", "   yywwwwww  ", "   ywwwwwwww ", "             "]], "PARTLYN": [["  *    .     ", "   (  .-.    ", "    \\(   ).  ", "    (___(__) ", "             "], ["  d    d     ", "   m  www    ", "    mwwwwww  ", "    wwwwwwww ", "             "]], "CLOUDY": [["             ", "     .--.    ", "  .-(    ).  ", " (___.__)__) ", "             "], ["             ", "     wwww    ", "  ggwwwwwww  ", " wwwwwwwwggg ", "             "]], "FOG": [["             ", " _ - _ - _ - ", "  _ - _ - _  ", " _ - _ - _ - ", "             "], ["             ", " f f f f f f ", "  f f f f f  ", " f f f f f f ", "             "]], "CLOUD": [["     .-.     ", "    (   ).   ", "   (___(__)  ", "             ", "             "], ["     www     ", "    wwwwww   ", "   wwwwwwww  ", "             ", "             "]], "UNKNOWN": [["    .-.      ", "     __)     ", "    (        ", "     `-'     ", "      *      "], ["    www      ", "     www     ", "    w        ", "     www     ", "      y      "]]};
+  const WXS_ORDER = ["SUN_A", "SUN_B", "MOON", "PARTLY", "PARTLYN", "CLOUDY", "FOG", "CLOUD", "UNKNOWN"];
+  const WXCOL = {"y": "#ffce3c", "w": "#e2e8f2", "g": "#8c94a8", "b": "#5aaaff", "s": "#f0f8ff", "m": "#f0ecc8", "o": "#ffe65a", "f": "#aab0be", "d": "#788296", "r": "#ff6078", "t": "#e8be78"};
+  const wxb = { open: 0, hop: 0, spin: 0, say: '', sayUntil: 0, shownMode: -1 };
+  const wxFlash = now => { const k = now % 2600; return k < 140 || (k > 230 && k < 300); };
+  function wxSprite(k, x, y, sz, now, cloud, rowShift = 0) {
+    const [L, M] = WXS[k];
+    for (let r = 0; r < 5; r++) {
+      const dx = rowShift ? Math.trunc(Math.sin(now / 900 + r * 1.3) * rowShift) : 0;
+      for (let col = 0; col < 13; col++) {
+        const ch = L[r][col]; let m = M[r][col];
+        if (ch === ' ') continue;
+        if (m === 'w') m = cloud;
+        if (m === 'd' && (((now / 600 | 0) + col + r) & 1)) m = 's';
+        G(ch, x + col * 6 * sz + dx, y + r * 8 * sz, sz, WXCOL[m]);
       }
-      const sp = now % 9000; if (sp < 600) { const x = 70 + sp / 5, y = 14 + sp / 16; for (let k = 0; k < 14; k++) PM(x - k * 2, y - k, '#fff', 255 - k * 18); }
-    }
-    if (L.day && cd <= 1) wxSkyPiece(4, 186, 18 + Math.sin(now / 2200) * 1.5, 0);
-    if (!L.day && cd <= 2) wxSkyPiece(5, 192, 18, 0);
-    const SETS = [[2, -1, -1, -1], [0, 2, 1, -1], [0, 1, 0, 2], [1, 0, 2, 1], [3, 1, -1, -1], [3, 0, 3, -1], [1, 0, -1, -1], [3, 3, 3, 0]], CY = [28, 54, 12, 70];
-    const sg = L.grade | (L.day || L.bg !== WXB.NIGHT ? 0 : WXG.NIGHT), wind = 3 + L.wind / 4;
-    for (let i = 0; i < 4; i++) {
-      const k = SETS[cd][i]; if (k < 0 || (!L.day && cd === 0)) continue;
-      const w = A.sky.w[k], span = W + w + 60;
-      wxSkyPiece(k, Math.floor((now / 1000 * wind * (0.6 + i * 0.25) + wxH(i, cd) % span) % span) - w - 30, CY[i], sg);
-    }
-    if (L.flash) {
-      const s = now / 3100 | 0; let x = 150 + s % 3 * 22, y = 40;
-      while (y < sky + 20) { const nx = x + wxH(s, y) % 13 - 6; for (let k = 0; k <= 8; k++) { const px = x + (nx - x) * k / 8 | 0, py = y + k; P(px, py, '#fffac8'); P(px + 1, py, '#fff'); PM(px - 1, py, '#fff08c', 120); PM(px + 2, py, '#fff08c', 120); } x = nx; y += 8; }
     }
   }
-  function wxDragonfly(x, y, body, now) {
-    R(x | 0, y | 0, 6, 1, body); P(x + 6, y, '#222');
-    const up = (now / 40 | 0) % 2;
-    for (const dx of [3, 4]) { PM(x + dx, y - 1 - up, '#dcecff', 200); PM(x + dx, y + 1 + up, '#dcecff', 200); }
+  function wxPrecip(cond, x, y, sz, now) {
+    const cw = 6 * sz, rh = 8 * sz;
+    for (let r = 3; r <= 4; r++) for (let col = 3; col <= 10; col++) {
+      let ch = '', k = 'b';
+      if (cond === 6) { const ph = now / 420 | 0; if ((col + r * 2 + ph) % 3 === 0) { ch = '*'; k = 's'; } }
+      else if (cond === 4) { const ph = now / 260 | 0; if ((col + r * 2 + ph) % 4 === 0) ch = "'"; }
+      else { const ph = now / 180 | 0; if ((col + r + ph) % 2 === 0) ch = ((col + ph) & 1) ? ',' : "'"; }
+      if (cond === 7 && col >= 5 && col <= 8) ch = '';
+      if (ch) G(ch, x + col * cw, y + r * rh, sz, WXCOL[k]);
+    }
+    if (cond === 7) { const bc = wxFlash(now) ? WXCOL.o : '#786428'; G('_', x + 6 * cw, y + 3 * rh - 4, sz, bc); G('/', x + 7 * cw, y + 3 * rh, sz, bc); G('/', x + 6 * cw, y + 4 * rh, sz, bc); }
   }
-  function wxBack(L, now) {
-    const cd = L.cond, fair = !L.wet && !L.snow && cd !== 3;
-    if (L.day && !L.wet && cd !== 3 && L.bg !== WXB.WINTER)
-      for (let i = 0; i < 3; i++) {
-        const x = ((now / 38 | 0) + i * 97) % 320 - 40, y = 84 + i * 9 + Math.sin(now / 600 + i) * 3 | 0, f = ((now / 170 | 0) + i) % 2, col = cd === 2 ? '#1e1e24' : '#28283c';
-        P(x - 2, y - f, col); P(x - 1, y - (f ? 0 : 1), col); P(x, y, col); P(x + 1, y - (f ? 0 : 1), col); P(x + 2, y - f, col);
+  function wxBigIcon(d, x, y, sz, now) {
+    if (!d) return wxSprite('UNKNOWN', x, y, sz, now, 'w');
+    const day = d.isDay, drift = Math.trunc(Math.sin(now / 1400) * 3);
+    switch (d.cond) {
+      case 0: return wxSprite(day ? ((now / 700 | 0) % 2 ? 'SUN_B' : 'SUN_A') : 'MOON', x, y, sz, now, 'w');
+      case 1: return wxSprite(day ? 'PARTLY' : 'PARTLYN', x + drift, y, sz, now, 'w');
+      case 2: return wxSprite('CLOUDY', x + drift, y, sz, now, 'w');
+      case 3: return wxSprite('FOG', x, y, sz, now, 'w', 5);
+      default: {
+        const dark = d.cond === 5 || d.cond === 7;
+        wxSprite('CLOUD', x + drift, y, sz, now, d.cond === 7 && wxFlash(now) ? 's' : dark ? 'g' : 'w');
+        wxPrecip(d.cond, x, y, sz, now);
       }
-    if (L.day && fair && (L.bg === WXB.SUMMER || L.bg === WXB.AUTUMN))
-      for (let i = 0; i < 2; i++) {
-        const seg = (now / 1300 | 0) + i * 7, t = now % 1300, e = t < 500 ? 1 - (1 - t / 500) ** 2 : 1;
-        const x0 = 20 + wxH(seg, i) % 190, y0 = 150 + wxH(seg, i + 9) % 80, x1 = 20 + wxH(seg + 1, i) % 190, y1 = 150 + wxH(seg + 1, i + 9) % 80;
-        wxDragonfly(x0 + (x1 - x0) * e, y0 + (y1 - y0) * e + Math.sin(now / 90 + i), L.bg === WXB.AUTUMN ? '#dc3224' : '#3c96e6', now);
-      }
-    if (L.day && fair && (L.bg === WXB.SUMMER || L.bg === WXB.SPRING))
-      for (let i = 0; i < 2; i++) {
-        const x = 40 + i * 120 + Math.sin(now / 1700 + i * 2) * 40 + Math.sin(now / 430 + i) * 6 | 0, y = 214 + Math.sin(now / 900 + i * 3) * 14 | 0, col = i ? '#ffec78' : '#fff', open = ((now / 110 | 0) + i) % 2;
-        P(x, y, '#3c3228');
-        if (open) { P(x - 1, y - 1, col); P(x - 2, y - 1, col); P(x - 1, y, col); P(x + 1, y - 1, col); P(x + 2, y - 1, col); P(x + 1, y, col); } else { P(x - 1, y - 1, col); P(x + 1, y - 1, col); }
-      }
-    if (L.day && fair && L.bg === WXB.SUMMER) for (let i = 0; i < 10; i++) PM(wxH(i, 4) % W + Math.sin(now / 1200 + i) * 8, 250 - ((now / 40 | 0) + (wxH(i, 5) & 1023)) % 160, '#fffad2', 150);
-    if (L.bg === WXB.WINTER && L.day && !L.wet)
-      for (let i = 0; i < 10; i++) { const s = (now / 160 | 0) + i * 13; if (wxH(s, i) % 3) continue; const x = wxH(s, 7) % W, y = 190 + wxH(s, 8) % 60; P(x, y, '#fff'); for (const [dx, dy] of [[-1, 0], [1, 0], [0, -1], [0, 1]]) PM(x + dx, y + dy, '#fff', 140); }
-    if (!L.day && !L.wet && !L.snow && L.band >= 2)
-      for (let i = 0; i < 12; i++) {
-        const x = 10 + wxH(i, 6) % 220 + Math.sin(now / 1500 + i * 1.7) * 14, y = 150 + wxH(i, 7) % 90 + Math.sin(now / 1100 + i) * 10, p = .5 + .5 * Math.sin(now / 380 + i * 2.1);
-        if (p < .15) continue; glow(x, y, 4, '#c8ff6e', p * 150); P(x, y, '#f0ffaa');
-      }
+    }
   }
-  function wxFront(L, now) {
-    const cd = L.cond, wind = L.wind;
-    if (L.wet) {
-      const n = cd === 4 ? 26 : cd === 7 ? 70 : 54, len = cd === 4 ? 4 : 7, slant = Math.min(wind / 8 | 0, 4), col = L.flash ? '#fff' : L.day ? '#bed6ff' : '#788cbe';
-      for (let i = 0; i < n; i++) {
-        const v = 7 + wxH(i, 11) % 5, ground = 200 + wxH(i, 12) % 52, y = ((now / 33 | 0) * v + (wxH(i, 13) & 1023)) % (ground + 30) - 30, x = wxH(i, 14) % (W + 40) - 20 + (y * slant / 12 | 0);
-        if (y < ground - len) for (let k = 0; k < len; k++) PM(x - (k * slant / 6 | 0), y - k, col, 210 - k * 18);
-        else { const dd = y - (ground - len); if (dd < 6) { PM(x - dd, ground - (dd >> 1), col, 200); PM(x + dd, ground - (dd >> 1), col, 200); PM(x, ground, col, 140); } }
-      }
-    }
-    if (L.snow)
-      for (let i = 0; i < 70; i++) {
-        const sz = wxH(i, 21) % 2 === 0 ? 2 : 1, v = 2 + wxH(i, 22) % 3 + sz, y = ((now / 25 | 0) * v / 4 + (wxH(i, 23) & 1023)) % 300 - 10 | 0, x = wxH(i, 24) % 260 - 10 + Math.sin(now / 700 + i) * 4 + y * wind / 300 | 0;
-        R(x, y, sz, sz, '#fff'); if (sz === 2) PM(x - 1, y, '#fff', 90);
-      }
-    if (!L.wet && !L.snow && L.bg === WXB.SPRING) {
-      const PET = ['#ffb7c5', '#ffd8e2', '#ec8ca8'];
-      for (let i = 0; i < 18; i++) {
-        const v = 3 + wxH(i, 31) % 3, y = ((now / 40 | 0) * v / 3 + (wxH(i, 32) & 1023)) % 310 - 20 | 0, x = ((wxH(i, 33) & 1023) + (now / 60 | 0) * (1 + (wind / 6 | 0))) % 280 - 20 + Math.sin(now / 500 + i) * 5 | 0;
-        const col = PET[i % 3], ph = ((now / 160 | 0) + i) % 3;
-        P(x, y, col); if (ph === 0) P(x + 1, y, col); else if (ph === 1) P(x, y + 1, col); else { P(x + 1, y, col); P(x, y + 1, col); }
-      }
-    }
-    if (!L.wet && !L.snow && L.bg === WXB.AUTUMN) {
-      const LEAF = ['#de3e28', '#f27a2a', '#fab036'];
-      for (let i = 0; i < 10; i++) {
-        const v = 2 + wxH(i, 41) % 3, y = ((now / 37 | 0) * v / 3 + (wxH(i, 42) & 1023)) % 310 - 20 | 0, x = ((wxH(i, 43) & 1023) + (now / 70 | 0) * (1 + (wind / 5 | 0))) % 280 - 20 + Math.sin(now / 650 + i) * 9 | 0;
-        const col = LEAF[i % 3], dk = mixc(col, '#000000', .27);
-        if (((now / 220 | 0) + i) % 2) { P(x, y - 1, col); P(x - 1, y, col); P(x, y, col); P(x + 1, y, col); P(x, y + 1, dk); }
-        else { P(x - 1, y - 1, col); P(x + 1, y - 1, col); P(x, y, col); P(x - 1, y + 1, col); P(x + 1, y + 1, dk); }
-      }
-    }
-    if (L.have && cd === 3)
-      for (let b = 0; b < 4; b++) { const y0 = 96 + b * 44 + Math.sin(now / 1500 + b) * 6, g = c.createLinearGradient(0, y0, 0, y0 + 18); g.addColorStop(0, 'rgba(230,232,236,0)'); g.addColorStop(.5, 'rgba(230,232,236,.35)'); g.addColorStop(1, 'rgba(230,232,236,0)'); c.fillStyle = g; c.fillRect(0, y0, W, 18); }
-    if (wind >= 20 && !L.snow)
-      for (let i = 0; i < 4; i++) { const len = 14 + wxH(i, 51) % 12, y = 110 + wxH(i, 52) % 130, x = ((now / 40 | 0) * (8 + i) + (wxH(i, 53) & 1023)) % 360 - 60; for (let k = 0; k < len; k++) PM(x + k, y + (k > len - 4 ? -((k - len + 4) >> 1) : 0), '#fff', 120 - k * 4); }
+  const WXMINI = [['-\x0F-', 'yyy', '.).', 'dmd'], ['\x0F~~', 'yww', ')~~', 'mww'], ['~~~', 'www'], ['=-=', 'fff'], ["'.'", 'bbb'], [",',", 'bbb'], ['*.*', 'sss'], ["'/'", 'bob']];
+  function wxMini(cond, day, cx, y) {
+    const e = WXMINI[cond] || ['???', 'www'], [s, m] = !day && e[2] ? [e[2], e[3]] : [e[0], e[1]];
+    for (let i = 0; i < 3; i++) G(s[i], cx - 9 + i * 6, y, 1, WXCOL[m[i]]);
   }
-  function wxKid(L, now) {
-    const A = window.WXART, K = A.kid;
-    const f = L.wet ? 5 : L.snow ? 6 : !L.day && L.band >= 2 ? 7 : 4 - L.band;
-    const scared = L.have && L.cond === 7, cold = f === 4 || f === 6, cx = WX_KX, gy = WX_GY;
-    const ht = now - wxb.hop; let hop = ht < 420 ? Math.sin(ht / 420 * Math.PI) * 18 | 0 : 0;
-    let squash = ht >= 420 && ht < 560 ? 4 - ((ht - 420) / 35 | 0) : 0;
-    if (!hop && !squash) squash = Math.sin(now / 560) > .6 ? 1 : 0;
-    const lean = scared ? Math.sin(now / 45) * 1.5 : Math.max(-4, Math.min(4, tiltX * 4)) + Math.sin(now / 1400) * 1.5;
-    const shiver = (cold || scared) && (now / 70 | 0) % 2 ? 1 : 0;
-    if (now > wxb.turn + 5200 && Math.random() < 1 / 160) wxb.turn = now;
-    const flip = now - wxb.turn < 1600 || (now < wxb.spin && (now / 110 | 0) % 2);
-    if (now < wxb.spin) hop = Math.max(hop, Math.abs(Math.sin(now / 110)) * 6 | 0);
-    c.fillStyle = 'rgba(20,16,30,.43)'; c.beginPath(); c.ellipse(cx, gy, 17 - hop / 3, 2.5, 0, 0, 7); c.fill();
-    const top = gy - hop - K.h + squash, lx = flip ? K.w - 1 - K.lantern[0] : K.lantern[0];
-    if (f === 7) glow(cx - (K.w >> 1) + lx, top + K.lantern[1], 16, '#ffb45a', 110 + Math.sin(now / 140) * 20);
-    const strip = wxArt('kid', K.src, L.day ? 0 : WXG.DUSK);
-    if (strip) {
-      const h = K.h - squash, x0 = cx - (K.w >> 1) + shiver, y0 = gy - hop - h, sm = c.imageSmoothingEnabled;
-      c.imageSmoothingEnabled = false;
-      c.save(); if (flip) { c.translate(2 * x0 + K.w, 0); c.scale(-1, 1); }
-      for (let dy = 0; dy < h; dy++) { const sh = Math.round(lean * (h - dy) / h) * (flip ? -1 : 1); c.drawImage(strip, f * K.w, dy * K.h / h | 0, K.w, 1, x0 + sh, y0 + dy, K.w, 1); }
-      c.restore(); c.imageSmoothingEnabled = sm;
+  const wxC = d => d ? (d.fahr ? Math.round((d.t - 32) * 5 / 9) : d.t) : 15;
+  function wxCritter(d, now, x, y) {
+    let t1 = '', t2 = '', face = '(^_^)', c1 = 'w', c2 = 'w';
+    const tc = wxC(d), day = !d || d.isDay;
+    if (!d) { t2 = '  ?  '; c2 = 'd'; face = '(o_o)'; }
+    else switch (d.cond) {
+      case 4: case 5: t1 = '/^^^\\'; c1 = 'b'; t2 = '  |  '; face = '(._.)'; break;
+      case 7: t1 = '/^^^\\'; c1 = 'b'; t2 = '  |  '; face = '(O_O)'; break;
+      case 6: t1 = ' .*. '; c1 = 'r'; t2 = '/___\\'; c2 = 'r'; face = '(^o^)'; break;
+      case 3: t2 = '  ?  '; c2 = 'd'; face = '(o_o)'; break;
+      case 2: face = '(-_-)'; break;
+      default:
+        if (day) { t1 = ' ___ '; t2 = '/___\\'; c1 = c2 = 't'; face = tc >= 28 ? '(^_^;)' : tc < 5 ? '(>_<)' : '(^_^)'; }
+        else { const f = (now / 700 | 0) % 2; t1 = f ? '   z ' : '    z'; t2 = f ? '  z  ' : '   z '; c1 = c2 = 'd'; face = '(-_-)'; }
     }
-    if (f === 7) glow(cx - (K.w >> 1) + lx, top + K.lantern[1], 4, '#ffe6a0', 120);
-    if (cold) for (let i = 0; i < 3; i++) { const pz = (now / 1400 + i * .33) % 1; glow(cx + (flip ? -8 : 8) + (flip ? -1 : 1) * pz * 16, top + 28 - pz * 10, 1 + pz * 4, '#fff', 200 * (1 - pz)); }
-    if (f === 0 && L.day) { const k = (now / 900 | 0) % 2 ? 1 : -1, sy = (now / 90 | 0) % 10; P(cx + k * 17, top + 14 + sy, '#96d2ff'); P(cx + k * 17, top + 15 + sy, '#6eb4ff'); }
-    if (scared && (now / 400 | 0) % 2) G('!', cx + 22, top - 4, 2, '#ffdc50');
-    if (now - wxb.heart < 1500) { const pz = (now - wxb.heart) / 1500; for (const k of [-1, 1]) { const hx = cx + k * (18 + pz * 8), hy = top + 8 - pz * 24; circle(hx - 2, hy, 2, '#ff6e96', true); circle(hx + 2, hy, 2, '#ff6e96', true); c.fillStyle = '#ff6e96'; c.beginPath(); c.moveTo(hx - 4, hy + 1); c.lineTo(hx + 4, hy + 1); c.lineTo(hx, hy + 5); c.fill(); } }
+    if (now < wxb.spin) face = '(@_@)';
+    if (now % 3200 < 140 && face[1] !== '-') face = face[0] + '-' + face[2] + '-' + face.slice(4);
+    let jx = 0, jy = 0;
+    if (now < wxb.spin) jx = Math.trunc(Math.sin(now / 60) * 3);
+    else if (d && tc < 5 && d.cond !== 6) jx = frame & 1 ? 1 : -1;
+    const ht = now - wxb.hop; if (wxb.hop && ht < 500) jy = -Math.trunc(Math.sin(ht / 500 * Math.PI) * 10);
+    G(t1, x + jx, y + jy, 2, WXCOL[c1]); G(t2, x + jx, y + 16 + jy, 2, WXCOL[c2]); G(face, x + jx, y + 32 + jy, 2, '#fff');
+    let g = '____________', gc = 'd';
+    if (d && (d.cond === 4 || d.cond === 5 || d.cond === 7)) { g = (now / 500 | 0) % 2 ? '~-~-~-~-~-~-' : '-~-~-~-~-~-~'; gc = 'b'; }
+    else if (d && d.cond === 6) { g = '*.**.*.**.*.'; gc = 's'; }
+    G(g, x - 2, y + 50, 1, WXCOL[gc]);
   }
   function weather() {
-    const d = window.wxData && window.wxData(), now = performance.now(), A = window.WXART;
-    if (!A) { R(0, 0, W, H, '#000'); return; }
-    const L = wxLook(d, now);
-    wxSky(L, now);
-    const bg = wxArt('bg' + L.bg, A.bg[L.bg].src, L.grade);
-    if (bg) c.drawImage(bg, 0, A.bg[L.bg].y0);
-    wxBack(L, now);
-    dim(10, 11, 140, d ? 87 : 44, .25);
+    const d = window.wxData && window.wxData(), now = performance.now(), DIMA = mixk(ACC, .45);
+    if (wxb.shownMode !== 15) wxb.open = now;
+    wxb.shownMode = 15;
+    R(0, 0, W, H, TTY_BG);
+    const slug = (d ? d.place : 'here').toLowerCase().replace(/ /g, '+').replace(/[^\x20-\x7e]/g, '?').slice(0, 20), cmd = 'curl wttr.in/' + slug;
+    const typed = calm ? cmd.length : Math.min(cmd.length, (now - wxb.open) / 22 | 0);
+    G('$', 14, 3, 1, ACC); G(cmd.slice(0, Math.min(typed, 13)), 26, 3, 1, '#fff'); if (typed > 13) G(cmd.slice(13, typed), 26 + 78, 3, 1, ACC);
+    if (typed < cmd.length) { R(26 + typed * 6, 2, 6, 9, ACC); return; }
+    if (!calm && now - wxb.open < cmd.length * 22 + 160) return;
+    G('Weather report:', 14, 15, 1, TTY_DIM); G(d ? d.place.slice(0, 19) : 'unknown', 110, 15, 1, TTY_TEXT);
+    wxBigIcon(d, 6, 30, 2, now);
     if (d) {
-      const sh = '#0a0e1e'; G(d.place.slice(0, 20), 17, 17, 1, sh); G(d.place.slice(0, 20), 16, 16, 1, '#fff');
-      const t = String(d.t); G(t, 18, 30, 4, sh); G(t, 16, 28, 4, '#fff');
-      c.strokeStyle = '#fff'; c.lineWidth = 1.5; c.beginPath(); c.arc(16 + t.length * 24 + 5, 33, 2.5, 0, 7); c.stroke(); G(d.fahr ? 'F' : 'C', 16 + t.length * 24 + 11, 30, 2, '#fff');
-      G(WXN[d.cond], 16, 62, 1, '#fff'); G(`H ${d.hi}  L ${d.lo}  feels ${d.feels}`, 16, 74, 1, '#fff'); G(`hum ${d.hum}%  wind ${d.wind}km/h`, 16, 86, 1, '#fff');
-    } else { G('no weather yet', 16, 18, 1, '#fff'); G('pick a place in the', 16, 32, 1, '#fff'); G('app: weather tab', 16, 44, 1, '#fff'); }
-    wxKid(L, now);
-    wxFront(L, now);
-    if (d && d.hours.length) {
-      dim(18, 254, 204, 24, .45);
-      d.hours.forEach((h, i) => { const x = 30 + i * 51; G(String(h.h).padStart(2, '0'), x - 4, 258, 1, '#fff'); wxIcon(h.cond, x + 18, 263, 12, h.h >= 6 && h.h < 19); G(String(h.t), x - 4, 268, 1, '#ffdc78'); });
-    }
+      const t = String(d.t), sz = t.length <= 2 ? 3 : 2, ex = 170 + t.length * 6 * sz;
+      G(t, 170, 34, sz, '#fff'); c.strokeStyle = '#fff'; c.lineWidth = 1.5; c.beginPath(); c.arc(ex + 4, 37, 2, 0, 7); c.stroke(); G(d.fahr ? 'F' : 'C', ex + 8, 34, 2, '#fff');
+      G('H ' + d.hi, 172, 66, 1, TTY_TEXT); G('L ' + d.lo, 172, 78, 1, TTY_TEXT); G(d.isDay ? 'day' : 'night', 172, 90, 1, TTY_DIM);
+    } else G('--', 170, 34, 3, TTY_DIM);
+    G(d ? WXN[d.cond] : 'no data', 10, 114, 2, '#fff');
+    ['feels', 'wind', 'hum', 'rain'].forEach((l, i) => {
+      const y = 140 + i * 12; G(l, 10, y, 1, TTY_DIM);
+      if (!d) return G('--', 52, y, 1, TTY_DIM);
+      G([d.feels + (d.fahr ? 'F' : 'C'), d.wind + ' km/h', d.hum + '%', d.rain + '%'][i], 52, y, 1, i === 3 && d.rain >= 50 ? WXCOL.b : TTY_TEXT);
+    });
+    wxCritter(d, now, 164, 132);
+    const tx = 9, ty = 196, cw = 55, th = 42;
+    c.strokeStyle = DIMA; c.lineWidth = 1; c.strokeRect(tx + .5, ty + .5, cw * 4, th - 1);
+    R(tx, ty + 14, cw * 4 + 1, 1, DIMA); for (let k = 1; k < 4; k++) R(tx + k * cw, ty, 1, th, DIMA);
+    if (d && d.hours.length) for (let i = 0; i < 4; i++) {
+      const cx = tx + i * cw + (cw >> 1), h = d.hours[i];
+      if (!h) { G('-', cx - 3, ty + 4, 1, TTY_DIM); continue; }
+      G(String(h.h).padStart(2, '0') + 'h', cx - 9, ty + 4, 1, ACC); wxMini(h.cond, h.h >= 6 && h.h < 19, cx, ty + 18);
+      const s = String(h.t), w = s.length * 6, x0 = cx - ((w + 4) >> 1); G(s, x0, ty + 29, 1, '#fff'); c.strokeStyle = '#fff'; c.strokeRect(x0 + w + 1.5, ty + 29.5, 1, 1);
+    } else G(d ? 'no forecast' : 'set a place: app > weather', tx + 6, ty + 4, 1, TTY_DIM);
+    G('$', 14, 248, 1, ACC); if ((now / 500 | 0) % 2) R(26, 247, 6, 9, ACC);
+    if (d) { const m = (Date.now() - d.at) / 60000 | 0, s = m ? m + 'm ago' : 'just now'; G(s, 226 - s.length * 6, 248, 1, TTY_DIM); }
     if (now < wxb.sayUntil) {
-      const w = wxb.say.length * 6 + 14, x = Math.max(10, Math.min(230 - w, WX_KX - w / 2)), y = 158;
-      c.fillStyle = '#fff'; c.beginPath(); c.roundRect(x, y, w, 18, 6); c.fill(); c.strokeStyle = OL; c.lineWidth = 1; c.stroke();
-      c.beginPath(); c.moveTo(x + w / 2 - 4, y + 17); c.lineTo(x + w / 2 + 4, y + 17); c.lineTo(x + w / 2, y + 23); c.fill();
-      G(wxb.say, x + 7, y + 5, 1, OL);
+      const w = wxb.say.length * 6 + 12, x = Math.max(6, 156 - w), y = 136;
+      R(x, y, w, 19, TTY_BG); c.strokeStyle = ACC; c.strokeRect(x + .5, y + .5, w - 1, 18); G(wxb.say, x + 6, y + 6, 1, '#fff'); line(x + w, y + 10, 166, y + 30, ACC);
     }
   }
   window.wxPreviewTap = () => {
-    const d = window.wxData && window.wxData(), L = wxLook(d, performance.now());
-    wxb.say = !d ? 'eh? where am i?' : d.cond === 7 ? 'kaminari!! eek' : L.wet ? 'ame da~ puddles!' : L.snow ? 'yuki da!! snowball!' : d.cond === 3 ? "kiri... can't see" : !L.day ? (L.band >= 2 ? 'hotaru! fireflies' : 'oyasumi~') : ['samui! brrr', 'momiji season!', 'hanami time!', 'bug hunting!', 'atsui~ so hot'][L.band];
-    wxb.sayUntil = performance.now() + 2200; wxb.hop = wxb.heart = performance.now();
+    const d = window.wxData && window.wxData(), tc = wxC(d), day = !d || d.isDay;
+    wxb.say = !d ? 'eh? where am i?' : d.cond === 7 ? 'kaminari!! eek' : d.cond === 5 || d.cond === 4 ? 'ame da~ puddles!' : d.cond === 6 ? 'yuki da!! snowball!' : d.cond === 3 ? "kiri... can't see" : !day ? 'oyasumi~ zzz' : tc >= 28 ? 'atsui~ so hot' : tc < 5 ? 'samui! brrr' : d.cond === 2 ? 'kumori... meh' : 'ii tenki da!';
+    wxb.sayUntil = performance.now() + 2200; wxb.hop = performance.now();
   };
   const scenes = { 0: clock, 1: text, 2: photo, 4: music, 5: pet, 6: toy, 7: card, 8: deck, 9: eyes, 10: jukeDeck, 11: torch, 12: chargeDeck, 13: tty, 14: claude, 15: weather };
   // Quest: frames rendered by the firmware itself (desktop simulator), packed in one sheet.
@@ -1121,6 +1016,7 @@
     if (ACC[0] !== '#') ACC = '#' + ACC.match(/\d+/g).map(v => (+v).toString(16).padStart(2, '0')).join('');
 
     if (shownMode !== 4) npBig = false;
+    if (shownMode !== 15) wxb.shownMode = -1;
     if (ui.mode !== shownMode && !zoom) {
       const opening = shownMode === 8, ti = tileOf(opening ? ui.mode : shownMode);
       if (ti >= 0 && (opening || ui.mode === 8) && !calm) zoom = { ti, s: 0, opening, to: ui.mode }; else { shownMode = ui.mode; glitch = Math.max(glitch, 3); }

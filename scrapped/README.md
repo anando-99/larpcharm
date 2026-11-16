@@ -25,3 +25,7 @@ docs/cotton.png            Cotton screens, rendered from the firmware
 - **Web app:** serve `web/` with `python3 -m http.server` and open it in Chrome.
 
 Firmware 7.0 and the main web app (8.0) don't talk to each other fully: 7.0's look-switch and profile commands are gone from 8.0.
+
+## Also here
+
+`weather-countryside/`: the pixel-art weather screen from firmware 8.5 to 8.8 (a kid in the Japanese countryside), with its art and generator. See its README.
