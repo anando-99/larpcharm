@@ -1,5 +1,5 @@
 /*
-  LARP CHARM firmware v9.1
+  LARP CHARM firmware v9.2
   Board : Waveshare ESP32-S3-Touch-LCD-1.69 (240x280 ST7789V2, CST816T touch)
   Control: Bluetooth LE from the Larp Charm web app
 
@@ -8,7 +8,7 @@
   windows. Tap a pane and the prompt types `open <pane>` before it zooms in.
   Swipe down (or the side button) closes whatever is open.
 
-  Blocks: weather (`curl wttr.in`: ASCII-art skies and a critter dressed for them), tty (a kaomoji in the terminal), cc (Claude Code: a live remote through larp-bridge, or a demo), clock, spotify (a terminal music player), spell recorder (motion data for air-gesture spells), eyes, jukebox, pet, dice, message, photo, ID card, torch,
+  Blocks: weather (`curl wttr.in`: ASCII-art skies and a critter dressed for them), tty (a kaomoji in the terminal), cc (Claude Code: a live remote through larp-bridge, or a demo), clock, spotify (a terminal music player), spells (draw them in the air: a 1D CNN on the charm recognises them; teach your own), spell recorder, eyes, jukebox, pet, dice, message, photo, ID card, torch,
           and a charging screen that appears when you plug it in.
 
   Touch:
@@ -74,7 +74,7 @@ struct EyeShape { float w, h, rad, lidT, slope, lidB; };
 #define SVC_UUID    "6e400001-c4a7-4d2e-9b3c-c4a2d7c0ffee"
 #define RX_UUID     "6e400002-c4a7-4d2e-9b3c-c4a2d7c0ffee"
 #define STATUS_UUID "6e400003-c4a7-4d2e-9b3c-c4a2d7c0ffee"
-#define FW_VERSION  "9.1"
+#define FW_VERSION  "9.2"
 #define DEVICE_NAME "Larp Charm"
 
 enum Cmd : uint8_t {
@@ -104,13 +104,14 @@ enum Cmd : uint8_t {
   CMD_SONG_LIST   = 0x1A, // -> "song=id,notes,name" ... "songs=end"
   CMD_SONG_DELETE = 0x1B, // [song id 100..107]
   // 0x1C, 0x1D were the Cotton profile and mood (removed in 8.0)
+  CMD_SPELL       = 0x21, // [op] 0 action: [spell 0..3 or 10+slot][action] · 1 teach: [slot][action] name · 2 stop teaching · 3 forget [slot] · 4 list · 5 open
   CMD_REC         = 0x20, // [op] 0 label: [take u16][goal u16] label 0x1F hint · 1 exit · 2 timed take [ms u16] · 3 stop · 4 send the last take again
   CMD_WEATHER     = 0x1F, // [cond][day][t][feels][hi][lo][hum][wind][rain%][fahr][n] n*[hour][cond][t] place
   CMD_CC          = 0x1E, // [op] the live link to Claude Code (larp-bridge): 0 state, 1 log, 2 clear, 3 permission, 4 permission over, 5 presets, 6 status
 };
 
 void setMode(int m, bool announce = true);
-enum Mode : uint8_t { M_CLOCK = 0, M_TEXT, M_PHOTO, M_GONE3 /* was clips, then the sing-along */, M_MUSIC, M_PET, M_TOY, M_CARD, M_DECK, M_EYES, M_JUKE, M_TORCH, M_CHARGE, M_TERM, M_CLAUDE, M_WEATHER, M_REC, M_COUNT };
+enum Mode : uint8_t { M_CLOCK = 0, M_TEXT, M_PHOTO, M_GONE3 /* was clips, then the sing-along */, M_MUSIC, M_PET, M_TOY, M_CARD, M_DECK, M_EYES, M_JUKE, M_TORCH, M_CHARGE, M_TERM, M_CLAUDE, M_WEATHER, M_REC, M_CAST, M_COUNT };
 
 // ───────────── Display ─────────────
 Arduino_DataBus *bus   = new Arduino_ESP32SPI(LCD_DC, LCD_CS, LCD_SCK, LCD_MOSI);
@@ -1066,14 +1067,14 @@ void drawSprite(const char *const *spr, int ox, int oy, int scale, uint16_t body
 // ───────────── The deck: a live tmux session ─────────────
 // Every pane is labelled with the command that would print it. Tap a pane and the prompt types
 // "open <pane>" before it zooms in. The bottom pane tails the charm's own event log (klog).
-#define TILE_COUNT 13
-const int16_t TILE_X[TILE_COUNT] = {2, 2, 152, 2, 92, 10, 37, 65, 92, 120, 147, 175, 202};
-const int16_t TILE_Y[TILE_COUNT] = {15, 81, 81, 141, 141, 258, 258, 258, 258, 258, 258, 258, 258};
-const int16_t TILE_W[TILE_COUNT] = {236, 146, 86, 86, 146, 27, 28, 27, 28, 27, 28, 27, 28};
-const int16_t TILE_H[TILE_COUNT] = {62, 56, 56, 54, 54, 22, 22, 22, 22, 22, 22, 22, 22};
-const uint8_t TILE_MODE[TILE_COUNT] = {M_CLOCK, M_MUSIC, M_PET, M_TOY, M_TEXT, M_MUSIC, M_PHOTO, M_CARD, M_EYES, M_JUKE, M_TERM, M_CLAUDE, M_WEATHER};
-const char *TILE_CMD[TILE_COUNT]   = {"date", "np", "ps pet", "imu --scope", "cat motd", "spt", "img", "id", "eye", "jbx", "tty", "cc", "wx"};
-const char *TILE_OPEN[TILE_COUNT]  = {"clock", "spotify", "pet", "rng", "motd", "spotify", "img", "id", "eyes", "jukebox", "tty", "claude", "weather"};
+#define TILE_COUNT 14
+const int16_t TILE_X[TILE_COUNT] = {2, 2, 152, 2, 92, 8, 33, 58, 83, 108, 132, 157, 182, 207};
+const int16_t TILE_Y[TILE_COUNT] = {15, 81, 81, 141, 141, 258, 258, 258, 258, 258, 258, 258, 258, 258};
+const int16_t TILE_W[TILE_COUNT] = {236, 146, 86, 86, 146, 25, 25, 25, 25, 24, 25, 25, 25, 25};
+const int16_t TILE_H[TILE_COUNT] = {62, 56, 56, 54, 54, 22, 22, 22, 22, 22, 22, 22, 22, 22};
+const uint8_t TILE_MODE[TILE_COUNT] = {M_CLOCK, M_MUSIC, M_PET, M_TOY, M_TEXT, M_CAST, M_MUSIC, M_PHOTO, M_CARD, M_EYES, M_JUKE, M_TERM, M_CLAUDE, M_WEATHER};
+const char *TILE_CMD[TILE_COUNT]   = {"date", "np", "ps pet", "imu --scope", "cat motd", "spl", "spt", "img", "id", "eye", "jbx", "tty", "cc", "wx"};
+const char *TILE_OPEN[TILE_COUNT]  = {"clock", "spotify", "pet", "rng", "motd", "spells", "spotify", "img", "id", "eyes", "jukebox", "tty", "claude", "weather"};
 #define LOG_X 2
 #define LOG_Y 199
 #define LOG_W 236
@@ -3582,8 +3583,9 @@ void recStop() {
   recOn = false;
   delay(12);                                         // let the sampler finish the sample it is on
   if (bleConnected) notifyText("recst=0");
-  if (recN < 30) { recState = 4; recStateAt = millis(); sfx(4); return; }     // under 0.3 s
+  if (recN < 30) { recState = 4; recStateAt = millis(); sfx(4); if (mode == M_CAST) toast("too short", 700); return; }     // under 0.3 s
   recLastN = recN;
+  if (mode == M_CAST) { recState = 0; castRun(); return; }
   {                                                  // a summary on USB serial, for checking the sampler
     long m[6] = {0}; int peak = 0;
     for (int i = 0; i < recLastN; i++) { for (int c = 0; c < 6; c++) m[c] += recBuf[i * 6 + c]; peak = max(peak, abs((int)recBuf[i * 6 + 3]) + abs((int)recBuf[i * 6 + 4]) + abs((int)recBuf[i * 6 + 5])); }
@@ -3597,7 +3599,7 @@ void recStop() {
 }
 
 void recPoll() {
-  if (mode != M_REC) return;
+  if (mode != M_REC && mode != M_CAST) return;
   lastInteraction = millis();                        // no sleeping in the middle of a session
   if (recOn && ((!recByThumb && millis() - recStartAt >= recTimedMs) || recN >= REC_MAX)) recStop();
 }
@@ -3711,6 +3713,304 @@ void drawRec() {
   textAt("pwr: exit", 12, 240, 1, TTY_DIM);
 }
 
+// ═════════════ 9.2: spells, cast in the air ═════════════
+// Hold your thumb on the `spell --cast` screen, draw a spell in the air, let go. A 1D CNN (spells_model.h,
+// trained on recorded takes by firmware/tools/spells) turns the take into a 32-number fingerprint; the four
+// built-in spells are the nearest class prototype, or "no match" under SPL_BASE_THR. Spells you teach are
+// recognised by DTW against their own 5 recordings, with the CNN able to veto (the hybrid rule in
+// firmware/tools/spells/evaluate.py). Each spell plays its effect, then does what the spellbook says.
+// The network runs here on the charm in a few tens of milliseconds; nothing leaves the charm to recognise.
+#include "spells_engine.h"
+#define SPL_CUSTOM 6                  // spells you can teach
+#define SPL_TEACH  5                  // recordings per taught spell
+#define SPL_TROWS  300                // rows kept per recording (6 s at 50 Hz)
+enum SplAct : uint8_t { SA_NONE, SA_TORCH, SA_THEME, SA_NEXT, SA_PLAY, SA_LOVE, SA_WEATHER, SA_CLOCK, SA_PET, SA_DICE, SA_CLAUDE, SA_SPOTIFY, SA_COUNT };
+const char *SA_NAMES[SA_COUNT] = {"nothing", "torch", "new colour", "next song", "play/pause", "eyes in love", "weather", "clock", "pet", "roll dice", "claude", "spotify"};
+const char *SPL_WORD[4] = {"LUMOS", "FULMEN", "ACCIO", "AMOR"};       // what the charm calls out for circle, zigzag, flick, heart
+uint8_t splBaseAct[4] = {SA_TORCH, SA_THEME, SA_NEXT, SA_LOVE};
+struct SplCustom { bool used; uint8_t act; char name[17]; float proto[SPL_EMB]; float wmax; uint16_t rows[SPL_TEACH]; float *tpl[SPL_TEACH]; };
+SplCustom splC[SPL_CUSTOM];
+float   *splSeg = nullptr, *splIn = nullptr, *splA = nullptr, *splB = nullptr, *splFeat = nullptr, *splRows = nullptr;
+float   *splBaseTpl = nullptr;        // the stored recordings for the base spells, as floats
+uint32_t splBaseOff[SPL_TPL_N];
+// the last cast
+int8_t   castKind = -1;               // -1 none yet, 0..3 base spell, 10+k taught spell k, 99 fizzle
+float    castSim = 0, castTop[3]; const char *castTopName[3]; char castTopBuf[3][17];
+uint32_t castAt = 0, castMs = 0; bool castActed = true; uint8_t castActNow = SA_NONE;
+// teaching
+int8_t   teachSlot = -1; uint8_t teachN = 0, teachAct = SA_NONE; char teachName[17] = "";
+float    teachEmb[SPL_TEACH][SPL_EMB];
+
+String splPath(int k) { return String("/spl/") + k + ".bin"; }
+const char *splName(int8_t kind) { return kind >= 10 && kind < 10 + SPL_CUSTOM ? splC[kind - 10].name : kind >= 0 && kind < 4 ? SPL_NAMES[kind] : "fizzle"; }
+
+bool splSaveCustom(int k) {
+  if (!fsOK) return false;
+  FFat.mkdir("/spl");
+  File f = FFat.open(splPath(k), "w"); if (!f) return false;
+  SplCustom &c = splC[k];
+  f.write((const uint8_t *)"LSPL", 4); f.write(1); f.write(c.act); f.write((const uint8_t *)c.name, 17);
+  f.write((const uint8_t *)c.proto, sizeof(c.proto)); f.write((const uint8_t *)&c.wmax, 4); f.write((const uint8_t *)c.rows, sizeof(c.rows));
+  for (int i = 0; i < SPL_TEACH; i++) f.write((const uint8_t *)c.tpl[i], c.rows[i] * 6 * 4);
+  f.close(); return true;
+}
+void splLoad() {
+  for (int k = 0; k < SPL_CUSTOM; k++) {
+    SplCustom &c = splC[k]; c.used = false;
+    if (!c.tpl[0]) for (int i = 0; i < SPL_TEACH; i++) c.tpl[i] = (float *)ps_malloc(SPL_TROWS * 6 * 4);
+    if (!fsOK || !c.tpl[0]) continue;
+    File f = FFat.open(splPath(k), "r"); if (!f) continue;
+    char mg[4]; uint8_t v;
+    bool ok = f.read((uint8_t *)mg, 4) == 4 && !memcmp(mg, "LSPL", 4) && f.read(&v, 1) == 1 && v == 1 && f.read(&c.act, 1) == 1 &&
+              f.read((uint8_t *)c.name, 17) == 17 && f.read((uint8_t *)c.proto, sizeof(c.proto)) == sizeof(c.proto) &&
+              f.read((uint8_t *)&c.wmax, 4) == 4 && f.read((uint8_t *)c.rows, sizeof(c.rows)) == sizeof(c.rows);
+    for (int i = 0; ok && i < SPL_TEACH; i++) ok = c.rows[i] <= SPL_TROWS && f.read((uint8_t *)c.tpl[i], c.rows[i] * 24) == c.rows[i] * 24;
+    f.close(); c.name[16] = 0; c.used = ok;
+  }
+  for (int i = 0; i < 4; i++) splBaseAct[i] = prefs.getUChar((String("spa") + i).c_str(), splBaseAct[i]) % SA_COUNT;
+}
+void splInit() {
+  // the network's working memory in the fast internal RAM (about 45 KB), the rest in PSRAM
+  auto fast = [](size_t n) { void *p = heap_caps_malloc(n, MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT); return (float *)(p ? p : ps_malloc(n)); };
+  splSeg = (float *)ps_malloc(SPL_MAX_ROWS * 6 * 4); splIn = fast(SPL_IN * SPL_T * 4);
+  splA = fast(SPL_BUF * 4); splB = fast(SPL_BUF * 4);
+  splFeat = fast(SPL_TROWS * 6 * 4); splRows = fast((SPL_TROWS + 2) * 2 * 4);
+  uint32_t tot = 0;
+  for (int t = 0; t < SPL_TPL_N; t++) { splBaseOff[t] = tot; tot += SPL_TPL_INFO[t * 3 + 2]; }
+  splBaseTpl = (float *)ps_malloc(tot * 6 * 4);
+  if (splBaseTpl) for (int t = 0; t < SPL_TPL_N; t++) {
+    const int16_t *src = SPL_TPL_DATA + SPL_TPL_INFO[t * 3 + 1] * 6;
+    for (int i = 0; i < SPL_TPL_INFO[t * 3 + 2] * 6; i++) splBaseTpl[splBaseOff[t] * 6 + i] = src[i] / SPL_TPL_SCALE;
+  }
+  splLoad();
+}
+
+void splListToApp() {
+  char b[96];
+  snprintf(b, sizeof(b), "spb=%u,%u,%u,%u", splBaseAct[0], splBaseAct[1], splBaseAct[2], splBaseAct[3]); notifyText(b); delay(15);
+  for (int k = 0; k < SPL_CUSTOM; k++) if (splC[k].used) { snprintf(b, sizeof(b), "spc=%d,%u,%s", k, splC[k].act, splC[k].name); notifyText(b); delay(15); }
+  notifyText("spc=end");
+}
+
+void splAct(uint8_t a) {
+  switch (a) {
+    case SA_TORCH:   openModule(M_TORCH); break;
+    case SA_THEME:   theme = (theme + 1) % THEME_COUNT; prefs.putUChar("theme", theme); themePreviewUntil = millis() + 2500; toast(THEME_NAMES[theme], 900); break;
+    case SA_NEXT:    mediaCmd(1); break;
+    case SA_PLAY:    mediaCmd(0); break;
+    case SA_LOVE:    openModule(M_EYES); setExpr(E_LOVE, 6000); break;
+    case SA_WEATHER: openModule(M_WEATHER); break;
+    case SA_CLOCK:   openModule(M_CLOCK); break;
+    case SA_PET:     openModule(M_PET); petMood = min(100, petMood + 10); petHeartsUntil = millis() + 2500; break;
+    case SA_DICE:    openModule(M_TOY); toySwitch(1); toyRoll(); break;
+    case SA_CLAUDE:  openModule(M_CLAUDE); break;
+    case SA_SPOTIFY: openModule(M_MUSIC); break;
+    default: break;
+  }
+}
+
+// a take has come in on the cast screen: recognise it (or, while teaching, learn from it)
+void castRun() {
+  if (!splSeg || !splBaseTpl) return;
+  uint32_t t0 = millis();
+  int n = spl_segment(recBuf, recLastN, REC_A_LSB, REC_G_LSB, splSeg);
+  if (n < 8) { castKind = 99; castAt = millis(); return; }
+  spl_input(splSeg, n, splIn);
+  float emb[SPL_EMB]; spl_embed(splIn, emb, splA, splB);
+  uint32_t tEmb = millis() - t0;
+  int fm = spl_dtw_feat(splSeg, min(n, SPL_TROWS * 2), splFeat);
+  char b[128];
+
+  if (teachSlot >= 0) {                                  // one more recording of the spell being taught
+    SplCustom &c = splC[teachSlot];
+    memcpy(teachEmb[teachN], emb, sizeof(emb));
+    memcpy(c.tpl[teachN], splFeat, fm * 24); c.rows[teachN] = fm;
+    teachN++;
+    snprintf(b, sizeof(b), "teach=%d,%u,%u", teachSlot, teachN, SPL_TEACH); notifyText(b);
+    sfx(4);
+    if (teachN >= SPL_TEACH) {
+      float nrm = 0;
+      for (int e = 0; e < SPL_EMB; e++) { float s = 0; for (int i = 0; i < SPL_TEACH; i++) s += teachEmb[i][e]; c.proto[e] = s; nrm += s * s; }
+      nrm = sqrtf(nrm) + 1e-12f; for (int e = 0; e < SPL_EMB; e++) c.proto[e] /= nrm;
+      float wm = 0;
+      for (int i = 0; i < SPL_TEACH; i++) for (int j = i + 1; j < SPL_TEACH; j++) wm = max(wm, spl_dtw(c.tpl[i], c.rows[i], c.tpl[j], c.rows[j], splRows));
+      c.wmax = wm; c.act = teachAct; memcpy(c.name, teachName, 17); c.used = true;
+      bool ok = splSaveCustom(teachSlot);
+      klog("spl: learnt %s", c.name);
+      toast(ok ? "learnt!" : "not saved", 1200);
+      snprintf(b, sizeof(b), "teach=%d,done", teachSlot); notifyText(b);
+      teachSlot = -1;
+      castKind = 10 + (&c - splC); castSim = 1; castAt = millis(); castActed = true;
+    }
+    return;
+  }
+
+  float sim[SPL_CLASSES];
+  for (int c = 0; c < SPL_CLASSES; c++) sim[c] = spl_dot(emb, SPL_PROTO + c * SPL_EMB, SPL_EMB);
+  // DTW: the nearest recording of each taught spell, and (only then needed) of the base spells
+  int bestK = -1; float bestD = INFINITY, db = INFINITY;
+  for (int k = 0; k < SPL_CUSTOM; k++) if (splC[k].used) {
+    float d = INFINITY;
+    for (int i = 0; i < SPL_TEACH; i++) d = min(d, spl_dtw(splFeat, fm, splC[k].tpl[i], splC[k].rows[i], splRows));
+    if (d < bestD) { bestD = d; bestK = k; }
+  }
+  if (bestK >= 0) for (int t = 0; t < SPL_TPL_N; t++) db = min(db, spl_dtw(splFeat, fm, splBaseTpl + splBaseOff[t] * 6, SPL_TPL_INFO[t * 3 + 2], splRows));
+  // the top three by fingerprint similarity (built-in spells and taught ones), for the readout
+  struct { const char *n; float s; } top[SPL_CLASSES + SPL_CUSTOM]; int nt = 0;
+  for (int c = 0; c < SPL_CLASSES; c++) top[nt++] = {SPL_NAMES[c], sim[c]};
+  for (int k = 0; k < SPL_CUSTOM; k++) if (splC[k].used) top[nt++] = {splC[k].name, spl_dot(emb, splC[k].proto, SPL_EMB)};
+  for (int i = 0; i < 3; i++) for (int j = i + 1; j < nt; j++) if (top[j].s > top[i].s) { auto t = top[i]; top[i] = top[j]; top[j] = t; }
+  for (int i = 0; i < 3; i++) { snprintf(castTopBuf[i], 17, "%s", i < nt ? top[i].n : ""); castTopName[i] = castTopBuf[i]; castTop[i] = i < nt ? top[i].s : 0; }
+
+  int8_t kind = 99; float s = 0; char how = 'c';
+  if (bestK >= 0) {
+    float sc = spl_dot(emb, splC[bestK].proto, SPL_EMB);
+    if (bestD < db && bestD <= SPL_TEACH_SPREAD * splC[bestK].wmax && sc >= SPL_TEACH_MIN_SIM && !(sim[SPL_NONE] > sc)) { kind = 10 + bestK; s = sc; how = 'd'; }
+  }
+  if (kind == 99) {
+    int c = 0; for (int i = 1; i < SPL_CLASSES; i++) if (sim[i] > sim[c]) c = i;
+    if (c != SPL_NONE && sim[c] >= SPL_BASE_THR) { kind = c; s = sim[c]; } else s = sim[c];
+  }
+  castKind = kind; castSim = s; castAt = millis(); castMs = castAt - t0; castActed = false;
+  castActNow = kind >= 10 ? splC[kind - 10].act : kind < 4 ? splBaseAct[kind] : SA_NONE;
+  klog("spl: %s %.2f %lums", splName(kind), s, (unsigned long)castMs);
+  Serial.printf("cast: network %lu ms (buffers %s); ", (unsigned long)tEmb, esp_ptr_internal(splA) ? "internal" : "psram");
+  Serial.printf("cast: %s %.3f (%c) in %lu ms, %d rows; top %s %.3f, %s %.3f, %s %.3f; dtw base %.3f\n", splName(kind), s, how, (unsigned long)castMs, n,
+                castTopName[0], castTop[0], castTopName[1], castTop[1], castTopName[2], castTop[2], db);
+  sfx(kind == 99 ? 4 : 3);
+  snprintf(b, sizeof(b), "cast=%s,%.3f,%c,%u,%lu,%s,%.3f,%s,%.3f,%s,%.3f", kind == 99 ? "-" : splName(kind), s, how, castActNow, (unsigned long)castMs,
+           castTopName[0], castTop[0], castTopName[1], castTop[1], castTopName[2], castTop[2]);
+  if (bleConnected) notifyText(b);
+}
+
+void castPoll() {                                      // the effect plays, then the spell does its thing
+  if (mode != M_CAST || castActed || millis() - castAt < 1500) return;
+  castActed = true;
+  if (castKind != 99 && castActNow != SA_NONE) splAct(castActNow);
+}
+
+// ── the effects ──
+void fxSparkles(int cx, int cy, int r, uint32_t t, uint16_t c) {
+  for (int i = 0; i < 14; i++) {
+    float a = i * 0.449f + t / 400.0f, rr = r * (0.6f + 0.5f * ((i * 37) % 10) / 10.0f) + t / 30.0f;
+    if ((t / 80 + i) % 3) gfx->drawPixel(cx + (int)(cosf(a) * rr), cy + (int)(sinf(a) * rr), c);
+    else sparkle(cx + (int)(cosf(a) * rr), cy + (int)(sinf(a) * rr), 2, c);
+  }
+}
+void fxHeart(int cx, int cy, float sz, uint16_t c) {
+  int lx = 0, ly = 0;
+  for (int i = 0; i <= 64; i++) {
+    float a = i / 64.0f * 6.2832f, x = -16 * powf(sinf(a), 3), y = 13 * cosf(a) - 5 * cosf(2 * a) - 2 * cosf(3 * a) - cosf(4 * a);
+    int px = cx + (int)(x * sz), py = cy - (int)((y - 2) * sz);
+    if (i) { gfx->drawLine(lx, ly, px, py, c); gfx->drawLine(lx + 1, ly, px + 1, py, c); }
+    lx = px; ly = py;
+  }
+}
+void castEffect(int x0, int y0, int w, int h, uint32_t t) {
+  int cx = x0 + w / 2, cy = y0 + h / 2;
+  float u = min(1.0f, t / 900.0f);
+  switch (castKind) {
+    case 0:                                         // circle: a ring of light opens
+      for (int k = 0; k < 4; k++) gfx->drawCircle(cx, cy, (int)(u * 52) + k, mix565(COL_WHITE, ACC, k * 60));
+      fxSparkles(cx, cy, (int)(u * 52), t, COL_WHITE);
+      break;
+    case 1: {                                       // zigzag: lightning
+      if ((t / 70) % 4 == 0) gfx->fillRect(x0 + 1, y0 + 1, w - 2, h - 2, mix565(TTY_BG, COL_WHITE, 70));
+      int px = cx - 30, py = y0 + 6;
+      for (int i = 1; i <= 6; i++) {
+        int nx = cx + ((i % 2) ? 28 : -24) - i * 2, ny = y0 + 6 + i * (h - 12) / 6;
+        if (i <= (int)(u * 7)) for (int o = -1; o <= 1; o++) gfx->drawLine(px + o, py, nx + o, ny, o ? ACC : COL_WHITE);
+        px = nx; py = ny;
+      }
+      break;
+    }
+    case 2:                                         // flick: streaks fly off to the right
+      for (int i = 0; i < 9; i++) {
+        int y = y0 + 14 + i * (h - 28) / 8, x = x0 + (int)((t / 2 + i * 41) % (w + 60)) - 40;
+        gfx->drawFastHLine(max(x0 + 2, x - 30), y, 30, mix565(ACC, COL_WHITE, i * 25));
+        textAt(">", min(x0 + w - 8, x), y - 3, 1, COL_WHITE);
+      }
+      break;
+    case 3: {                                       // heart: a heart beats, little ones rise
+      float beat = 1.0f + 0.12f * fabsf(sinf(t / 140.0f));
+      fxHeart(cx, cy + 4, 2.3f * u * beat, COL_PINK);
+      for (int i = 0; i < 6; i++) { int hx = x0 + 20 + i * 36, hy = y0 + h - 10 - (int)((t / 6 + i * 23) % (h - 20)); textAt("\x03", hx, hy, 1, COL_PINK); }
+      break;
+    }
+    case 99:                                        // fizzle: a puff of smoke
+      for (int i = 0; i < 5; i++) textAt("~", cx - 30 + i * 13 + (int)(sinf(t / 200.0f + i) * 4), cy - (int)(t / 25) % 40 + (i % 2) * 8, 2, TTY_DIM);
+      textAt("*poof*", cx - 36, cy + 22, 2, TTY_DIM);
+      break;
+    default:                                        // a spell you taught: your own stroke, lit up
+      recStroke(x0, y0, w, h, COL_WHITE);
+      fxSparkles(cx, cy, 40, t, ACC);
+      break;
+  }
+}
+
+void drawCast() {
+  uint32_t now = millis();
+  gfx->fillScreen(TTY_BG);
+  char b[48];
+  textAt("$", 14, 3, 1, ACC); textAt("spell --cast", 26, 3, 1, COL_WHITE);
+  if (teachSlot >= 0) { snprintf(b, sizeof(b), "teach %u/%u", teachN, SPL_TEACH); textAt(b, 226 - (int)strlen(b) * 6, 3, 1, COL_AMBER); }
+  const int bx = 6, by = 20, bw = 228, bh = 140;
+  bool fresh = castKind >= 0 && now - castAt < 2600;
+  ttyPane(bx, by, bw, bh, recOn ? "stroke" : fresh ? "fx" : teachSlot >= 0 ? "teach" : "spellbook", recOn || fresh);
+  if (recOn) recStroke(bx, by, bw, bh, COL_RED);
+  else if (fresh) { recStroke(bx, by, bw, bh, ACC_LOW); castEffect(bx, by, bw, bh, now - castAt); }
+  else if (teachSlot >= 0) {
+    textAt(teachName, bx + 12, by + 14, 2, COL_WHITE);
+    snprintf(b, sizeof(b), "does: %s", SA_NAMES[teachAct]); textAt(b, bx + 12, by + 36, 1, TTY_DIM);
+    for (int i = 0; i < SPL_TEACH; i++) {
+      gfx->drawRect(bx + 14 + i * 40, by + 60, 32, 32, ACC);
+      if (i < teachN) gfx->fillRect(bx + 18 + i * 40, by + 64, 24, 24, ACC);
+    }
+    textAt("draw it the same way 5x", bx + 12, by + 104, 1, TTY_TEXT);
+  } else {
+    int y = by + 10;
+    const char *how[4] = {"one loop, clockwise", "three sharp peaks", "a quick snap right", "one stroke heart"};
+    for (int i = 0; i < 4; i++, y += 20) {
+      textAt(SPL_NAMES[i], bx + 10, y, 1, ACC); textAt(how[i], bx + 62, y, 1, TTY_DIM);
+      snprintf(b, sizeof(b), "> %s", SA_NAMES[splBaseAct[i]]); textAt(b, bx + 62, y + 9, 1, TTY_TEXT);
+    }
+    int nc = 0;
+    for (int k = 0; k < SPL_CUSTOM && y < by + bh - 12; k++) if (splC[k].used) {
+      snprintf(b, sizeof(b), "%s > %s", splC[k].name, SA_NAMES[splC[k].act]); textAt(b, bx + 10, y, 1, COL_LIME); y += 11; nc++;
+    }
+    if (!nc && y < by + bh - 12) textAt("teach your own: spells tab", bx + 10, y + 2, 1, TTY_DIM);
+  }
+
+  // the readout: what the network thinks
+  int ry = 168;
+  if (castKind >= 0 && !recOn) {
+    for (int i = 0; i < 3; i++) {
+      if (!castTopName[i] || !castTopName[i][0]) continue;
+      float s = max(0.0f, castTop[i]);
+      textAt(i == 0 ? ">" : " ", 10, ry + i * 11, 1, ACC);
+      textAt(String(castTopName[i]).substring(0, 9), 18, ry + i * 11, 1, i == 0 ? COL_WHITE : TTY_TEXT);
+      snprintf(b, sizeof(b), "%.2f", castTop[i]); textAt(b, 78, ry + i * 11, 1, TTY_DIM);
+      textAt(asciiBar(s, 18, '#', '#', '.'), 108, ry + i * 11, 1, i == 0 ? ACC : ACC_DIM);
+    }
+    String word = castKind == 99 ? String("fizzle") : castKind < 4 ? String(SPL_WORD[castKind]) + "!" : String(splName(castKind)) + "!";
+    word.toUpperCase();
+    textAt(word, 12, 206, 2, castKind == 99 ? TTY_DIM : ACC);
+    if (castKind != 99) { snprintf(b, sizeof(b), "-> %s  (%lums)", SA_NAMES[castActNow], (unsigned long)castMs); textAt(b, 12, 226, 1, TTY_TEXT); }
+    else textAt("no match. draw it bigger?", 12, 226, 1, TTY_DIM);
+  } else if (recOn) {
+    if ((now / 300) % 2) gfx->fillCircle(17, ry + 4, 4, COL_RED);
+    snprintf(b, sizeof(b), "casting %.1fs", (now - recStartAt) / 1000.0f); textAt(b, 26, ry, 2, COL_RED);
+    textAt("let go to cast", 12, ry + 22, 1, TTY_DIM);
+  } else {
+    textAt(teachSlot >= 0 ? "hold thumb, draw, let go" : "hold thumb, draw a spell,", 12, ry, 1, TTY_TEXT);
+    if (teachSlot < 0) textAt("let go", 12, ry + 11, 1, TTY_TEXT);
+    if ((now / 500) % 2) gfx->fillRect(teachSlot >= 0 ? 160 : 52, teachSlot >= 0 ? ry - 1 : ry + 10, 6, 9, ACC);
+    textAt("still 0.5s, draw, still 0.5s", 12, ry + 30, 1, TTY_DIM);
+  }
+  textAt("pwr: exit", 12, 246, 1, TTY_DIM);
+  textAt("1d cnn, 39k", 160, 246, 1, TTY_DIM);
+}
+
 // ═════════════ v5: torch ═════════════
 const uint16_t TORCH_COL[4] = { COL_WHITE, c565(255, 206, 150), c565(255, 0, 0), c565(120, 230, 255) };
 const char *TORCH_NAMES[4] = {"white", "warm", "red", "ice"};
@@ -3801,6 +4101,7 @@ void drawScene() {
     case M_CLAUDE: drawClaude(); break;
     case M_WEATHER: drawWeather(); break;
     case M_REC:   drawRec();   break;
+    case M_CAST:  drawCast();  break;
     case M_JUKE:  drawJuke();  break;
     case M_TORCH: drawTorch(); break;
     case M_CHARGE: drawCharge(); break;
@@ -3829,9 +4130,11 @@ void setMode(int m, bool announce) {
   uint8_t old = mode;
   mode = ((m % M_COUNT) + M_COUNT) % M_COUNT;
   if (mode == M_GONE3) mode = M_DECK;
-  if (mode != M_CHARGE && mode != M_TORCH && mode != M_REC && !idleEyesOn) prefs.putUChar("mode", mode);
-  if (mode == M_REC && old != M_REC) recSensor(true);
-  if (old == M_REC && mode != M_REC) recSensor(false);
+  if (mode != M_CHARGE && mode != M_TORCH && mode != M_REC && mode != M_CAST && !idleEyesOn) prefs.putUChar("mode", mode);
+  bool wantS = mode == M_REC || mode == M_CAST, hadS = old == M_REC || old == M_CAST;     // the gyro is on for these two
+  if (wantS && !hadS) recSensor(true);
+  if (hadS && !wantS) recSensor(false);
+  if (mode == M_CAST && old != M_CAST) castKind = -1;
   if (old == M_TORCH && mode != M_TORCH && !sleeping) analogWrite(LCD_BL, brightness);
   if (mode == M_TORCH && old != M_TORCH) { analogWrite(LCD_BL, 255); chromeUntil = millis() + 2500; }
   if (mode == M_EYES && old != M_EYES) { chromeUntil = millis() + 1500; tiltBaseX = tiltX; tiltBaseY = tiltY; nextIdleExpr = millis() + 4000; exprShown = 255; }
@@ -4182,6 +4485,23 @@ void handlePacket(const uint8_t *d, uint16_t n) {
 
     case CMD_CC: ccPacket(p, len); break;
     case CMD_WEATHER: wxPacket(p, len); break;
+    case CMD_SPELL:
+      if (len < 1) break;
+      if (p[0] == 0 && len >= 3) {
+        uint8_t a = p[2] % SA_COUNT;
+        if (p[1] < 4) { splBaseAct[p[1]] = a; prefs.putUChar((String("spa") + p[1]).c_str(), a); }
+        else if (p[1] >= 10 && p[1] < 10 + SPL_CUSTOM && splC[p[1] - 10].used) { splC[p[1] - 10].act = a; splSaveCustom(p[1] - 10); }
+      } else if (p[0] == 1 && len >= 3 && p[1] < SPL_CUSTOM && splC[p[1]].tpl[0]) {
+        teachSlot = p[1]; teachN = 0; teachAct = p[2] % SA_COUNT;
+        String nm = asciiOnly(String((const char *)(p + 3), len - 3)); nm.trim(); if (!nm.length()) nm = String("spell ") + (p[1] + 1);
+        snprintf(teachName, sizeof(teachName), "%s", nm.c_str());
+        if (mode != M_CAST) openModule(M_CAST);
+      } else if (p[0] == 2) teachSlot = -1;
+      else if (p[0] == 3 && len >= 2 && p[1] < SPL_CUSTOM) { splC[p[1]].used = false; if (fsOK) FFat.remove(splPath(p[1])); }
+      else if (p[0] == 5) { if (mode != M_CAST) openModule(M_CAST); }
+      splListToApp();
+      break;
+
     case CMD_REC:
       if (len < 1) break;
       if (p[0] == 0 && len >= 5) {
@@ -4242,7 +4562,7 @@ void handlePacket(const uint8_t *d, uint16_t n) {
       sendStatus("songs=changed");
       break;
 
-    case CMD_PING:      sendStatus(); shareScreens(); break;
+    case CMD_PING:      sendStatus(); shareScreens(); splListToApp(); break;
     case CMD_BUZZ:      beep(len >= 1 ? constrain((int)p[0], 1, 10) : 3); break;
   }
 }
@@ -4503,7 +4823,7 @@ void handleTouch() {
       if (sleeping) { touchActivity(); tch.consumed = true; return; }   // first touch only wakes
       if (idleEyesOn) { touchActivity(); tch.consumed = true; return; } // and wakes you out of the idle eyes
       touchActivity();
-      if (mode == M_REC) { tch.consumed = true; recStart(true, 0); return; }     // thumb down: record a take
+      if (mode == M_REC || mode == M_CAST) { tch.consumed = true; recStart(true, 0); return; }     // thumb down: record a take / cast
     }
     tch.x = x; tch.y = y;
     lastInteraction = now;
@@ -4518,7 +4838,7 @@ void handleTouch() {
     }
   } else if (tch.down) {
     tch.down = false;
-    if (mode == M_REC && recOn && recByThumb) { recStop(); return; }               // thumb up: send it
+    if ((mode == M_REC || mode == M_CAST) && recOn && recByThumb) { recStop(); return; }   // thumb up: send it / cast it
     if (tch.consumed) return;
     int dx = tch.x - tch.x0, dy = tch.y - tch.y0;
     uint32_t dt = now - tch.t0;
@@ -4736,7 +5056,8 @@ void setup() {
     if (f) f.close();
   }
   scanMySongs();
-  if (fsOK && FFat.exists("/show.bin")) FFat.remove("/show.bin");             // left behind by the sing-along (removed in 8.7)
+  if (fsOK && FFat.exists("/show.bin")) FFat.remove("/show.bin");
+  splInit();                                         // the spell network's buffers, its recordings, your taught spells             // left behind by the sing-along (removed in 8.7)
   bootLine("storage", fsOK ? "FFat ok" : "not mounted", fsOK);
 
   time_t e;
@@ -4789,13 +5110,14 @@ void klogWatch() {
   if (npTitle != trackWas) { trackWas = npTitle; if (npTitle.length()) klog("np: %s", asciiOnly(npTitle).c_str()); }
 }
 
-// USB serial, for development: r = open the spell recorder, t = a 2 s timed take, x = close it
+// USB serial, for development: r = open the spell recorder, c = the cast screen, t = a 2 s timed take, x = close it
 void serialDev() {
   while (Serial.available()) {
     char c = Serial.read();
     if (c == 'r' && mode != M_REC) openModule(M_REC);
-    else if (c == 't' && mode == M_REC) recStart(false, 2000);
-    else if (c == 'x' && mode == M_REC) closeModule();
+    else if (c == 'c' && mode != M_CAST) openModule(M_CAST);
+    else if (c == 't' && (mode == M_REC || mode == M_CAST)) recStart(false, 2000);
+    else if (c == 'x' && (mode == M_REC || mode == M_CAST)) closeModule();
   }
 }
 
@@ -4820,6 +5142,7 @@ void loop() {
   klogWatch();
   if (imuUpdate()) onShake();
   recPoll();
+  castPoll();
   serialDev();
   serviceTimers();
   updateBattery();

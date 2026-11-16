@@ -1,0 +1,236 @@
+{
+ "trained": "2026-11-16",
+ "parameters": 38848,
+ "takes": 110,
+ "per_class": {
+  "circle": 20,
+  "zigzag": 20,
+  "flick": 20,
+  "heart": 20,
+  "none": 30
+ },
+ "epochs": 160,
+ "final_loss": 0.2295321449637413,
+ "thresholds": {
+  "base": 0.85,
+  "teach_spread": 2.0,
+  "teach_min_sim": 0.3
+ },
+ "sessions": [
+  "sitting-1"
+ ],
+ "evaluation": {
+  "takes": 118,
+  "labels": {
+   "circle": 20,
+   "zigzag": 20,
+   "flick": 20,
+   "heart": 20,
+   "none": 30,
+   "anticlockcircle": 8
+  },
+  "base": {
+   "sweep": [
+    {
+     "threshold": 0.0,
+     "spells_right": 1.0,
+     "spells_wrong": 0.0,
+     "none_rejected": 0.8666666666666667
+    },
+    {
+     "threshold": 0.5,
+     "spells_right": 1.0,
+     "spells_wrong": 0.0,
+     "none_rejected": 0.8666666666666667
+    },
+    {
+     "threshold": 0.6,
+     "spells_right": 1.0,
+     "spells_wrong": 0.0,
+     "none_rejected": 0.8666666666666667
+    },
+    {
+     "threshold": 0.7,
+     "spells_right": 1.0,
+     "spells_wrong": 0.0,
+     "none_rejected": 0.8666666666666667
+    },
+    {
+     "threshold": 0.75,
+     "spells_right": 1.0,
+     "spells_wrong": 0.0,
+     "none_rejected": 0.8666666666666667
+    },
+    {
+     "threshold": 0.8,
+     "spells_right": 1.0,
+     "spells_wrong": 0.0,
+     "none_rejected": 0.9333333333333333
+    },
+    {
+     "threshold": 0.85,
+     "spells_right": 1.0,
+     "spells_wrong": 0.0,
+     "none_rejected": 0.9666666666666667
+    },
+    {
+     "threshold": 0.9,
+     "spells_right": 0.975,
+     "spells_wrong": 0.0,
+     "none_rejected": 1.0
+    }
+   ],
+   "confusion": [
+    [
+     20,
+     0,
+     0,
+     0,
+     0
+    ],
+    [
+     0,
+     20,
+     0,
+     0,
+     0
+    ],
+    [
+     0,
+     0,
+     20,
+     0,
+     0
+    ],
+    [
+     0,
+     0,
+     0,
+     20,
+     0
+    ],
+    [
+     1,
+     0,
+     2,
+     1,
+     26
+    ]
+   ],
+   "classes": [
+    "circle",
+    "zigzag",
+    "flick",
+    "heart",
+    "none"
+   ]
+  },
+  "teach": {
+   "per_gesture": {
+    "circle": {
+     "cnn": {
+      "taught": 0.7253333333333334,
+      "stole_spells": 0.0,
+      "stole_none": 0.0
+     },
+     "dtw": {
+      "taught": 0.9973333333333333,
+      "stole_spells": 0.05466666666666667,
+      "stole_none": 0.38133333333333336
+     },
+     "hybrid": {
+      "taught": 0.968,
+      "stole_spells": 0.0,
+      "stole_none": 0.0
+     }
+    },
+    "zigzag": {
+     "cnn": {
+      "taught": 0.8693333333333333,
+      "stole_spells": 0.0,
+      "stole_none": 0.0
+     },
+     "dtw": {
+      "taught": 0.9973333333333333,
+      "stole_spells": 0.0026666666666666666,
+      "stole_none": 0.21066666666666667
+     },
+     "hybrid": {
+      "taught": 0.9893333333333333,
+      "stole_spells": 0.0026666666666666666,
+      "stole_none": 0.0
+     }
+    },
+    "flick": {
+     "cnn": {
+      "taught": 0.8346666666666667,
+      "stole_spells": 0.0,
+      "stole_none": 0.35733333333333334
+     },
+     "dtw": {
+      "taught": 0.7546666666666667,
+      "stole_spells": 0.0,
+      "stole_none": 0.0
+     },
+     "hybrid": {
+      "taught": 0.7333333333333333,
+      "stole_spells": 0.0,
+      "stole_none": 0.0
+     }
+    },
+    "heart": {
+     "cnn": {
+      "taught": 0.9146666666666666,
+      "stole_spells": 0.0,
+      "stole_none": 0.0
+     },
+     "dtw": {
+      "taught": 1.0,
+      "stole_spells": 0.025333333333333333,
+      "stole_none": 0.3466666666666667
+     },
+     "hybrid": {
+      "taught": 1.0,
+      "stole_spells": 0.0026666666666666666,
+      "stole_none": 0.0
+     }
+    },
+    "anticlockcircle": {
+     "cnn": {
+      "taught": 0.9866666666666667,
+      "stole_spells": 0.0,
+      "stole_none": 0.0
+     },
+     "dtw": {
+      "taught": 0.9066666666666666,
+      "stole_spells": 0.004,
+      "stole_none": 0.0
+     },
+     "hybrid": {
+      "taught": 0.9066666666666666,
+      "stole_spells": 0.004,
+      "stole_none": 0.0
+     }
+    }
+   },
+   "average": {
+    "cnn": {
+     "taught": 0.8661333333333333,
+     "stole_spells": 0.0,
+     "stole_none": 0.07146666666666666
+    },
+    "dtw": {
+     "taught": 0.9311999999999999,
+     "stole_spells": 0.017333333333333333,
+     "stole_none": 0.18773333333333336
+    },
+    "hybrid": {
+     "taught": 0.9194666666666667,
+     "stole_spells": 0.0018666666666666664,
+     "stole_none": 0.0
+    }
+   },
+   "rule": "hybrid"
+  }
+ }
+}

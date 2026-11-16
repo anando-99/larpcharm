@@ -1,4 +1,4 @@
-// A working copy of the charm's screen. It draws the same deck and blocks as firmware 9.1,
+// A working copy of the charm's screen. It draws the same deck and blocks as firmware 9.2,
 // follows the controls on this page, and opens a block when you tap it.
 (() => {
   const $ = id => document.getElementById(id);
@@ -133,10 +133,10 @@
     const a = glyphs(col, size); s = String(s);
     for (let i = 0; i < s.length; i++) { const ch = s.charCodeAt(i) & 255; c.drawImage(a, ch * 6 * size, 0, 6 * size, 8 * size, x + i * 6 * size, y, 6 * size, 8 * size); }
   }
-  const TX = [2, 2, 152, 2, 92, 10, 37, 65, 92, 120, 147, 175, 202], TY = [15, 81, 81, 141, 141, 258, 258, 258, 258, 258, 258, 258, 258], TW = [236, 146, 86, 86, 146, 27, 28, 27, 28, 27, 28, 27, 28], TH = [62, 56, 56, 54, 54, 22, 22, 22, 22, 22, 22, 22, 22];
-  const TMODE = [0, 4, 5, 6, 1, 4, 2, 7, 9, 10, 13, 14, 15];
-  const TCMD = ['date', 'np', 'ps pet', 'imu --scope', 'cat motd', 'spt', 'img', 'id', 'eye', 'jbx', 'tty', 'cc', 'wx'];
-  const TOPEN = ['clock', 'spotify', 'pet', 'rng', 'motd', 'spotify', 'img', 'id', 'eyes', 'jukebox', 'tty', 'claude', 'weather'];
+  const TX = [2, 2, 152, 2, 92, 8, 33, 58, 83, 108, 132, 157, 182, 207], TY = [15, 81, 81, 141, 141, 258, 258, 258, 258, 258, 258, 258, 258, 258], TW = [236, 146, 86, 86, 146, 25, 25, 25, 25, 24, 25, 25, 25, 25], TH = [62, 56, 56, 54, 54, 22, 22, 22, 22, 22, 22, 22, 22, 22];
+  const TMODE = [0, 4, 5, 6, 1, 17, 4, 2, 7, 9, 10, 13, 14, 15];
+  const TCMD = ['date', 'np', 'ps pet', 'imu --scope', 'cat motd', 'spl', 'spt', 'img', 'id', 'eye', 'jbx', 'tty', 'cc', 'wx'];
+  const TOPEN = ['clock', 'spotify', 'pet', 'rng', 'motd', 'spells', 'spotify', 'img', 'id', 'eyes', 'jukebox', 'tty', 'claude', 'weather'];
   let openedTile = -1;      // the pane or window last opened, so closing shrinks back into it
   const tileOf = m => openedTile >= 0 && TMODE[openedTile] === m ? openedTile : TMODE.indexOf(m);
   const DAYS = ['SUN', 'MON', 'TUE', 'WED', 'THU', 'FRI', 'SAT'], MON = ['JAN', 'FEB', 'MAR', 'APR', 'MAY', 'JUN', 'JUL', 'AUG', 'SEP', 'OCT', 'NOV', 'DEC'];
@@ -152,7 +152,7 @@
   const boot = performance.now();
   const klog = [];
   const charmLog = window.charmLog = msg => { klog.push({ t: performance.now() - boot, s: String(msg).replace(/[^\x20-\x7e]/g, '?').slice(0, 31) }); if (klog.length > 8) klog.shift(); };
-  ['kernel: larp-os 9.1 up', 'imu: qmi8658 online', 'fs: ffat mounted', 'rtc: clock ok'].forEach(charmLog);
+  ['kernel: larp-os 9.2 up', 'imu: qmi8658 online', 'fs: ffat mounted', 'rtc: clock ok'].forEach(charmLog);
   const typing = { cmd: '', at: 0, tile: -1 };
   const scope = new Array(74).fill(0); let scopeHead = 0, lastTilt = 0;
   const bar = (f, n, fill, head, empty) => { const k = Math.round(Math.max(0, Math.min(1, f)) * (n - 2)); let s = '['; for (let i = 0; i < n - 2; i++) s += i < k - 1 ? fill : i === k - 1 ? head : empty; return s + ']'; };
@@ -1067,7 +1067,64 @@
     ['ax', 'ay', 'az', 'gx', 'gy', 'gz'].forEach((n, i) => G(n, 12 + i * 20, 228, 1, REC_COL[i]));
     G('|a| 1.00g', 136, 228, 1, TTY_TEXT); G('|w| 0 dps', 136, 240, 1, TTY_TEXT); G('pwr: exit', 12, 240, 1, TTY_DIM);
   }
-  const scenes = { 0: clock, 1: text, 2: photo, 4: music, 5: pet, 6: toy, 7: card, 8: deck, 9: eyes, 10: jukeDeck, 11: torch, 12: chargeDeck, 13: tty, 14: claude, 15: weather, 16: recScreen };
+  // ── spells: the cast screen (same layout as the firmware's drawCast), driven by the casts the charm reports ──
+  const SPL_WORD = { circle: 'LUMOS', zigzag: 'FULMEN', flick: 'ACCIO', heart: 'AMOR' };
+  function castFx(kind, x0, y0, w, h, t) {
+    const cx = x0 + w / 2, cy = y0 + h / 2, u = Math.min(1, t / 900);
+    if (kind === 'circle') { for (let k = 0; k < 4; k++) circle(cx, cy, u * 52 + k, k ? ACC : '#fff'); for (let i = 0; i < 14; i++) { const a = i * .449 + t / 400, r = u * 52 * (.6 + .5 * ((i * 37) % 10) / 10) + t / 30; R(cx + Math.cos(a) * r, cy + Math.sin(a) * r, 2, 2, '#fff'); } }
+    else if (kind === 'zigzag') {
+      if ((t / 70 | 0) % 4 === 0) R(x0 + 1, y0 + 1, w - 2, h - 2, 'rgba(255,255,255,.28)');
+      let px = cx - 30, py = y0 + 6; c.lineWidth = 3;
+      for (let i = 1; i <= 6; i++) { const nx = cx + (i % 2 ? 28 : -24) - i * 2, ny = y0 + 6 + i * (h - 12) / 6; if (i <= u * 7) { c.strokeStyle = '#fff'; c.beginPath(); c.moveTo(px, py); c.lineTo(nx, ny); c.stroke(); } px = nx; py = ny; }
+      c.lineWidth = 1;
+    } else if (kind === 'flick') { for (let i = 0; i < 9; i++) { const y = y0 + 14 + i * (h - 28) / 8, x = x0 + ((t / 2 + i * 41) % (w + 60)) - 40; R(Math.max(x0 + 2, x - 30), y, 30, 1, ACC); G('>', Math.min(x0 + w - 8, x), y - 3, 1, '#fff'); } }
+    else if (kind === 'heart') {
+      const sz = 2.3 * u * (1 + .12 * Math.abs(Math.sin(t / 140)));
+      c.strokeStyle = '#f472b6'; c.lineWidth = 2; c.beginPath();
+      for (let i = 0; i <= 64; i++) { const a = i / 64 * 2 * Math.PI, x = -16 * Math.sin(a) ** 3, y = 13 * Math.cos(a) - 5 * Math.cos(2 * a) - 2 * Math.cos(3 * a) - Math.cos(4 * a); const px = cx + x * sz, py = cy + 4 - (y - 2) * sz; i ? c.lineTo(px, py) : c.moveTo(px, py); }
+      c.stroke(); c.lineWidth = 1;
+      for (let i = 0; i < 6; i++) G('\x03', x0 + 20 + i * 36, y0 + h - 10 - ((t / 6 + i * 23) % (h - 20)), 1, '#f472b6');
+    } else if (!kind) { for (let i = 0; i < 5; i++) G('~', cx - 30 + i * 13 + Math.sin(t / 200 + i) * 4, cy - ((t / 25 | 0) % 40) + (i % 2) * 8, 2, TTY_DIM); G('*poof*', cx - 36, cy + 22, 2, TTY_DIM); }
+    else { for (let i = 0; i < 14; i++) { const a = i * .449 + t / 400, r = 40 * (.6 + .5 * ((i * 37) % 10) / 10) + t / 30; R(cx + Math.cos(a) * r, cy + Math.sin(a) * r, 2, 2, ACC); } G(kind.toUpperCase(), cx - kind.length * 6, cy - 8, 2, '#fff'); }
+  }
+  function castScreen() {
+    const v = window.spellsCastView ? window.spellsCastView() : null, now = performance.now(), LOW = mixk(ACC, .18);
+    R(0, 0, W, H, TTY_BG);
+    G('$', 14, 3, 1, ACC); G('spell --cast', 26, 3, 1, '#fff');
+    if (v && v.teach) { const s = `teach ${v.teach.n}/5`; G(s, 226 - s.length * 6, 3, 1, '#ffb000'); }
+    const bx = 6, by = 20, bw = 228, bh = 140, last = v && v.last, fresh = last && now - last.at < 2600;
+    const cmd = fresh ? 'fx' : v && v.teach ? 'teach' : 'spellbook';
+    c.strokeStyle = fresh ? ACC : LOW; c.strokeRect(bx + .5, by + .5, bw - 1, bh - 1);
+    R(bx + 6, by - 4, (cmd.length + 4) * 6, 9, TTY_BG); G('$', bx + 9, by - 3, 1, fresh ? ACC : TTY_DIM); G(cmd, bx + 21, by - 3, 1, fresh ? '#fff' : ACC);
+    if (fresh) castFx(last.label, bx, by, bw, bh, now - last.at);
+    else if (v && v.teach) {
+      G(v.teach.name, bx + 12, by + 14, 2, '#fff');
+      for (let i = 0; i < 5; i++) { c.strokeStyle = ACC; c.strokeRect(bx + 14.5 + i * 40, by + 60.5, 31, 31); if (i < v.teach.n) R(bx + 18 + i * 40, by + 64, 24, 24, ACC); }
+      G('draw it the same way 5x', bx + 12, by + 104, 1, TTY_TEXT);
+    } else if (v) {
+      let y = by + 10;
+      const how = ['one loop, clockwise', 'three sharp peaks', 'a quick snap right', 'one stroke heart'];
+      v.book.forEach((b, i) => { G(b.label, bx + 10, y, 1, ACC); G(how[i], bx + 62, y, 1, TTY_DIM); G('> ' + v.acts[v.base[i]], bx + 62, y + 9, 1, TTY_TEXT); y += 20; });
+      v.custom.forEach(cs => { if (y < by + bh - 12) { G(`${cs.name} > ${v.acts[cs.act]}`, bx + 10, y, 1, '#39ff14'); y += 11; } });
+      if (!v.custom.length) G('teach your own: spells tab', bx + 10, y + 2, 1, TTY_DIM);
+    }
+    const ry = 168;
+    if (last) {
+      last.top.slice(0, 3).forEach(([n, s], i) => {
+        G(i ? ' ' : '>', 10, ry + i * 11, 1, ACC); G(n.slice(0, 9), 18, ry + i * 11, 1, i ? TTY_TEXT : '#fff'); G(s.toFixed(2), 78, ry + i * 11, 1, TTY_DIM);
+        G(bar(Math.max(0, s), 18, '#', '#', '.'), 108, ry + i * 11, 1, i ? mixk(ACC, .45) : ACC);
+      });
+      const word = last.label ? (SPL_WORD[last.label] || last.label.toUpperCase()) + '!' : 'FIZZLE';
+      G(word, 12, 206, 2, last.label ? ACC : TTY_DIM);
+      G(last.label ? `-> ${v.acts[last.act]}  (${last.ms}ms)` : 'no match. draw it bigger?', 12, 226, 1, last.label ? TTY_TEXT : TTY_DIM);
+    } else {
+      G('hold thumb, draw a spell,', 12, ry, 1, TTY_TEXT); G('let go', 12, ry + 11, 1, TTY_TEXT);
+      if ((now / 500 | 0) % 2) R(52, ry + 10, 6, 9, ACC);
+      G('still 0.5s, draw, still 0.5s', 12, ry + 30, 1, TTY_DIM);
+    }
+    G('pwr: exit', 12, 246, 1, TTY_DIM); G('1d cnn, 39k', 160, 246, 1, TTY_DIM);
+  }
+  const scenes = { 0: clock, 1: text, 2: photo, 4: music, 5: pet, 6: toy, 7: card, 8: deck, 9: eyes, 10: jukeDeck, 11: torch, 12: chargeDeck, 13: tty, 14: claude, 15: weather, 16: recScreen, 17: castScreen };
   // Quest: frames rendered by the firmware itself (desktop simulator), packed in one sheet.
   // d00..d10 day village, n00..n10 night village, then the screens behind the doors.
   // ── tap a block to open it, tap again to go back ──

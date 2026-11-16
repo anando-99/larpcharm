@@ -226,7 +226,8 @@
     list.forEach((t, i) => {
       const el = document.createElement('div'); el.className = 'sp-take' + (t === sp.view ? ' on' : '');
       const cv = document.createElement('canvas'); cv.width = 64; cv.height = 64; drawStroke(cv, t);
-      el.append(cv); el.insertAdjacentHTML('beforeend', `<span>#${i + 1} · ${(t.n / t.hz).toFixed(2)}s</span><small>${t.session}${t.missed ? ' · ' + t.missed + ' missed' : ''}</small>`);
+      const pr = predict(t), odd = pr && t.group !== 'calibrate' && t.group !== 'custom' && (pr.label || 'none') !== t.label;
+      el.append(cv); el.insertAdjacentHTML('beforeend', `<span>#${i + 1} · ${(t.n / t.hz).toFixed(2)}s</span><small>${t.session}${t.missed ? ' · ' + t.missed + ' missed' : ''}${odd ? ' · <span class="sp-model bad">model: ' + (pr.label || 'no match') + '</span>' : ''}</small>`);
       const x = document.createElement('button'); x.className = 'sp-x'; x.textContent = '×'; x.title = 'delete this take';
       x.onclick = async e => { e.stopPropagation(); await delTake(t.id); sp.takes = sp.takes.filter(q => q !== t); if (sp.view === t) sp.view = sp.takes.filter(q => q.label === sp.label).at(-1) || null; renderAll(); sendLabel(); };
       el.append(x); el.onclick = () => { sp.view = t; renderTakes(); renderView(); };
@@ -235,9 +236,21 @@
   }
   function renderView(){
     const t = sp.view; drawPlot(t); drawStroke($('spStroke'), t);
-    $('spTakeInfo').textContent = t ? `${t.label} · ${(t.n / t.hz).toFixed(2)} s · ${t.n} samples · ${t.trigger} · ${t.session}, ${t.posture} · ${new Date(t.at).toLocaleString()}${t.missed ? ' · ' + t.missed + ' samples missed' : ''}` : '';
+    $('spTakeInfo').innerHTML = t ? `${t.label} · ${(t.n / t.hz).toFixed(2)} s · ${t.n} samples · ${t.trigger} · ${t.session}, ${t.posture} · ${new Date(t.at).toLocaleString()}${t.missed ? ' · ' + t.missed + ' samples missed' : ''}${modelSays(t)}` : '';
   }
   function renderAll(){ renderPlan(); renderNow(); renderTakes(); renderView(); }
+  // what the network (spells-net.js, the same one the charm runs) makes of a take
+  const preds = new WeakMap();
+  function predict(t){
+    if (!window.SpellNet || !window.SPELL_MODEL || t.group === 'calibrate') return null;
+    if (!preds.has(t)) { try { preds.set(t, SpellNet.classify(t.data, t.n, t.aLsb, t.gLsb)); } catch (e) { preds.set(t, null); } }
+    return preds.get(t);
+  }
+  function modelSays(t){
+    const p = predict(t); if (!p) return '';
+    const odd = t.group !== 'custom' && (p.label || 'none') !== t.label;
+    return ` · <span class="sp-model${odd ? ' bad' : ''}">model: ${p.label || 'no match'} (${p.scores[0].label} ${p.scores[0].sim.toFixed(2)})${odd ? ' — check this take' : ''}</span>`;
+  }
 
   // ── export / import ──
   function download(){
@@ -272,15 +285,15 @@
   ['spSession', 'spPosture'].forEach(id => { const v = localStorage.getItem('sp_' + id); if (v) { $(id).querySelectorAll('button').forEach(b => b.classList.toggle('on', b.dataset.v === v)); $(id).value = v; } });
   $('spGrip').value = localStorage.getItem('sp_grip') || ''; $('spGrip').onchange = () => localStorage.setItem('sp_grip', $('spGrip').value);
   addEventListener('keydown', e => {
-    if (!$('spells').offsetParent || e.target.closest('input,textarea,select') || e.metaKey || e.ctrlKey || e.altKey) return;
+    if (!$('spRecWrap').offsetParent || e.target.closest('input,textarea,select') || e.metaKey || e.ctrlKey || e.altKey) return;
     if (e.key === ' ') { e.preventDefault(); timedTake(); }
     else if (e.key === 'Enter') { e.preventDefault(); nextLabel(); }
     else if (e.key === 'Backspace') { e.preventDefault(); $('spUndo').click(); }
   });
-  // send the label when the tab is opened, so the charm switches to its recorder
-  document.querySelectorAll('.tab[data-tab="spells"]').forEach(t => t.addEventListener('click', () => sendLabel()));
+  // in record mode, opening the tab switches the charm to its recorder
+  document.querySelectorAll('.tab[data-tab="spells"]').forEach(t => t.addEventListener('click', () => { if ($('spMode').value === 'rec') sendLabel(); }));
   addEventListener('resize', () => renderView());
-  (function loop(now){ if ($('spells').offsetParent) { demo(now); if (sp.recording || sp.countdown) renderNow(); } requestAnimationFrame(loop); })(0);
+  (function loop(now){ if ($('spRecWrap').offsetParent) { demo(now); if (sp.recording || sp.countdown) renderNow(); } requestAnimationFrame(loop); })(0);
 
   loadAll().then(all => {
     sp.takes = (all || []).map(t => ({ ...t, data: t.data instanceof Int16Array ? t.data : Int16Array.from(t.data) }));
@@ -289,6 +302,122 @@
     sp.view = sp.takes.filter(t => t.label === sp.label).at(-1) || null;
     renderAll();
   }).catch(e => { console.warn(e); renderAll(); });
+
+
+  // ───────────── the spellbook: what each spell does, teaching new ones, the casts the charm reports ─────────────
+  const ACTS = ['nothing', 'torch', 'new colour', 'next song', 'play/pause', 'eyes in love', 'weather', 'clock', 'pet', 'roll dice', 'claude', 'spotify'];
+  const BOOK = [
+    { label: 'circle', word: 'lumos', how: 'one loop, clockwise, from the top' },
+    { label: 'zigzag', word: 'fulmen', how: 'three sharp peaks, left to right' },
+    { label: 'flick', word: 'accio', how: 'a quick wrist snap to the right' },
+    { label: 'heart', word: 'amor', how: 'one stroke: down the left, up the right' }];
+  const book = sp.book = { base: [1, 2, 3, 5], custom: [], live: false, collecting: null, teach: null, casts: [], last: null };
+  const conn = () => typeof rxChar !== 'undefined' && !!rxChar;
+  const spellCmd = (bytes, txt) => conn() ? write(packet(CMD.SPELL, bytes, txt)).catch(e => hud(e.message)) : (hud('Connect the charm first.'), Promise.resolve());
+  const actSelect = (val, onChange) => { const s = document.createElement('select'); ACTS.forEach((a, i) => s.add(new Option(a, i))); s.value = val; s.onchange = () => onChange(+s.value); return s; };
+
+  function miniPath(cv, label){
+    const c = cv.getContext('2d'), W = cv.width, H = cv.height, f = PATHS[label];
+    c.clearRect(0, 0, W, H); if (!f) return;
+    const acc = getComputedStyle(document.documentElement).getPropertyValue('--acc').trim() || '#00e5ff';
+    c.strokeStyle = acc; c.lineWidth = 2; c.beginPath();
+    for (let i = 0; i <= 60; i++) { const [x, y] = f(i / 60); const px = W / 2 + x * W * .34, py = H / 2 + y * H * .34; i ? c.lineTo(px, py) : c.moveTo(px, py); }
+    c.stroke(); const [sx, sy] = f(0); c.fillStyle = '#fff'; c.beginPath(); c.arc(W / 2 + sx * W * .34, H / 2 + sy * H * .34, 3, 0, 7); c.fill();
+  }
+  function renderBook(){
+    const box = $('spBookList'); box.innerHTML = '';
+    BOOK.forEach((b, i) => {
+      const row = document.createElement('div'); row.className = 'sp-spell';
+      const cv = document.createElement('canvas'); cv.width = 64; cv.height = 64; miniPath(cv, b.label);
+      const info = document.createElement('div');
+      info.innerHTML = `<div><b>${b.label}</b><span class="w">${b.word.toUpperCase()}!</span></div><div class="h">${b.how}</div>`;
+      const ctl = document.createElement('div'); ctl.className = 'ctl'; ctl.append('does ', actSelect(book.base[i], a => { book.base[i] = a; spellCmd([0, i, a]); renderPreview(); }));
+      info.append(ctl); row.append(cv, info); box.append(row);
+    });
+    book.custom.forEach(c => {
+      const row = document.createElement('div'); row.className = 'sp-spell custom';
+      const tag = document.createElement('div'); tag.style.cssText = 'width:64px;height:64px;display:grid;place-items:center;color:var(--ok);font-size:11px;border:1px dashed var(--line2)'; tag.textContent = 'taught';
+      const info = document.createElement('div'); info.innerHTML = `<div><b>${esc(c.name)}</b><span class="w">${esc(c.name).toUpperCase()}!</span></div><div class="h">your own, learnt from 5 recordings · slot ${c.slot + 1}</div>`;
+      const ctl = document.createElement('div'); ctl.className = 'ctl';
+      const forget = document.createElement('button'); forget.className = 'btn plain sm sp-danger'; forget.textContent = 'forget';
+      forget.onclick = () => { if (forget.dataset.arm !== '1') { forget.dataset.arm = '1'; forget.textContent = 'really forget?'; setTimeout(() => { forget.dataset.arm = ''; forget.textContent = 'forget'; }, 3000); return; } spellCmd([3, c.slot]); };
+      ctl.append('does ', actSelect(c.act, a => { c.act = a; spellCmd([0, 10 + c.slot, a]); }), forget); info.append(ctl); row.append(tag, info); box.append(row);
+    });
+    $('spBookNote').textContent = conn() ? (book.live ? '' : 'reading the spellbook from the charm...') : 'connect the charm to change these.';
+    $('spTeach').disabled = !conn() || !!book.teach || book.custom.length >= 6;
+    $('spTeachStop').classList.toggle('hidden', !book.teach);
+    const p = $('spTeachProg'); p.innerHTML = '';
+    if (book.teach) { for (let i = 0; i < 5; i++) { const b = document.createElement('i'); b.className = i < book.teach.n ? 'on' : ''; p.append(b); } p.append(` draw "${book.teach.name}" on the charm: ${book.teach.n}/5`); }
+    else if (book.custom.length >= 6) p.textContent = 'the charm holds 6 taught spells. forget one to teach another.';
+  }
+  const esc = s => String(s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[c]);
+  function renderCasts(){
+    const box = $('spCastLog'); if (!book.casts.length) return;
+    box.innerHTML = book.casts.map(k => `<div class="sp-cast"><div class="r"><b class="${k.label ? '' : 'no'}">${k.label ? esc(k.label) + ' · ' + k.sim.toFixed(2) : 'no match'}</b><small>${k.label ? '→ ' + ACTS[k.act] + ' · ' : ''}${k.how === 'd' ? 'taught (dtw)' : 'cnn'} · ${k.ms} ms · ${k.time}</small></div>
+      <div class="sp-bars">${k.top.map(([n, s]) => `<span>${esc(n)}</span><span>${s.toFixed(2)}</span><i style="width:${Math.max(0, s) * 100}%;opacity:${n === k.label ? 1 : .45}"></i>`).join('')}</div></div>`).join('');
+  }
+  function renderCard(){
+    const M = window.SPELL_MODEL; if (!M) { $('spModelCard').textContent = 'model not loaded'; return; }
+    const m = M.metrics || {}, pc = v => v == null ? '–' : (v * 100).toFixed(1) + '%';
+    $('spModelCard').innerHTML = `<table>
+      <tr><td>network</td><td>1D CNN, ${M.params.toLocaleString()} parameters</td></tr>
+      <tr><td>input</td><td>6-axis IMU, 100 Hz → 7 × ${M.T}</td></tr>
+      <tr><td>output</td><td>a ${M.emb}-number fingerprint</td></tr>
+      <tr><td>on the charm</td><td>~70 ms, float32, ESP32-S3</td></tr>
+      <tr><td>trained</td><td>${M.version}, ${m.takes || '–'} recorded takes</td></tr>
+      <tr><td>built-in spells right (5-fold cv)</td><td>${pc(m.spells_right)}</td></tr>
+      <tr><td>"not a spell" rejected</td><td>${pc(m.none_rejected)}</td></tr>
+      <tr><td>taught spells recognised</td><td>${pc(m.teach && m.teach.taught)}</td></tr>
+      <tr><td>other spells taken for a taught one</td><td>${pc(m.teach && m.teach.stole_spells)}</td></tr></table>
+      <pre>imu 6×(1–6 s) ─ trim ─ resample ─▶ 7×128
+  conv k5 32 ─ conv k5/2 64 ─ conv k3/2 64 ─ conv k3 64
+  ─ mean over time ─ linear 32 ─ L2 norm ─▶ fingerprint
+  built-in: nearest prototype (cos ≥ ${M.baseThr})
+  taught:   DTW to your 5 takes, CNN can veto</pre>
+      <p class="meta">how it was built: firmware/tools/spells and docs/spells.md in the repo.</p>`;
+  }
+  function renderPreview(){}
+
+  const statusBook = s => {
+    const k = s.slice(0, s.indexOf('=')), v = s.slice(s.indexOf('=') + 1);
+    if (k === 'spb') { book.base = v.split(',').map(Number); book.collecting = []; return true; }
+    if (k === 'spc') {
+      if (v === 'end') { book.custom = book.collecting || []; book.collecting = null; book.live = true; renderBook(); return true; }
+      const a = v.indexOf(','), b = v.indexOf(',', a + 1); (book.collecting || (book.collecting = [])).push({ slot: +v.slice(0, a), act: +v.slice(a + 1, b), name: v.slice(b + 1) }); return true;
+    }
+    if (k === 'teach') {
+      const [slot, n] = v.split(',');
+      if (n === 'done') { hud(`Learnt "${book.teach ? book.teach.name : 'it'}"`); book.teach = null; }
+      else if (book.teach) book.teach.n = +n;
+      renderBook(); return true;
+    }
+    if (k === 'cast') {
+      const f = v.split(','), top = [];
+      for (let i = 5; i + 1 < f.length; i += 2) if (f[i]) top.push([f[i], +f[i + 1]]);
+      const c = { label: f[0] === '-' ? null : f[0], sim: +f[1], how: f[2], act: +f[3], ms: +f[4], top, time: new Date().toLocaleTimeString(), at: performance.now() };
+      book.casts.unshift(c); book.casts.length = Math.min(book.casts.length, 20); book.last = c;
+      renderCasts(); return true;
+    }
+    return false;
+  };
+  const prevStatus = window.spellsOnStatus;
+  window.spellsOnStatus = s => { if (!statusBook(s)) prevStatus(s); };
+
+  $('spTeachAct').innerHTML = ''; ACTS.forEach((a, i) => $('spTeachAct').add(new Option(a, i))); $('spTeachAct').value = 1;
+  $('spTeach').onclick = () => {
+    const name = ascii($('spTeachName').value.trim()).slice(0, 16); if (!name) { hud('Give the spell a name'); return; }
+    const used = new Set(book.custom.map(c => c.slot)), slot = [0, 1, 2, 3, 4, 5].find(i => !used.has(i));
+    if (slot === undefined) return;
+    book.teach = { slot, n: 0, name }; spellCmd([1, slot, +$('spTeachAct').value], name); setActiveMode(17); renderBook();
+  };
+  $('spTeachStop').onclick = () => { book.teach = null; spellCmd([2]); renderBook(); };
+  $('spCastOpen').onclick = () => { spellCmd([5]); setActiveMode(17); };
+  seg('spMode', v => { $('spBook').classList.toggle('hidden', v !== 'book'); $('spRecWrap').classList.toggle('hidden', v !== 'rec'); localStorage.setItem('sp_mode', v); if (v === 'rec') { sendLabel(); renderView(); } });
+  { const v = localStorage.getItem('sp_mode'); if (v === 'rec') { $('spMode').querySelector('[data-v="rec"]').click(); } }
+  const prevConnect = window.spellsOnConnect;
+  window.spellsOnConnect = () => { book.live = false; renderBook(); if ($('spMode').value === 'rec') prevConnect(); };
+  renderBook(); renderCard();
+  window.spellsCastView = () => ({ last: book.last, base: book.base, custom: book.custom, teach: book.teach, acts: ACTS, book: BOOK });
 
   // for the charm preview
   window.spellsView = () => { const it = item(sp.label); return { label: it ? it.label : '', hint: it ? it.hint : '', take: it ? count(it.label) : 0, goal: it ? it.goal : 0, recording: sp.recording, recAt: sp.recAt, timed: it && it.timed, last: sp.view, stroke: sp.view ? stroke(sp.view) : null }; };

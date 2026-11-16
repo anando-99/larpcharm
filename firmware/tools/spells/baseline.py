@@ -6,17 +6,10 @@ downsampled to 50 Hz, and gyro is scaled so 200 dps counts like 1 g. Reports:
   2. rejection: spells vs "not a spell" by distance to the nearest spell template
   3. teach-your-own: your custom gestures enrolled from 5 takes, tested against everything
 """
-import ctypes, os, subprocess, sys, tempfile
+import sys
 import numpy as np
 from spells_data import load, gyro_bias, active
-
-here = os.path.dirname(os.path.abspath(__file__))
-lib_path = os.path.join(tempfile.gettempdir(), 'larp_dtw.so')
-if not os.path.exists(lib_path) or os.path.getmtime(lib_path) < os.path.getmtime(os.path.join(here, 'dtw.c')):
-    subprocess.check_call(['cc', '-O3', '-shared', '-fPIC', '-o', lib_path, os.path.join(here, 'dtw.c')])
-lib = ctypes.CDLL(lib_path)
-lib.dtw.restype = ctypes.c_double
-lib.dtw.argtypes = [ctypes.c_void_p, ctypes.c_int, ctypes.c_void_p, ctypes.c_int, ctypes.c_int, ctypes.c_int]
+from dtw import dist
 
 
 def feat(t):
@@ -25,10 +18,6 @@ def feat(t):
     a = active(x)
     f = np.concatenate([a[:, :3] - g0, (a[:, 3:] - b) / 200.0], 1)[::2]
     return np.ascontiguousarray(f, dtype=np.float32)
-
-
-def dist(a, b):
-    return lib.dtw(a.ctypes.data, len(a), b.ctypes.data, len(b), a.shape[1], max(8, int(0.25 * max(len(a), len(b)))))
 
 
 takes = [t for t in load(sys.argv[1]) if t['group'] != 'calibrate']
