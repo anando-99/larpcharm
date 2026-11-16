@@ -3,7 +3,7 @@ const SVC = '6e400001-c4a7-4d2e-9b3c-c4a2d7c0ffee';
 const RX  = '6e400002-c4a7-4d2e-9b3c-c4a2d7c0ffee';
 const ST  = '6e400003-c4a7-4d2e-9b3c-c4a2d7c0ffee';
 const CMD = {MODE:1, TEXT:2, TIME:3, NOWPLAYING:4, XFER_BEGIN:5, XFER_DATA:6, XFER_END:7, BRIGHT:8, PET:9, CARD:10, SETTINGS:11, PING:12, BUZZ:13, FEED:14, LOOK:18, TIMER:19, TOY:20, THEME:21, SKIN:22, EYES:23, TUNE:24, TORCH:25, SONG_LIST:26, SONG_DELETE:27, CC:30, WEATHER:31};
-const MODE = {CLOCK:0, TEXT:1, PHOTO:2, SING:3, MUSIC:4, PET:5, TOY:6, CARD:7, DECK:8, EYES:9, JUKE:10, TORCH:11, CHARGE:12, TERM:13, CLAUDE:14, WEATHER:15};
+const MODE = {CLOCK:0, TEXT:1, PHOTO:2, MUSIC:4, PET:5, TOY:6, CARD:7, DECK:8, EYES:9, JUKE:10, TORCH:11, CHARGE:12, TERM:13, CLAUDE:14, WEATHER:15};
 const THEMES = ['#00E5FF', '#FF2BD6', '#FFB000', '#39FF14', '#FF3B30', '#C8DCFF'];
 const klog = m => { if (window.charmLog) window.charmLog(m); };       // lines for the preview's dmesg pane
 const ui = window.ui = { mode: 8, bg: 9, face: 0, toy: 0, theme: 0, playing: false, artReady: false, expr: 255, torch: 0, jbSong: -1, jbQueue: 0, charging: false, bat: 76 };
@@ -258,60 +258,6 @@ $('sendPhoto').onclick = act(async () => {
   finally { $('sendPhoto').disabled = false; pr.hide(2500); }
 });
 
-// ─────────── Sing-along ───────────
-const sctx = $('singCv').getContext('2d');
-let singPick = {};                 // line text -> { face, prop, scene, color } picked by hand
-let singT0 = performance.now(), singJump = 0, singTimer = null;
-window.singClock = () => performance.now() - singT0;
-const SING_COLS = [['Same colour', null], ['Graphite', '#36343e'], ['Red', '#de3e48'], ['Green', '#3f9e5c'], ['Blue', '#5c94e4'], ['Pink', '#f0749e'], ['Purple', '#9a5fd8'], ['Orange', '#ee8a24']];
-function buildShow(){
-  const lines = Sing.splitLines($('singText').value);
-  window.singShow = { bpm: +$('singBpm').value, theme: +$('singTheme').value, hat: $('singHat').checked, blips: $('singBlips').checked, ink: $('singInk').value,
-    lines: lines.map((text, i) => ({ ...Sing.guess(text, i), ...(singPick[text] || {}), text })) };
-  $('singBpmVal').textContent = $('singBpm').value + ' bpm';
-  const words = lines.reduce((n, l) => n + Sing.words(l), 0), secs = Math.round(lines.reduce((n, l) => n + Sing.words(l) + 2, 0) * 60 / +$('singBpm').value);
-  $('singInfo').textContent = lines.length ? `${lines.length}${lines.length >= 24 ? ' (max)' : ''} lines · ${words} words · ${fmtTime(secs)} loop` : 'Add a line';
-  $('singSend').disabled = !lines.length;
-  renderSingLines();
-}
-function renderSingLines(){
-  const ul = $('singLines'); ul.innerHTML = '';
-  const show = window.singShow;
-  if (!show.lines.length) { ul.innerHTML = '<li class="empty">No lines</li>'; return; }
-  show.lines.forEach((l, i) => {
-    const li = document.createElement('li'), t = document.createElement('span'); t.className = 't'; t.textContent = l.text;
-    const set = (key, v) => { singPick[l.text] = { face: l.face, prop: l.prop, scene: l.scene, color: l.color, [key]: v }; buildShow(); singT0 = performance.now() - Sing.lineStart(window.singShow, i); };
-    const mk = (opts, val, key, title) => { const s = document.createElement('select'); s.title = title; s.setAttribute('aria-label', title);
-      opts.forEach((o, k) => s.add(new Option(o, k))); s.value = val; s.onchange = () => set(key, +s.value); return s; };
-    const col = document.createElement('select'); col.title = col.ariaLabel = 'Colour of this line';
-    SING_COLS.forEach(([n, v], k) => col.add(new Option(n, k)));
-    col.value = Math.max(0, SING_COLS.findIndex(([, v]) => v === l.color));
-    col.onchange = () => set('color', SING_COLS[+col.value][1]);
-    li.append(t, mk(Sing.FACES, l.face, 'face', 'Face'), mk(Sing.PROPS, l.prop, 'prop', 'Prop'), mk(Sing.SCENES, l.scene || 0, 'scene', 'Scene'), col);
-    li.onclick = e => { if (e.target.tagName !== 'SELECT') singT0 = performance.now() - Sing.lineStart(window.singShow, i); };
-    ul.append(li);
-  });
-}
-$('singText').addEventListener('input', () => { clearTimeout(singTimer); singTimer = setTimeout(buildShow, 220); });
-$('singBpm').addEventListener('input', buildShow);
-seg('singTheme', buildShow);
-$('singHat').onchange = buildShow; $('singBlips').onchange = buildShow;
-$('singCv').onclick = () => { singJump = performance.now(); };
-(function singLoop(){
-  const r = $('singCv').getBoundingClientRect();
-  if (window.singShow) window.singShow.ink = $('singInk').value;
-  if (window.singShow && window.singShow.lines.length && r.bottom > 0 && r.top < innerHeight) Sing.draw(sctx, window.singShow, window.singClock(), singJump);
-  requestAnimationFrame(singLoop);
-})();
-$('singSend').onclick = act(async () => {
-  buildShow();
-  const pr = progress('singProg'); pr.show('Sending…'); $('singSend').disabled = true;
-  try {
-    await sendBlob(5, Sing.encode(window.singShow), 0, f => pr.set(f, 'Sending…'));
-    pr.set(1, 'Playing on your charm.'); setActiveMode(MODE.SING); singT0 = performance.now();
-  } catch (e) { pr.set(0, e.message); throw e; }
-  finally { $('singSend').disabled = false; pr.hide(2500); }
-});
 
 async function jpegBlob(canvas, q){ return new Promise(r => canvas.toBlob(r, 'image/jpeg', q)); }
 
@@ -324,8 +270,12 @@ function renderStorage(){
 
 // ─────────── Music ───────────
 seg('musicSrc', v => { $('spotifyBox').classList.toggle('hidden', v !== 'spotify'); $('manualBox').classList.toggle('hidden', v !== 'manual'); });
-function nowPlayingPacket(rgb, playing, posMs, durMs, title, artist){
-  return packet(CMD.NOWPLAYING, [...rgb, playing ? 1 : 0, ...u32(posMs), ...u32(durMs)], ascii(title).slice(0, 80) + '\x1F' + ascii(artist).slice(0, 60));
+// title 0x1F artist, then (from Spotify) 0x1F "volume,shuffle,repeat" 0x1F device name
+function nowPlayingPacket(rgb, playing, posMs, durMs, title, artist, ex){
+  let s = ascii(title).slice(0, 80) + '\x1F' + ascii(artist).slice(0, 60);
+  if (ex) s += '\x1F' + `${ex.vol},${ex.shuffle ? 1 : 0},${ex.repeat}` + '\x1F' + ascii(ex.device || '').slice(0, 24);
+  ui.np = { pos: posMs, dur: durMs, at: performance.now(), ...(ex || { vol: -1 }) };
+  return packet(CMD.NOWPLAYING, [...rgb, playing ? 1 : 0, ...u32(posMs), ...u32(durMs)], s);
 }
 function vibeColor(ctx, w, h){
   const d = ctx.getImageData(0, 0, w, h).data; let r = 0, g = 0, b = 0, t = 0;
@@ -338,17 +288,17 @@ function vibeColor(ctx, w, h){
   return c.map(v => Math.round(Math.min(255, v * (220 / mx))));
 }
 const actx = $('artCv').getContext('2d', { willReadFrequently: true });
+const AW = 240;      // the cover goes over square; the charm shrinks it to 120×120 for its player
 let manualArt = null;
-// The cover is cropped to the whole 240×280 screen and sent as one small JPEG.
 async function artJpeg(){ return new Uint8Array(await (await jpegBlob($('artCv'), 0.82)).arrayBuffer()); }
 const toHex = rgb => '#' + rgb.map(v => v.toString(16).padStart(2, '0')).join('');
-$('mArtFile').onchange = act(async e => { if (!e.target.files[0]) return; manualArt = await loadImage(e.target.files[0]); drawFitted(actx, manualArt, W, H); ui.artReady = true; $('mColor').value = toHex(vibeColor(actx, W, H)); hud('Album art ready'); });
+$('mArtFile').onchange = act(async e => { if (!e.target.files[0]) return; manualArt = await loadImage(e.target.files[0]); drawFitted(actx, manualArt, AW, AW); ui.artReady = true; $('mColor').value = toHex(vibeColor(actx, AW, AW)); hud('Album art ready'); });
 $('sendMusic').onclick = act(async () => {
   const [m, s] = $('mLen').value.split(':').map(Number);
   const dur = ((m || 0) * 60 + (s || 0)) * 1000;
   await write(nowPlayingPacket(hexRgb($('mColor').value), $('mPlaying').checked, 0, dur, $('mTitle').value || 'Untitled', $('mArtist').value));
   ui.playing = $('mPlaying').checked;
-  if (manualArt) { drawFitted(actx, manualArt, W, H); ui.artReady = true; await sendBlob(3, await artJpeg(), 0); }
+  if (manualArt) { drawFitted(actx, manualArt, AW, AW); ui.artReady = true; await sendBlob(3, await artJpeg(), 0); }
   await write(packet(CMD.MODE, [MODE.MUSIC])); setActiveMode(MODE.MUSIC); hud('Now playing sent');
 });
 
@@ -391,51 +341,63 @@ async function ensureToken(){
   history.replaceState(null, '', REDIRECT);
 })();
 let spTimer = null, lastTrack = null, lastPlaying = null, lastSent = 0;
+const REPEAT = { off: 0, context: 1, track: 2 };
 function startSpotifyLoop(){ clearInterval(spTimer); spTimer = setInterval(pollSpotify, 5000); pollSpotify(); }
 async function pollSpotify(){
   if (!$('spLive').checked || !rxChar || document.hidden) return;
   try {
     if (!(await ensureToken())) return;
-    const r = await fetch('https://api.spotify.com/v1/me/player/currently-playing', { headers: { Authorization: 'Bearer ' + spotifyToken() } });
+    const r = await fetch('https://api.spotify.com/v1/me/player', { headers: { Authorization: 'Bearer ' + spotifyToken() } });
     if (r.status === 204) return;
     if (r.status === 401) { localStorage.setItem('sp_exp', 0); return; }
     const j = await r.json(); const it = j.item; if (!it) return;
     const title = it.name, artist = (it.artists || []).map(a => a.name).join(', ');
+    const dv = j.device || {}, ex = { vol: dv.volume_percent == null ? -1 : dv.volume_percent, shuffle: !!j.shuffle_state, repeat: REPEAT[j.repeat_state] || 0, device: dv.name || '' };
+    const st = [j.is_playing, ex.vol, ex.shuffle, ex.repeat, ex.device].join('|');
     const changed = it.id !== lastTrack;
-    if (!changed && j.is_playing === lastPlaying && Date.now() - lastSent < 20000) return;
+    if (!changed && st === lastPlaying && Date.now() - lastSent < 20000) return;
     let rgb = [244, 114, 182], artBytes = null;
     const art = it.album && it.album.images && (it.album.images.find(i => i.width <= 640) || it.album.images[0]);
     if (art) {
       try {
         const img = new Image(); img.crossOrigin = 'anonymous';
         await new Promise((res, rej) => { img.onload = res; img.onerror = rej; img.src = art.url; });
-        drawFitted(actx, img, W, H);
+        drawFitted(actx, img, AW, AW);
         ui.artReady = true;
-        rgb = vibeColor(actx, W, H);
+        rgb = vibeColor(actx, AW, AW);
         $('mColor').value = toHex(rgb);
         if (changed) artBytes = await artJpeg();
         $('spArt').src = art.url;
       } catch (_) {}
     }
-    await write(nowPlayingPacket(rgb, j.is_playing, j.progress_ms || 0, it.duration_ms || 0, title, artist));
+    await write(nowPlayingPacket(rgb, j.is_playing, j.progress_ms || 0, it.duration_ms || 0, title, artist, ex));
     if (artBytes) await sendBlob(3, artBytes, 0);
-    lastTrack = it.id; lastPlaying = j.is_playing; lastSent = Date.now(); ui.playing = j.is_playing;
+    lastTrack = it.id; lastPlaying = st; lastSent = Date.now(); ui.playing = j.is_playing;
     if ($('spTitle').textContent !== title) klog('np: ' + title);
     $('spNow').style.display = 'flex'; $('spTitle').textContent = title; $('spArtist').textContent = artist;
   } catch (e) { console.warn(e); }
 }
 
-// Play, pause and skip, asked for by tapping the charm's music screen.
+// Play, pause, skip and volume, asked for by tapping the charm's music screen.
 async function mediaControl(kind){
   try {
     if ($('musicSrc').value !== 'spotify' || !spotifyToken()) {
-      if (kind !== 'toggle') { hud('Skipping songs from the charm needs Spotify.'); return; }
+      if (kind !== 'toggle') { hud(kind.startsWith('vol') ? 'Volume from the charm needs Spotify.' : 'Skipping songs from the charm needs Spotify.'); return; }
       $('mPlaying').checked = !$('mPlaying').checked; ui.playing = $('mPlaying').checked;
       const [m, s] = $('mLen').value.split(':').map(Number);
       await write(nowPlayingPacket(hexRgb($('mColor').value), ui.playing, 0, ((m || 0) * 60 + (s || 0)) * 1000, $('mTitle').value || 'Untitled', $('mArtist').value));
       return;
     }
     if (!(await ensureToken())) { hud('Sign in with Spotify again.'); return; }
+    if (kind === 'volup' || kind === 'voldown') {
+      const np = ui.np || {}, v = Math.max(0, Math.min(100, (np.vol >= 0 ? np.vol : 50) + (kind === 'volup' ? 10 : -10)));
+      const r = await fetch('https://api.spotify.com/v1/me/player/volume?volume_percent=' + v, { method: 'PUT', headers: { Authorization: 'Bearer ' + spotifyToken() } });
+      if (r.ok) { np.vol = v; hud('Volume ' + v + '%'); }
+      else if (r.status === 404) hud('Start a song on Spotify first.');
+      else hud(r.status === 403 ? 'That device won’t let Spotify change its volume.' : 'Couldn’t change the volume.');
+      lastSent = 0; lastPlaying = null; setTimeout(pollSpotify, 700);
+      return;
+    }
     const path = kind === 'next' ? 'next' : kind === 'prev' ? 'previous' : (ui.playing ? 'pause' : 'play');
     const r = await fetch('https://api.spotify.com/v1/me/player/' + path, { method: kind === 'toggle' ? 'PUT' : 'POST', headers: { Authorization: 'Bearer ' + spotifyToken() } });
     if (r.status === 401 || r.status === 403) {
@@ -487,7 +449,7 @@ $('syncTime').onclick = act(async () => { await syncTime(); hud('Time synced'); 
 $('findMe').onclick = act(() => write(packet(CMD.BUZZ, [5])));
 
 // ─────────── Remember inputs ───────────
-['txt', 'mTitle', 'mArtist', 'petName', 'cName', 'cSub', 'singText'].forEach(id => {
+['txt', 'mTitle', 'mArtist', 'petName', 'cName', 'cSub'].forEach(id => {
   const el = $(id), v = localStorage.getItem('f_' + id); if (v !== null) el.value = v;
   el.addEventListener('change', () => localStorage.setItem('f_' + id, el.value));
 });
@@ -786,7 +748,7 @@ if (/^(localhost|127\.0\.0\.1)$/.test(location.hostname) || localStorage.getItem
 setInterval(() => { if (ccB.st && rxChar) ccRelay(ccB.st); }, 10000);
 
 // ─────────── the command line at the bottom of the page ───────────
-const SCREENS = { weather: 15, wx: 15, home: 8, deck: 8, clock: 0, msg: 1, message: 1, photo: 2, img: 2, sing: 3, music: 4, np: 4, pet: 5, dice: 6, rng: 6, id: 7, card: 7, eyes: 9, jukebox: 10, jbx: 10, torch: 11, tty: 13, term: 13, claude: 14, cc: 14 };
+const SCREENS = { weather: 15, wx: 15, home: 8, deck: 8, clock: 0, msg: 1, message: 1, photo: 2, img: 2, music: 4, np: 4, spotify: 4, pet: 5, dice: 6, rng: 6, id: 7, card: 7, eyes: 9, jukebox: 10, jbx: 10, torch: 11, tty: 13, term: 13, claude: 14, cc: 14 };
 const THEME_NAMES = ['ice', 'neon', 'amber', 'phosphor', 'redline', 'ghost'];
 const cmdIn = $('cmdIn'), cmdOut = $('cmdOut');
 const cmdHist = []; let cmdPos = 0, cmdClearT = 0;

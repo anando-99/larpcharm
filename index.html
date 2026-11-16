@@ -9,7 +9,7 @@
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Crect x='1' y='2' width='14' height='12' rx='1' fill='%2307090c' stroke='%2300E5FF'/%3E%3Cpath d='M4 6l2 2-2 2M8 10h4' stroke='%2300E5FF' fill='none'/%3E%3C/svg%3E">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;700;800&family=Nunito:wght@700;800;900&family=Gloria+Hallelujah&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;700;800&display=swap" rel="stylesheet">
 <style>
 :root{
   --bg:#07090c; --pane:#0b0f14; --pane2:#0f141a; --line:#1b232d; --line2:#2a3542;
@@ -188,14 +188,6 @@ input[type=range]::-moz-range-thumb{width:8px;height:16px;background:var(--acc);
 .bg9 span{background:radial-gradient(circle at 25% 30%,var(--acc) 0 2px,transparent 2.5px),radial-gradient(circle at 70% 25%,var(--acc) 0 2px,transparent 2.5px),linear-gradient(8deg,transparent 48.5%,var(--acc) 49% 50%,transparent 50.5%),#03050c}
 .bg10 span{background:radial-gradient(circle,var(--acc) 0 1px,transparent 1.4px) 0 0/12px 12px,#000}
 
-/* sing-along lines */
-.singlines{margin:0;padding:0;list-style:none;display:grid;gap:1px;background:var(--line);border:1px solid var(--line);max-height:300px;overflow:auto}
-.singlines li{display:grid;grid-template-columns:1fr 1fr;gap:6px;padding:7px 9px;background:var(--bg);cursor:pointer}
-.singlines li .t{grid-column:1/-1}
-@media (min-width:1080px){ .singlines li{grid-template-columns:1fr 100px 100px 130px 104px;align-items:center} .singlines li .t{grid-column:auto} }
-.singlines .t{font:400 15px/1.25 "Gloria Hallelujah",var(--mono);overflow-wrap:anywhere}
-.singlines select{padding:4px 22px 4px 6px;font-size:12px;background-position:right 6px center}
-#singCv{width:100%;height:auto;border-radius:22%/19%;display:block;background:#fbf6ec;cursor:pointer}
 
 /* lists */
 .empty{padding:10px 12px;color:var(--dim)}
@@ -291,7 +283,6 @@ code{font-size:12px;background:var(--bg);border:1px solid var(--line);padding:1p
         <button class="tile" data-m="6" data-k="·">games</button>
         <button class="tile" data-m="1" data-k="·">msg</button>
         <button class="tile" data-m="2" data-k="·">photo</button>
-        <button class="tile" data-m="3" data-k="·">sing</button>
         <button class="tile" data-m="7" data-k="·">id</button>
         <button class="tile" data-m="9" data-k="·">eyes</button>
         <button class="tile" data-m="10" data-k="·">jukebox</button>
@@ -309,7 +300,6 @@ code{font-size:12px;background:var(--bg);border:1px solid var(--line);padding:1p
       <button class="tab" role="tab" data-tab="photo" data-k="3">photo</button>
       <button class="tab" role="tab" data-tab="music" data-k="4">music</button>
       <button class="tab" role="tab" data-tab="jukebox" data-k="5">jukebox</button>
-      <button class="tab" role="tab" data-tab="sing" data-k="6">sing</button>
       <button class="tab" role="tab" data-tab="eyes" data-k="7">eyes</button>
       <button class="tab" role="tab" data-tab="pet" data-k="8">pet</button>
       <button class="tab" role="tab" data-tab="tools" data-k="9">tools</button>
@@ -433,7 +423,7 @@ $ node larp-bridge/bridge.mjs    # keep it running
           <button class="btn" id="sendMusic">Send</button>
         </div>
       </div>
-      <canvas id="artCv" width="240" height="280" class="hidden"></canvas>
+      <canvas id="artCv" width="240" height="240" class="hidden"></canvas>
     </section>
 
     <!-- JUKEBOX -->
@@ -457,29 +447,6 @@ $ node larp-bridge/bridge.mjs    # keep it running
         <div class="storage"><span id="storageText">storage</span><span id="storageFree"></span></div>
         <div class="storage-bar"><i id="storageFill"></i></div>
       </div>
-    </section>
-
-    <!-- SING -->
-    <section class="panel" role="tabpanel" id="sing" data-cmd="sing">
-      <div class="split">
-        <div class="frame"><canvas id="singCv" width="240" height="280"></canvas></div>
-        <div class="stack">
-          <div class="field"><label for="singText">lyrics</label><textarea id="singText" rows="5" maxlength="1600">No big bows and no shiny wrapping
-keep the tinsel, keep the sleigh
-I just want my favourite person
-sitting next to me all day
-Merry Christmas!</textarea><p class="meta" id="singInfo"></p></div>
-          <div class="row">
-            <div class="field"><div class="range-row"><span class="label">tempo</span><span id="singBpmVal">96 bpm</span></div><input type="range" id="singBpm" min="60" max="160" step="2" value="96"></div>
-            <div class="field"><span class="label">ink</span><div class="swatches" data-target="singInk" data-colors="#36343e,#de3e48,#3f9e5c,#5c94e4,#f0749e,#9a5fd8,#ee8a24"></div><input type="hidden" id="singInk" value="#36343e"></div>
-          </div>
-          <div class="field"><span class="label">theme</span><div class="seg" id="singTheme"><button data-v="0" class="on">christmas</button><button data-v="1">love</button><button data-v="2">party</button><button data-v="3">plain</button></div></div>
-          <div class="toggles"><label class="switch">hat<input type="checkbox" id="singHat" checked></label><label class="switch">voice blips<input type="checkbox" id="singBlips" checked></label></div>
-          <div class="actions"><button class="btn" id="singSend">Send</button></div>
-          <div class="progress" id="singProg"><div class="bar-track"><i></i></div><p></p></div>
-        </div>
-      </div>
-      <div class="field"><span class="label">lines</span><ul class="singlines" id="singLines"></ul></div>
     </section>
 
     <!-- EYES -->
@@ -619,8 +586,6 @@ Merry Christmas!</textarea><p class="meta" id="singInfo"></p></div>
 })();
 </script>
 <script src="songs.js"></script>
-<script src="sing-font.js"></script>
-<script src="sing.js"></script>
 <script src="app.js"></script>
 <script src="wxart.js"></script>
 <script src="charm.js"></script>

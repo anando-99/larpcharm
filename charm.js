@@ -1,4 +1,4 @@
-// A working copy of the charm's screen. It draws the same deck and blocks as firmware 8.2,
+// A working copy of the charm's screen. It draws the same deck and blocks as firmware 8.7,
 // follows the controls on this page, and opens a block when you tap it.
 (() => {
   const $ = id => document.getElementById(id);
@@ -133,10 +133,10 @@
     const a = glyphs(col, size); s = String(s);
     for (let i = 0; i < s.length; i++) { const ch = s.charCodeAt(i) & 255; c.drawImage(a, ch * 6 * size, 0, 6 * size, 8 * size, x + i * 6 * size, y, 6 * size, 8 * size); }
   }
-  const TX = [2, 2, 152, 2, 92, 10, 37, 65, 92, 120, 147, 175, 202], TY = [15, 81, 81, 141, 141, 258, 258, 258, 258, 258, 258, 258, 258], TW = [236, 146, 86, 86, 146, 27, 28, 27, 28, 27, 28, 27, 28], TH = [62, 56, 56, 54, 54, 22, 22, 22, 22, 22, 22, 22, 22];
-  const TMODE = [0, 4, 5, 6, 1, 2, 3, 7, 9, 10, 13, 14, 15];
-  const TCMD = ['date', 'np', 'ps pet', 'imu --scope', 'cat motd', 'img', 'sng', 'id', 'eye', 'jbx', 'tty', 'cc', 'wx'];
-  const TOPEN = ['clock', 'audio', 'pet', 'rng', 'motd', 'img', 'sing', 'id', 'eyes', 'jukebox', 'tty', 'claude', 'weather'];
+  const TX = [2, 2, 152, 2, 92, 10, 41, 73, 104, 136, 167, 199], TY = [15, 81, 81, 141, 141, 258, 258, 258, 258, 258, 258, 258], TW = [236, 146, 86, 86, 146, 31, 32, 31, 32, 31, 32, 31], TH = [62, 56, 56, 54, 54, 22, 22, 22, 22, 22, 22, 22];
+  const TMODE = [0, 4, 5, 6, 1, 2, 7, 9, 10, 13, 14, 15];
+  const TCMD = ['date', 'np', 'ps pet', 'imu --scope', 'cat motd', 'img', 'id', 'eye', 'jbx', 'tty', 'cc', 'wx'];
+  const TOPEN = ['clock', 'spotify', 'pet', 'rng', 'motd', 'img', 'id', 'eyes', 'jukebox', 'tty', 'claude', 'weather'];
   const DAYS = ['SUN', 'MON', 'TUE', 'WED', 'THU', 'FRI', 'SAT'], MON = ['JAN', 'FEB', 'MAR', 'APR', 'MAY', 'JUN', 'JUL', 'AUG', 'SEP', 'OCT', 'NOV', 'DEC'];
   const SPR = [
     ['K..........K', 'KK........KK', 'KBK......KBK', 'KBBKKKKKKBBK', 'KBBBBBBBBBBK', 'KBBKBBBBKBBK', 'KBBKBBBBKBBK', 'KBPBBKKBBPBK', 'KBBBBBBBBBBK', '.KBBBBBBBBK.', '..KBBBBBBK..', '...KKKKKK...'],
@@ -150,7 +150,7 @@
   const boot = performance.now();
   const klog = [];
   const charmLog = window.charmLog = msg => { klog.push({ t: performance.now() - boot, s: String(msg).replace(/[^\x20-\x7e]/g, '?').slice(0, 31) }); if (klog.length > 8) klog.shift(); };
-  ['kernel: larp-os 8.6 up', 'imu: qmi8658 online', 'fs: ffat mounted', 'rtc: clock ok'].forEach(charmLog);
+  ['kernel: larp-os 8.7 up', 'imu: qmi8658 online', 'fs: ffat mounted', 'rtc: clock ok'].forEach(charmLog);
   const typing = { cmd: '', at: 0, tile: -1 };
   const scope = new Array(74).fill(0); let scopeHead = 0, lastTilt = 0;
   const bar = (f, n, fill, head, empty) => { const k = Math.round(Math.max(0, Math.min(1, f)) * (n - 2)); let s = '['; for (let i = 0; i < n - 2; i++) s += i < k - 1 ? fill : i === k - 1 ? head : empty; return s + ']'; };
@@ -224,7 +224,7 @@
     });
     // tmux status bar
     R(0, 258, W, 22, ACC);
-    for (let i = 0; i < 8; i++) {
+    for (let i = 0; i < TX.length - 5; i++) {
       const k = 5 + i, wx = TX[k], a = act === k;
       if (a) R(wx, 258, TW[k], 22, TTY_BG);
       if (i) R(wx, 261, 1, 16, a ? ACC : TTY_BG);
@@ -290,22 +290,80 @@
   }
   function empty(label, big, l1) { R(0, 0, W, H, VOID); topBar(label, true); brackets(34, 84, 172, 100, 14, ACC); TC(big, 106, 2, ACC); TC(l1, 138, 1, '#fff'); TC('from the app', 152, 1, '#fff'); }
   const photo = () => $('sendPhoto').disabled && !ui.photoShown ? empty('//IMG', 'NO IMAGE', 'send a photo') : c.drawImage($('photoCv'), 0, 0);
-  function music() {
-    const s = song();
-    if (ui.artReady) c.drawImage($('artCv'), 0, 0);
-    else { R(0, 0, W, H, VOID); const beat = ui.playing ? Math.sin(frame * 0.35) * 3 + 3 : 1; for (let i = 0; i < 6; i++) circle(120, 108, 20 + i * 14 + beat, mixk(ACC, .8 - i * .12)); const a = frame * (ui.playing ? 0.08 : 0); line(120, 108, 120 + Math.cos(a) * 96, 108 + Math.sin(a) * 96, ACC); R(116, 104, 9, 9, ACC); }
-    const g = c.createLinearGradient(0, 140, 0, H); g.addColorStop(0, 'rgba(0,0,0,0)'); g.addColorStop(1, 'rgba(0,0,0,.92)'); c.fillStyle = g; c.fillRect(0, 140, W, 140);
-    topBar(ui.playing ? '//AUDIO' : '//PAUSED', true);
-    const title = s.title || 'NO SIGNAL', tw = title.length * 12;
-    c.save(); c.beginPath(); c.rect(0, 180, W, 30); c.clip();
-    if (tw <= 212) T(title, 14, 190, 2, '#fff'); else { const o = (frame * 2) % (tw + 60); T(title, 14 - o, 190, 2, '#fff'); T(title, 14 - o + tw + 60, 190, 2, '#fff'); }
-    c.restore();
-    T((s.artist || (s.title ? '' : 'play something on your phone')).slice(0, 35), 14, 212, 1, ACC);
-    const p = s.title ? ((frame / 900) % 1) : 0, w = Math.max(2, 212 * p | 0);
-    R(14, 228, 212, 2, '#46465a'); R(14, 227, w, 4, ACC); R(12 + w, 224, 3, 10, '#fff');
-    T('0:' + pad(p * 59 | 0), 14, 240, 1, '#fff'); T(val('mLen') || '', 226 - (val('mLen') || '').length * 6, 240, 1, '#fff');
-    for (let i = 0; i < 20; i++) { const h = 2 + (eq(i) * 16 | 0); R(60 + i * 6, 258 - h, 4, h, ACC); }
+  // ── spotify: a music player in a terminal (same layout as the firmware's drawMusic) ──
+  const mixw = (h, t) => { const [r, g, b] = rgb(h); return `rgb(${r + (255 - r) * t | 0},${g + (255 - g) * t | 0},${b + (255 - b) * t | 0})`; };
+  const fmtMs = ms => `${ms / 60000 | 0}:${pad((ms / 1000 | 0) % 60)}`;
+  const NP_KEY_Y = 242, NP_VOL_Y = 226;
+  let npFlash = { k: '', at: 0 };
+  function cellBar(x, y, cells, f, on, off, head) { const k = Math.round(Math.max(0, Math.min(1, f)) * cells); for (let i = 0; i < cells; i++) R(x + i * 6, y, 5, 7, i < k - 1 ? on : i === k - 1 ? head : off); }
+  function npKey(x, w, kind, lit) {
+    const flash = npFlash.k === kind && performance.now() - npFlash.at < 350, inv = lit || flash, fg = inv ? TTY_BG : ACC, cy = NP_KEY_Y + 13;
+    if (inv) R(x, NP_KEY_Y, w, 26, flash && !lit ? '#fff' : ACC); else { c.strokeStyle = ACC; c.lineWidth = 1; c.strokeRect(x + .5, NP_KEY_Y + .5, w - 1, 25); }
+    const tri = (a, b, d) => { c.fillStyle = fg; c.beginPath(); c.moveTo(...a); c.lineTo(...b); c.lineTo(...d); c.fill(); };
+    if (kind === 'toggle') {
+      const ix = x + 10;
+      if (ui.playing) { R(ix, cy - 6, 4, 13, fg); R(ix + 7, cy - 6, 4, 13, fg); } else tri([ix, cy - 7], [ix, cy + 8], [ix + 11, cy + .5]);
+      G(ui.playing ? 'PLAYING' : 'PAUSED', ix + 18, cy - 7, 2, fg);
+    } else {
+      const cx = x + w / 2, d = kind === 'next' ? 1 : -1;
+      tri([cx - 9 * d, cy - 6], [cx - 9 * d, cy + 7], [cx - d, cy + .5]); tri([cx - d, cy - 6], [cx - d, cy + 7], [cx + 7 * d, cy + .5]);
+      R(d > 0 ? cx + 7 : cx - 9, cy - 6, 2, 13, fg);
+    }
   }
+  function music() {
+    const s = song(), np = ui.np || {}, have = !!s.title, LOW = mixk(ACC, .18), DIMC = mixk(ACC, .45), now = performance.now();
+    R(0, 0, W, H, TTY_BG);
+    G('\x04', 12, 5, 2, ACC); G('SPOTIFY', 28, 5, 2, ACC);
+    const on = document.body.classList.contains('connected'), age = np.at ? now - np.at : 0;
+    const lit = !have ? 1 : on && age > 40000 ? 2 : 5;
+    for (let i = 0; i < 5; i++) R(194 + i * 6, 19 - (3 + i * 3), 4, 3 + i * 3, i < lit ? ACC : LOW);
+    for (let x = 8; x < 232; x += 3) R(x, 24, 1, 1, DIMC);
+    // the cover
+    c.strokeStyle = ACC; c.lineWidth = 1; c.strokeRect(8.5, 30.5, 121, 121);
+    if (ui.artReady) c.drawImage($('artCv'), 9, 31, 120, 120);
+    else {
+      const cx = 69, cy = 91;
+      for (let i = 0; i < 5; i++) circle(cx, cy, 14 + i * 10, i === 4 ? DIMC : LOW);
+      const a = frame * (ui.playing ? 0.08 : 0); line(cx, cy, cx + Math.cos(a) * 54, cy + Math.sin(a) * 54, ACC); circle(cx, cy, 5, ACC, true);
+      G(have ? 'no art' : 'no tty', cx - 18, 139, 1, TTY_DIM);
+    }
+    // facts, `ls -l` style
+    const fx = 140, known = np.vol >= 0;
+    let dev = String(np.device || '').replace(/[^\x20-\x7e]/g, '?').toLowerCase(); if (!dev) dev = have ? 'phone' : '--'; if (dev.length > 11) dev = dev.slice(0, 10) + '~';
+    G('dev', fx, 32, 1, TTY_DIM); G(dev, fx + 24, 32, 1, TTY_TEXT);
+    G('shf', fx, 44, 1, TTY_DIM); G(!known ? '--' : np.shuffle ? 'on' : 'off', fx + 24, 44, 1, np.shuffle ? ACC : TTY_TEXT);
+    G('rpt', fx, 56, 1, TTY_DIM); G(!known ? '--' : ['off', 'all', 'one'][np.repeat || 0], fx + 24, 56, 1, np.repeat ? ACC : TTY_TEXT);
+    G('st', fx, 68, 1, TTY_DIM); G(!have ? 'idle' : ui.playing ? 'play' : 'pause', fx + 24, 68, 1, ui.playing ? ACC : TTY_TEXT);
+    // $ cava
+    const px = fx - 2, py = 86, act = ui.playing;
+    c.strokeStyle = act ? ACC : LOW; c.strokeRect(px + .5, py + .5, 93, 65);
+    R(px + 6, py - 4, 8 * 6, 9, TTY_BG); G('$', px + 9, py - 3, 1, act ? ACC : TTY_DIM); G('cava', px + 21, py - 3, 1, act ? '#fff' : ACC);
+    for (let i = 0; i < 12; i++) { const h = 1 + (ui.playing ? eq(i) : 0.03) * 46 | 0; for (let y = 0; y < h; y += 3) R(fx + 3 + i * 7, 146 - y - 2, 5, 2, mixw(ACC, Math.min(1, y * 4 / 255))); }
+    // the song
+    let artist = have ? s.artist : 'play on spotify'; if (artist.length > 18) artist = artist.slice(0, 16) + '..';
+    G(marquee(have ? s.title : 'NO SIGNAL', 18, 6), 12, 160, 2, '#fff'); G(artist, 12, 180, 2, ACC);
+    // time
+    let dur = np.dur, pos;
+    if (dur && np.at) pos = Math.min(dur, np.pos + (ui.playing ? now - np.at : 0));
+    else { const [m, sec] = (val('mLen') || '3:30').split(':').map(Number); dur = have ? ((m || 0) * 60 + (sec || 0)) * 1000 : 0; pos = dur ? (frame * 1000 / 60) % dur : 0; }
+    cellBar(12, 202, 36, dur ? pos / dur : 0, ACC, LOW, '#fff');
+    G(fmtMs(pos), 12, 213, 1, '#fff');
+    if (dur) { const d = fmtMs(dur), left = '-' + fmtMs(dur - pos); G(d, 228 - d.length * 6, 213, 1, TTY_TEXT); G(left, 120 - left.length * 3, 213, 1, TTY_DIM); }
+    // volume
+    const vf = npFlash.k.startsWith('vol') && now - npFlash.at < 350, vc = vf ? '#fff' : ACC;
+    R(12, NP_VOL_Y + 2, 3, 4, vc); c.fillStyle = vc; c.beginPath(); c.moveTo(14, NP_VOL_Y + 4); c.lineTo(19, NP_VOL_Y - 1); c.lineTo(19, NP_VOL_Y + 9); c.fill();
+    cellBar(26, NP_VOL_Y, 28, known ? np.vol / 100 : 0, vc, LOW, known ? '#fff' : LOW);
+    const vt = known ? np.vol + '%' : '--'; G(vt, 228 - vt.length * 6, NP_VOL_Y, 1, TTY_TEXT);
+    // keys
+    npKey(12, 40, 'prev', false); npKey(58, 124, 'toggle', ui.playing); npKey(188, 40, 'next', false);
+  }
+  window.npPreviewTap = (x, y) => {
+    if (y < NP_VOL_Y - 8) return false;
+    const k = y >= NP_KEY_Y - 4 ? (x < 54 ? 'prev' : x > 186 ? 'next' : 'toggle') : (x < 120 ? 'voldown' : 'volup');
+    npFlash = { k, at: performance.now() };
+    if (typeof window.mediaControl === 'function') window.mediaControl(k);
+    return true;
+  };
   function floor(hz, col) { c.strokeStyle = col; c.lineWidth = 1; c.beginPath(); for (let i = 0; i < 9; i++) { const y = hz + (i / 9) ** 2 * (H - hz); c.moveTo(0, y); c.lineTo(W, y); } for (let i = -8; i <= 8; i++) { c.moveTo(120 + i * 14, hz); c.lineTo(120 + i * 90, H); } c.stroke(); }
   function pet() {
     grad(VOID, mixk(val('petCol'), .2)); floor(204, mixk(ACC, .2)); topBar('//DAEMON', true);
@@ -490,7 +548,6 @@
     for (let i = 0; i < 10; i++) R(30 + i * 17, 140, 14, 36, i < Math.ceil(p / 10) - ((frame / 12 | 0) % 2 && i === Math.ceil(p / 10) - 1 ? 1 : 0) ? col : mixk(col, .16));
     TC('CHARGING  4.05V', 244, 1, '#fff');
   }
-  const sing = () => window.Sing && window.singShow && window.singShow.lines.length ? Sing.draw(c, window.singShow, window.singClock()) : deck();
 
   // ── tty: a kaomoji that lives in the terminal (same as the firmware's drawTty) ──
   const TFACE = ['(o_o)', '(^_^)', '(^o^)', '(\x03_\x03)', '(T_T)', '(>_<)', '(O_O)', '(-_-)', '(-.-)', '(\xAA_\xAA)', '(^_-)', '(@_@)', '(^_^)'];
@@ -991,7 +1048,7 @@
     wxb.say = !d ? 'eh? where am i?' : d.cond === 7 ? 'kaminari!! eek' : L.wet ? 'ame da~ puddles!' : L.snow ? 'yuki da!! snowball!' : d.cond === 3 ? "kiri... can't see" : !L.day ? (L.band >= 2 ? 'hotaru! fireflies' : 'oyasumi~') : ['samui! brrr', 'momiji season!', 'hanami time!', 'bug hunting!', 'atsui~ so hot'][L.band];
     wxb.sayUntil = performance.now() + 2200; wxb.hop = wxb.heart = performance.now();
   };
-  const scenes = { 0: clock, 1: text, 2: photo, 3: sing, 4: music, 5: pet, 6: toy, 7: card, 8: deck, 9: eyes, 10: jukeDeck, 11: torch, 12: chargeDeck, 13: tty, 14: claude, 15: weather };
+  const scenes = { 0: clock, 1: text, 2: photo, 4: music, 5: pet, 6: toy, 7: card, 8: deck, 9: eyes, 10: jukeDeck, 11: torch, 12: chargeDeck, 13: tty, 14: claude, 15: weather };
   // Quest: frames rendered by the firmware itself (desktop simulator), packed in one sheet.
   // d00..d10 day village, n00..n10 night village, then the screens behind the doors.
   // ── tap a block to open it, tap again to go back ──
@@ -1023,8 +1080,9 @@
       if (window.ccPageNow() === 0 && x >= 14 && x <= 74 && y >= 22 && y <= 68) return window.cbOpen();      // the little critter: pop it out
       return window.ccPoke();
     }
+    if (ui.mode === 4 && window.npPreviewTap(x, y)) return;
     if (ui.mode !== 8) return window.charmGoto(8);
-    for (let i = 0; i < 13; i++) if (x >= TX[i] - 2 && x < TX[i] + TW[i] + 2 && y >= TY[i] - 2 && y < (i >= 5 ? H : TY[i] + TH[i] + 3)) return deckRun(i);
+    for (let i = 0; i < TX.length; i++) if (x >= TX[i] - 2 && x < TX[i] + TW[i] + 2 && y >= TY[i] - 2 && y < (i >= 5 ? H : TY[i] + TH[i] + 3)) return deckRun(i);
   }
 
   let shownMode = ui.mode, zoom = null;       // zoom: { ti, s, opening }
@@ -1053,7 +1111,7 @@
           (scenes[shownMode] || deck)();
           if ([0, 5, 6, 7].includes(shownMode)) ticker();
         }
-        if (![2, 3, 4, 11].includes(shownMode) && $('optFx').checked) { c.fillStyle = 'rgba(0,0,0,.22)'; for (let y = 1; y < H; y += 2) c.fillRect(0, y, W, 1); }
+        if (![2, 4, 11].includes(shownMode) && $('optFx').checked) { c.fillStyle = 'rgba(0,0,0,.22)'; for (let y = 1; y < H; y += 2) c.fillRect(0, y, W, 1); }
       }
     } catch (e) { /* one bad frame must not stop the preview */ }
     c.restore();

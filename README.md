@@ -12,18 +12,17 @@ Larp Charm runs on a Waveshare ESP32-S3-Touch-LCD-1.69 (240×280 IPS, capacitive
 
 - **A remote for Claude Code.** `larp-bridge` (a dependency-free Node script) plugs into Claude Code's hooks and status line. The charm's `cc` screen then mirrors your real session on the laptop: the live transcript with tool calls and results, the spinner with Claude's actual state, and a `/status`-style page with model, context, cost, time and lines changed. When Claude needs permission, the charm buzzes and shows an **approve / deny** card, and your tap answers Claude on the laptop. A launcher page starts preset sessions in Terminal. The mascot reacts to all of it. It is fail-safe by design: if the bridge or the charm isn't there, Claude Code behaves exactly as normal, and unanswered prompts fall back to the terminal after 45 s.
 - **A control panel that is a terminal.** The web app is styled like a tmux session (panes, `0:claude 1:look …` windows, `[ buttons ]`, `--flags`), with a real command line pinned to the bottom: `open claude`, `theme phosphor`, `msg ship it`, `timer 25`, `allow`, `launch 2`, `status`, with history and tab completion.
-- **Custom BLE protocol.** A Nordic-UART-style GATT service with 23 binary commands, chunked file transfer (JPEG photos, album art, songs, sing-along shows) and a notify channel for battery, version and storage status.
-- **The deck: a live tmux session.** Home is a terminal drawn in the classic 5×7 bitmap font. Each pane is labelled with the command that would print it (`$ date`, `$ np`, `$ ps pet`, `$ imu --scope` with a live accelerometer oscilloscope, `$ cat motd`), and a tmux-style status bar holds the other screens as windows (`img sng id eye jbx tty cc`). Tap a pane and the prompt types `open <pane>` before zooming in.
+- **Custom BLE protocol.** A Nordic-UART-style GATT service with 23 binary commands, chunked file transfer (JPEG photos, album art, songs) and a notify channel for battery, version and storage status.
+- **The deck: a live tmux session.** Home is a terminal drawn in the classic 5×7 bitmap font. Each pane is labelled with the command that would print it (`$ date`, `$ np`, `$ ps pet`, `$ imu --scope` with a live accelerometer oscilloscope, `$ cat motd`), and a tmux-style status bar holds the other screens as windows (`img id eye jbx tty cc wx`). Tap a pane and the prompt types `open <pane>` before zooming in.
 - **`dmesg -w` for a bag charm.** The firmware keeps its own kernel-style event log (`klog`) and tails it on the deck: Bluetooth link changes, charging and battery steps, shakes with their g-force, step milestones, time syncs, received messages and files, songs, timers. Every line is a real event, timestamped from boot.
 - **Two terminal companions.** Like the animated eyes, they can take over when the charm is idle:
   - **`tty`**: a big kaomoji living in the terminal (`(o_o)`, `(^_^)`, `(♥_♥)`, `(@_@)`, `(-_-) zZ`) over a faint cmatrix rain. It blinks, glances around and changes mood by itself, reacts to taps and shakes, and thinks out loud at a typed prompt using real data: battery, steps, the song playing, the time of night.
   - **`cc`**: an homage to the Claude Code terminal UI, with its blocky orange mascot in the welcome box (it looks down while a prompt is typed, bounces and flaps while Claude works, does a happy hop when a session ends, waves when you tap, goes dizzy when shaken and sleeps when idle; tap it and it pops out to full screen as a pocket pet you can pet, make jump, walk around, tilt and shake, with a mood meter that fills when you pet it), the `✻` spinner and its whimsical verbs, tool calls with `⎿` results, and the input box. It loops through little sessions about the charm and answers with live data ("why is my battery at 76%?" reads the real voltage). Tap to say hi; shake it and it notices the g-force.
-- **Spotify integration.** OAuth 2.0 PKCE runs entirely in the browser (no client secret, no server). The charm shows the album art full screen, takes its accent colour from the cover, and gives you tap zones for previous, play/pause and next.
-- **Sing-along.** Type lyrics and a pencil-doodle kitten acts each line out with faces, props and scenes. The browser preview (`sing.js`) is a line-by-line port of the firmware renderer, drawing into the same 240×280 RGB565 frame with the same glyph bitmaps.
+- **Spotify, as a terminal music player.** OAuth 2.0 PKCE runs entirely in the browser (no client secret, no server). The charm's `spotify` screen is a little player drawn in the bitmap font: the cover top left, `ls -l`-style facts beside it (device, shuffle, repeat, state) over a `$ cava` spectrum, the song and artist, block-cell bars for time and volume, and `[ |◀◀ ] [ ▌▌ PLAYING ] [ ▶▶| ]` keys. The whole screen takes its accent colour from the cover. Tap the keys to skip or play/pause, and the volume row to turn it down or up.
 - **Weather, in the Japanese countryside.** Pick a city (or your location) in the app; it fetches the weather from [Open-Meteo](https://open-meteo.com) (free, no key) and sends it over Bluetooth. The screen becomes a pixel-art spot by the rice paddies, with a torii on the hill and a farmhouse under the trees, that follows the season the temperature calls for: summer, sakura spring, momiji autumn or deep snow. Grey skies, rain, fog, night and lightning recolour it on the fly. A pixel-art kid stands on the path dressed for it in one of eight outfits: straw hat and an ice pop, a bug net, a school backpack, hoodie and scarf, a puffy coat, a raincoat and umbrella, earmuffs and a snowball, or a yukata with a glowing paper lantern at night. The kid breathes, sways as you tilt the charm, looks around, shivers, and hops with hearts when you tap. Around them: drifting clouds, sun or moon, twinkling stars and shooting stars, rain that splashes, snow, falling sakura petals and maple leaves, darting dragonflies, butterflies, birds, fireflies, glittering snow, fog banks, gusts of wind and lightning. Up top: temperature, high/low, feels-like, humidity, wind, and a four-hour forecast. `weather <city>` works at the `larp>` prompt. Art made with [SpriteCook](https://spritecook.ai).
 - **Minigames.** Next to the oracle, dice and coin: tic-tac-toe against the charm (minimax with the odd deliberate slip, so it's beatable), rock-paper-scissors with a countdown, and a reflex test that times you in milliseconds and keeps your best. Playable in the web preview too, or start one with `game ttt` at the `larp>` prompt.
 - **Motion and sound.** Shake to wake, roll dice, ask the oracle or shuffle backdrops. There's a buzzer jukebox of public-domain melodies, and you can upload your own songs from MIDI files.
-- **Reproducible asset pipeline.** Fonts and melodies are generated by Python scripts into C headers (and JS modules for the web app), so the firmware and the browser preview never drift apart.
+- **Reproducible asset pipeline.** Melodies and the weather art are generated by Python scripts into C headers (and JS modules for the web app), so the firmware and the browser preview never drift apart.
 - **Also:** 6 colour themes, 11 animated backdrops, 4 clock faces, expressive animated eyes, a virtual pet with a step counter, an ID card, a torch, a timer, an hourly chime, a charging screen and an NFC tag writer (Web NFC).
 
 ## Architecture
@@ -33,8 +32,7 @@ Larp Charm runs on a Waveshare ESP32-S3-Touch-LCD-1.69 (240×280 IPS, capacitive
 │ index.html   UI and styles, plus the larp> command line                    │
 │ app.js       BLE connection, command packets, file transfer, Spotify PKCE  │
 │ charm.js     live 240×280 simulator of the charm's screen                  │
-│ sing.js      sing-along renderer (port of the firmware's)                  │
-│ songs.js, sing-font.js, wxart.js generated from the firmware's sources     │
+│ songs.js, wxart.js   generated from the firmware's sources                 │
 └──────────────┬────────────────────┬────────────────────────────────────────┘
                │ SSE + JSON         │ Web Bluetooth (GATT write / notify)
 ┌──────────────▼─────────────┐      │
@@ -45,7 +43,7 @@ Larp Charm runs on a Waveshare ESP32-S3-Touch-LCD-1.69 (240×280 IPS, capacitive
 │ firmware/LarpCharm/LarpCharm.ino   ESP32-S3, Arduino core 3.x              │
 │   ST7789V2 display (Arduino_GFX) · CST816T touch · QMI8658 IMU · buzzer    │
 │   NimBLE GATT server · FFat storage · JPEGDEC · PSRAM frame buffers        │
-│ aafonts.h · songs.h   generated by firmware/tools                          │
+│ songs.h · wx_art.h   generated by firmware/tools                           │
 └────────────────────────────────────────────────────────────────────────────┘
 ```
 
@@ -62,12 +60,12 @@ Commands cover mode switching, text, time sync, now playing, chunked transfer (`
 ## Repository layout
 
 ```
-index.html, app.js, charm.js, sing.js   web app (served by GitHub Pages)
-songs.js, sing-font.js, wxart.js        generated data shared with the firmware
+index.html, app.js, charm.js            web app (served by GitHub Pages)
+songs.js, wxart.js                      generated data shared with the firmware
 docs/                                   README media
 larp-bridge/                            Claude Code ⇄ charm bridge, hooks, installer, launcher presets
 firmware/LarpCharm/                     Arduino sketch and generated headers
-firmware/tools/                         generators: fonts, melodies, weather art (sources in art/)
+firmware/tools/                         generators: melodies, weather art (sources in art/)
 scrapped/                               retired looks (Aero, Quest, Ronin, Cotton), kept for reference
 ```
 
@@ -107,7 +105,7 @@ arduino-cli compile --upload -p <port> \
   firmware/LarpCharm
 ```
 
-The web app and the firmware are versioned together; this app expects firmware **8.6** (shown on the charm's status screen and in the app once connected).
+The web app and the firmware are versioned together; this app expects firmware **8.7** (shown on the charm's status screen and in the app once connected).
 
 ## Using the charm
 
@@ -123,20 +121,15 @@ The web app and the firmware are versioned together; this app expects firmware *
 
 ## Asset pipeline
 
-The generated files are checked in, so you only need these scripts to change the fonts, songs or weather art. They need Python 3 with Pillow.
+The generated files are checked in, so you only need these scripts to change the songs or weather art. They need Python 3 with Pillow.
 
 | Script | Output |
 | --- | --- |
 | `firmware/tools/songs.py` | `songs.h` and `songs.js` (run from a scratch dir, then copy) |
-| `firmware/tools/mkfont.py out.h [fontdir]` | `aafonts.h` (anti-aliased 4-bit fonts) |
-| `firmware/tools/mkfontjs.py aafonts.h sing-font.js` | the sing-along lettering for the web app |
 | `firmware/tools/mkwxart.py` | `wx_art.h` and `wxart.js` from `firmware/tools/art/` (kid sheet, sky pieces, five backgrounds) |
-
-Font files are not in the repo. Download them from Google Fonts (SIL Open Font Licence) into a `fonts/` folder next to the script.
 
 ## Credits
 
-- Fonts: Nunito and Gloria Hallelujah (SIL Open Font Licence 1.1), rasterised into bitmaps.
 - Melodies are public domain or original.
 - Libraries: [Arduino_GFX](https://github.com/moononournation/Arduino_GFX), [NimBLE-Arduino](https://github.com/h2zero/NimBLE-Arduino), [JPEGDEC](https://github.com/bitbank2/JPEGDEC).
 
