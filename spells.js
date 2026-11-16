@@ -189,7 +189,7 @@
       for (let i = 0; i < n; i++) { const x = i / (n - 1) * W, y = mid - d[i * 6 + ch] / lsb * sc; i ? c.lineTo(x, y) : c.moveTo(x, y); }
       c.stroke();
     }
-    c.fillStyle = '#6b7785'; c.fillText(`±${am.toFixed(1)} g`, W - 60 * dpr, 13 * dpr); c.fillText(`±${gm | 0} dps`, W - 70 * dpr, half + 13 * dpr);
+    c.fillStyle = '#6b7785'; c.textAlign = 'right'; c.fillText(`±${am.toFixed(1)} g`, W - 6 * dpr, half - 6 * dpr); c.fillText(`±${gm | 0} dps`, W - 6 * dpr, H - 6 * dpr); c.textAlign = 'left';
     NAMES.forEach((nm, i) => { c.fillStyle = COLS[i]; c.fillText(nm, 90 * dpr + i * 26 * dpr, 13 * dpr); });
   }
 
