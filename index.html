@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
 <meta charset="utf-8">
-<meta name="build" content="9.0">
+<meta name="build" content="9.1">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <meta name="theme-color" content="#07090c">
 <meta name="description" content="Control panel for the Larp Charm, an ESP32-S3 touchscreen bag charm, over Web Bluetooth. Also links the charm to Claude Code.">
@@ -221,6 +221,48 @@ code{font-size:12px;background:var(--bg);border:1px solid var(--line);padding:1p
 .ccstate::before{content:"\273b";color:#d97757}
 #ccStateLine[data-state=done]{color:var(--ok)}#ccStateLine[data-state=perm]{color:#d97757}#ccStateLine[data-state=offline]{color:var(--dim)}
 .term{margin:0;padding:10px 12px;background:#000;border:1px solid var(--line);color:var(--text);font-size:12.5px;line-height:1.5;white-space:pre-wrap;overflow-wrap:anywhere;max-height:300px;overflow:auto}
+/* spells recorder */
+.sp-bar{display:flex;flex-wrap:wrap;gap:12px 22px;align-items:end;margin-bottom:16px}
+.sp-bar .field{min-width:0}
+.sp-grid{display:grid;gap:16px;grid-template-columns:1fr;margin-bottom:16px}
+@media (min-width:980px){ .sp-grid{grid-template-columns:270px 1fr} }
+.sp-group{display:grid;gap:4px;margin-bottom:10px}
+.sp-gt{display:flex;justify-content:space-between;color:var(--acc);font-size:12.5px}.sp-gt b{font-weight:500}.sp-gt span{color:var(--dim)}
+.sp-group .meta{margin-bottom:4px}
+.sp-item{position:relative;display:flex;justify-content:space-between;align-items:center;gap:8px;width:100%;text-align:left;cursor:pointer;border:1px solid var(--line);background:var(--bg);padding:5px 8px;color:var(--text);overflow:hidden}
+.sp-item:hover{border-color:var(--line2)}
+.sp-item.on{border-color:var(--acc);box-shadow:inset 2px 0 0 var(--acc)}
+.sp-item.done .sp-l{color:var(--ok)}
+.sp-item i{position:absolute;left:0;bottom:0;height:2px;background:var(--acc);opacity:.55}
+.sp-item.done i{background:var(--ok)}
+.sp-n{color:var(--dim);font-size:12px}
+.sp-x{border:0;background:none;color:var(--dim);cursor:pointer;padding:0 4px;font-size:14px;line-height:1}
+.sp-x:hover{color:var(--bad)}
+.sp-group input[type=text]{flex:1;min-width:0}
+.sp-now{display:grid;gap:14px;grid-template-columns:1fr}
+@media (min-width:640px){ .sp-now{grid-template-columns:150px 1fr} }
+#spDemo{width:150px;height:150px;border:1px solid var(--line);background:#000}
+.sp-info{display:grid;gap:8px;align-content:start}
+.sp-head{display:flex;align-items:baseline;gap:14px;flex-wrap:wrap}
+.sp-head b{font-size:22px;font-weight:700;color:#fff}
+#spCount{font-size:18px;color:var(--acc)}#spCount.done{color:var(--ok)}
+.sp-hint{margin:0;color:var(--text)}
+.sp-how{margin:0;padding-left:20px;color:var(--dim);font-size:12.5px}
+.sp-state{font-size:13px;color:var(--acc);min-height:20px}
+.sp-state.rec{color:var(--bad);font-weight:700}
+.sp-view{display:grid;gap:12px;grid-template-columns:1fr}
+@media (min-width:760px){ .sp-view{grid-template-columns:1fr 220px} }
+#spPlot{width:100%;height:220px;background:#000;border:1px solid var(--line)}
+.sp-strokebox{display:grid;gap:4px;justify-items:center}
+#spStroke{width:220px;height:220px;background:#000;border:1px solid var(--line)}
+.sp-takes{display:grid;gap:6px;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));max-height:300px;overflow:auto}
+.sp-take{position:relative;display:grid;grid-template-columns:48px 1fr;column-gap:8px;align-items:center;border:1px solid var(--line);background:var(--bg);padding:5px;cursor:pointer}
+.sp-take.on{border-color:var(--acc)}
+.sp-take canvas{grid-row:span 2;width:48px;height:48px;background:#000}
+.sp-take span{font-size:12.5px}.sp-take small{color:var(--dim);font-size:11px}
+.sp-take .sp-x{position:absolute;top:2px;right:2px}
+.sp-danger{border-color:color-mix(in srgb,var(--bad) 50%,transparent) !important;color:var(--bad) !important}
+
 .term.wttr{white-space:pre;overflow-x:auto;overflow-wrap:normal;line-height:1.3;max-height:none}
 .perm{display:flex;flex-wrap:wrap;align-items:center;gap:8px 10px;border:1px solid #d97757;padding:10px 12px}
 .perm > span{color:#d97757}.perm > b{flex:1 1 220px;font-weight:500;overflow-wrap:anywhere}
@@ -289,6 +331,7 @@ code{font-size:12px;background:var(--bg);border:1px solid var(--line);padding:1p
         <button class="tile" data-m="9" data-k="·">eyes</button>
         <button class="tile" data-m="10" data-k="·">jukebox</button>
         <button class="tile" data-m="11" data-k="·">torch</button>
+        <button class="tile" data-m="16" data-k="·">spells</button>
       </div>
     </div>
   </aside>
@@ -302,6 +345,7 @@ code{font-size:12px;background:var(--bg);border:1px solid var(--line);padding:1p
       <button class="tab" role="tab" data-tab="photo" data-k="3">photo</button>
       <button class="tab" role="tab" data-tab="music" data-k="4">music</button>
       <button class="tab" role="tab" data-tab="jukebox" data-k="5">jukebox</button>
+      <button class="tab" role="tab" data-tab="spells" data-k="6">spells</button>
       <button class="tab" role="tab" data-tab="eyes" data-k="7">eyes</button>
       <button class="tab" role="tab" data-tab="pet" data-k="8">pet</button>
       <button class="tab" role="tab" data-tab="tools" data-k="9">tools</button>
@@ -451,6 +495,44 @@ $ node larp-bridge/bridge.mjs    # keep it running
       </div>
     </section>
 
+    <!-- SPELLS -->
+    <section class="panel" role="tabpanel" id="spells" data-cmd="spell --rec">
+      <div class="sp-bar">
+        <div class="field"><span class="label">sitting</span><div class="seg" id="spSession"><button data-v="sitting-1" class="on">sitting 1</button><button data-v="sitting-2">sitting 2</button><button data-v="another-day">another day</button></div></div>
+        <div class="field"><span class="label">you're</span><div class="seg" id="spPosture"><button data-v="standing" class="on">standing</button><button data-v="sitting">sitting</button><button data-v="walking">walking</button></div></div>
+        <div class="field"><label for="spGrip">grip</label><input type="text" id="spGrip" placeholder="fingertips, screen facing you" maxlength="40"></div>
+      </div>
+      <div class="sp-grid">
+        <div class="box sp-planbox"><h3>plan</h3><div id="spPlan"></div></div>
+        <div class="stack">
+          <div class="box"><h3>now</h3>
+            <div class="sp-now">
+              <canvas id="spDemo" width="150" height="150" aria-label="how to draw it"></canvas>
+              <div class="sp-info">
+                <div class="sp-head"><b id="spLabel">pick something to record</b><span id="spCount"></span></div>
+                <p class="sp-hint" id="spHint"></p>
+                <ol class="sp-how" id="spHowThumb"><li>thumb on the charm's screen</li><li>hold still ½ s</li><li>draw it in the air</li><li>hold still ½ s</li><li>let go: the take is sent</li></ol>
+                <ol class="sp-how hidden" id="spHowTimed"><li>press record (or space)</li><li>put the charm down during the 3 s countdown</li><li>don't touch it until it stops</li></ol>
+                <div class="actions"><button class="btn" id="spRec">record</button><button class="btn plain" id="spNext">next →</button><button class="btn plain" id="spUndo">undo last</button></div>
+                <div class="sp-state" id="spState"></div>
+              </div>
+            </div>
+            <p class="meta">keys: space record (timed) · enter next · backspace undo last</p>
+          </div>
+          <div class="box"><h3>take</h3>
+            <div class="sp-view"><canvas id="spPlot" height="220"></canvas><div class="sp-strokebox"><canvas id="spStroke" width="220" height="220"></canvas><span class="meta">stroke, from the gyro</span></div></div>
+            <p class="meta" id="spTakeInfo"></p>
+          </div>
+          <div class="box"><h3>takes · <span id="spTakesFor"></span></h3><div id="spTakes" class="sp-takes"></div></div>
+        </div>
+      </div>
+      <div class="box"><h3>dataset</h3>
+        <div class="actions"><span class="meta" id="spTotal"></span></div>
+        <div class="actions"><button class="btn" id="spDownload">download json</button><span class="file btn plain">import<input type="file" id="spImport" accept=".json,application/json"></span><button class="btn plain" id="spExit">leave the recorder</button><button class="btn plain sp-danger" id="spClear">delete all</button></div>
+        <p class="meta">takes stay in this browser until you download them. nothing is uploaded.</p>
+      </div>
+    </section>
+
     <!-- EYES -->
     <section class="panel" role="tabpanel" id="eyes" data-cmd="eyes">
       <div class="field">
@@ -588,8 +670,9 @@ $ node larp-bridge/bridge.mjs    # keep it running
 })();
 </script>
 <!-- bump ?v= and the build meta together on every release, so browsers fetch the new scripts -->
-<script src="songs.js?v=9.0"></script>
-<script src="app.js?v=9.0"></script>
-<script src="charm.js?v=9.0"></script>
+<script src="songs.js?v=9.1"></script>
+<script src="app.js?v=9.1"></script>
+<script src="spells.js?v=9.1"></script>
+<script src="charm.js?v=9.1"></script>
 </body>
 </html>

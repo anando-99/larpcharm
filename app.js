@@ -8,8 +8,8 @@ if (/^https:/.test(location.protocol)) fetch(location.pathname + '?b=' + Date.no
   const m = t.match(/<meta name="build" content="([^"]+)"/);
   if (m && m[1] !== BUILD && !sessionStorage.getItem('o_build' + m[1])) { sessionStorage.setItem('o_build' + m[1], '1'); location.reload(); }
 }).catch(() => {});
-const CMD = {MODE:1, TEXT:2, TIME:3, NOWPLAYING:4, XFER_BEGIN:5, XFER_DATA:6, XFER_END:7, BRIGHT:8, PET:9, CARD:10, SETTINGS:11, PING:12, BUZZ:13, FEED:14, LOOK:18, TIMER:19, TOY:20, THEME:21, SKIN:22, EYES:23, TUNE:24, TORCH:25, SONG_LIST:26, SONG_DELETE:27, CC:30, WEATHER:31};
-const MODE = {CLOCK:0, TEXT:1, PHOTO:2, MUSIC:4, PET:5, TOY:6, CARD:7, DECK:8, EYES:9, JUKE:10, TORCH:11, CHARGE:12, TERM:13, CLAUDE:14, WEATHER:15};
+const CMD = {MODE:1, TEXT:2, TIME:3, NOWPLAYING:4, XFER_BEGIN:5, XFER_DATA:6, XFER_END:7, BRIGHT:8, PET:9, CARD:10, SETTINGS:11, PING:12, BUZZ:13, FEED:14, LOOK:18, TIMER:19, TOY:20, THEME:21, SKIN:22, EYES:23, TUNE:24, TORCH:25, SONG_LIST:26, SONG_DELETE:27, CC:30, WEATHER:31, REC:32};
+const MODE = {CLOCK:0, TEXT:1, PHOTO:2, MUSIC:4, PET:5, TOY:6, CARD:7, DECK:8, EYES:9, JUKE:10, TORCH:11, CHARGE:12, TERM:13, CLAUDE:14, WEATHER:15, REC:16};
 const THEMES = ['#00E5FF', '#FF2BD6', '#FFB000', '#39FF14', '#FF3B30', '#C8DCFF'];
 const klog = m => { if (window.charmLog) window.charmLog(m); };       // lines for the preview's dmesg pane
 const ui = window.ui = { mode: 8, bg: 9, face: 0, toy: 0, theme: 0, playing: false, artReady: false, expr: 255, torch: 0, jbSong: -1, jbQueue: 0, charging: false, bat: 76 };
@@ -71,6 +71,7 @@ async function connectGatt(){
   hud('Connected to ' + (device.name || 'Larp Charm'));
   klog('ble: link up');
   if (spotifyToken()) startSpotifyLoop();
+  if (window.spellsOnConnect) window.spellsOnConnect();
 }
 
 async function onDisconnected(){
@@ -101,6 +102,7 @@ function onStatus(s){
     return;
   }
   if (s.startsWith('media=')) { mediaControl(s.slice(6)); return; }
+  if (/^rec(st|[012])=/.test(s)) { if (window.spellsOnStatus) window.spellsOnStatus(s); return; }   // the spell recorder (spells.js)
   const sh = /^(wx|pet|card|motd)=/.exec(s); if (sh) { mirrorFromCharm(sh[1], s.slice(sh[0].length)); return; }
   if (s.startsWith('cc=')) { ccFromCharm(s.slice(3)); return; }
   if (s.startsWith('song=')) { const p = s.slice(5).split(','); if (songCollect) songCollect.push({ id: +p[0], n: +p[1], name: p.slice(2).join(',') || 'Song' }); return; }
@@ -775,7 +777,7 @@ if (/^(localhost|127\.0\.0\.1)$/.test(location.hostname) || localStorage.getItem
 setInterval(() => { if (ccB.st && rxChar) ccRelay(ccB.st); }, 10000);
 
 // ─────────── the command line at the bottom of the page ───────────
-const SCREENS = { weather: 15, wx: 15, home: 8, deck: 8, clock: 0, msg: 1, message: 1, photo: 2, img: 2, music: 4, np: 4, spotify: 4, pet: 5, dice: 6, rng: 6, id: 7, card: 7, eyes: 9, jukebox: 10, jbx: 10, torch: 11, tty: 13, term: 13, claude: 14, cc: 14 };
+const SCREENS = { weather: 15, wx: 15, home: 8, deck: 8, clock: 0, msg: 1, message: 1, photo: 2, img: 2, music: 4, np: 4, spotify: 4, pet: 5, dice: 6, rng: 6, id: 7, card: 7, eyes: 9, jukebox: 10, jbx: 10, torch: 11, tty: 13, term: 13, claude: 14, cc: 14, spells: 16, spell: 16, rec: 16 };
 const THEME_NAMES = ['ice', 'neon', 'amber', 'phosphor', 'redline', 'ghost'];
 const cmdIn = $('cmdIn'), cmdOut = $('cmdOut');
 const cmdHist = []; let cmdPos = 0, cmdClearT = 0;

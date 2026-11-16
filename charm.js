@@ -1,4 +1,4 @@
-// A working copy of the charm's screen. It draws the same deck and blocks as firmware 9.0,
+// A working copy of the charm's screen. It draws the same deck and blocks as firmware 9.1,
 // follows the controls on this page, and opens a block when you tap it.
 (() => {
   const $ = id => document.getElementById(id);
@@ -152,7 +152,7 @@
   const boot = performance.now();
   const klog = [];
   const charmLog = window.charmLog = msg => { klog.push({ t: performance.now() - boot, s: String(msg).replace(/[^\x20-\x7e]/g, '?').slice(0, 31) }); if (klog.length > 8) klog.shift(); };
-  ['kernel: larp-os 9.0 up', 'imu: qmi8658 online', 'fs: ffat mounted', 'rtc: clock ok'].forEach(charmLog);
+  ['kernel: larp-os 9.1 up', 'imu: qmi8658 online', 'fs: ffat mounted', 'rtc: clock ok'].forEach(charmLog);
   const typing = { cmd: '', at: 0, tile: -1 };
   const scope = new Array(74).fill(0); let scopeHead = 0, lastTilt = 0;
   const bar = (f, n, fill, head, empty) => { const k = Math.round(Math.max(0, Math.min(1, f)) * (n - 2)); let s = '['; for (let i = 0; i < n - 2; i++) s += i < k - 1 ? fill : i === k - 1 ? head : empty; return s + ']'; };
@@ -1023,7 +1023,51 @@
     wxb.say = !d ? 'eh? where am i?' : d.cond === 7 ? 'kaminari!! eek' : d.cond === 5 || d.cond === 4 ? 'ame da~ puddles!' : d.cond === 6 ? 'yuki da!! snowball!' : d.cond === 3 ? "kiri... can't see" : !day ? 'oyasumi~ zzz' : tc >= 28 ? 'atsui~ so hot' : tc < 5 ? 'samui! brrr' : d.cond === 2 ? 'kumori... meh' : 'ii tenki da!';
     wxb.sayUntil = performance.now() + 2200; wxb.hop = performance.now();
   };
-  const scenes = { 0: clock, 1: text, 2: photo, 4: music, 5: pet, 6: toy, 7: card, 8: deck, 9: eyes, 10: jukeDeck, 11: torch, 12: chargeDeck, 13: tty, 14: claude, 15: weather };
+  // ── the spell recorder (same layout as the firmware's drawRec; the live traces are on the charm only) ──
+  const REC_COL = ['#ff6060', '#60e080', '#60a0ff', '#ffb040', '#c878ff', '#50e6e6'];
+  function recScreen() {
+    const v = window.spellsView ? window.spellsView() : { label: '', hint: '', take: 0, goal: 0 }, now = performance.now(), LOW = mixk(ACC, .18);
+    R(0, 0, W, H, TTY_BG);
+    G('$', 14, 3, 1, ACC); G('spell --rec', 26, 3, 1, '#fff'); G('100hz', 196, 3, 1, TTY_DIM);
+    G((v.label || 'no label').slice(0, 12), 12, 20, 2, v.label ? '#fff' : TTY_DIM);
+    if (v.goal) { const s = `${v.take}/${v.goal}`; G(s, 228 - s.length * 12, 20, 2, v.take >= v.goal ? '#39ff14' : ACC); }
+    const h = v.label ? v.hint : 'pick one in the spells tab';
+    G(h.slice(0, 36), 12, 40, 1, TTY_DIM); if (h.length > 36) G(h.slice(36, 72), 12, 50, 1, TTY_DIM);
+    const bx = 6, by = 68, bw = 228, bh = 118;
+    c.strokeStyle = v.recording ? ACC : LOW; c.lineWidth = 1; c.strokeRect(bx + .5, by + .5, bw - 1, bh - 1);
+    const cmd = v.stroke && !v.recording ? 'stroke' : 'imu --raw';
+    R(bx + 6, by - 4, (cmd.length + 4) * 6, 9, TTY_BG); G('$', bx + 9, by - 3, 1, v.recording ? ACC : TTY_DIM); G(cmd, bx + 21, by - 3, 1, v.recording ? '#fff' : ACC);
+    if (v.stroke && !v.recording) {
+      const p = v.stroke, xs = p.map(q => q[0]), ys = p.map(q => q[1]);
+      const mnx = Math.min(0, ...xs), mxx = Math.max(0, ...xs), mny = Math.min(0, ...ys), mxy = Math.max(0, ...ys), span = Math.max(mxx - mnx, mxy - mny, 8), s = (bh - 16) / span;
+      const cx = bx + bw / 2 - (mnx + mxx) / 2 * s, cy = by + bh / 2 - (mny + mxy) / 2 * s;
+      c.lineWidth = 1; for (let i = 1; i < p.length; i++) { c.strokeStyle = `color-mix(in srgb, ${ACC} ${25 + 75 * i / p.length}%, ${TTY_BG})`; c.beginPath(); c.moveTo(cx + p[i - 1][0] * s, cy + p[i - 1][1] * s); c.lineTo(cx + p[i][0] * s, cy + p[i][1] * s); c.stroke(); }
+      const l = p.at(-1); circle(cx + l[0] * s, cy + l[1] * s, 3, '#fff', true);
+    } else {
+      for (let ch = 0; ch < 6; ch++) {
+        const mid = ch >= 3 ? by + 89 : by + 31;
+        if (ch === 0 || ch === 3) for (let x = bx + 4; x < bx + bw - 4; x += 4) R(x, mid, 1, 1, LOW);
+        c.strokeStyle = REC_COL[ch]; c.beginPath();
+        for (let i = 0; i < 112; i++) { const x = bx + 4 + i * 2, y = mid + Math.sin(frame * .05 + i * .15 + ch * 1.7) * (v.recording ? 14 : 1.5) * (ch % 3 === 2 && ch < 3 ? .3 : 1); i ? c.lineTo(x, y) : c.moveTo(x, y); }
+        c.stroke();
+      }
+      G('acc', bx + 6, by + 6, 1, TTY_DIM); G('gyro', bx + 6, by + 64, 1, TTY_DIM);
+    }
+    const sy = 196;
+    if (v.recording) {
+      if ((now / 300 | 0) % 2) circle(17, sy + 3, 4, '#ff3b30', true);
+      G(`REC ${((now - v.recAt) / 1000).toFixed(2)}s`, 26, sy - 4, 2, '#ff3b30');
+      G(v.timed ? `/ ${v.timed / 1000 | 0}s` : 'let go to stop', v.timed ? 150 : 12, v.timed ? sy : sy + 16, 1, TTY_DIM);
+    } else {
+      const on = document.body.classList.contains('connected'), msg = on ? 'hold thumb, draw, let go' : 'no link: open spells tab';
+      G(msg, 12, sy, 1, on ? TTY_TEXT : '#ffb000');
+      if (on && (now / 500 | 0) % 2) R(12 + msg.length * 6 + 4, sy - 1, 6, 9, ACC);
+      G('still 0.5s, draw, still 0.5s', 12, sy + 14, 1, TTY_DIM);
+    }
+    ['ax', 'ay', 'az', 'gx', 'gy', 'gz'].forEach((n, i) => G(n, 12 + i * 20, 228, 1, REC_COL[i]));
+    G('|a| 1.00g', 136, 228, 1, TTY_TEXT); G('|w| 0 dps', 136, 240, 1, TTY_TEXT); G('pwr: exit', 12, 240, 1, TTY_DIM);
+  }
+  const scenes = { 0: clock, 1: text, 2: photo, 4: music, 5: pet, 6: toy, 7: card, 8: deck, 9: eyes, 10: jukeDeck, 11: torch, 12: chargeDeck, 13: tty, 14: claude, 15: weather, 16: recScreen };
   // Quest: frames rendered by the firmware itself (desktop simulator), packed in one sheet.
   // d00..d10 day village, n00..n10 night village, then the screens behind the doors.
   // ── tap a block to open it, tap again to go back ──

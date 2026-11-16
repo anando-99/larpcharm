@@ -1,5 +1,5 @@
 /*
-  LARP CHARM firmware v9.0
+  LARP CHARM firmware v9.1
   Board : Waveshare ESP32-S3-Touch-LCD-1.69 (240x280 ST7789V2, CST816T touch)
   Control: Bluetooth LE from the Larp Charm web app
 
@@ -8,7 +8,7 @@
   windows. Tap a pane and the prompt types `open <pane>` before it zooms in.
   Swipe down (or the side button) closes whatever is open.
 
-  Blocks: weather (`curl wttr.in`: ASCII-art skies and a critter dressed for them), tty (a kaomoji in the terminal), cc (Claude Code: a live remote through larp-bridge, or a demo), clock, spotify (a terminal music player), eyes, jukebox, pet, dice, message, photo, ID card, torch,
+  Blocks: weather (`curl wttr.in`: ASCII-art skies and a critter dressed for them), tty (a kaomoji in the terminal), cc (Claude Code: a live remote through larp-bridge, or a demo), clock, spotify (a terminal music player), spell recorder (motion data for air-gesture spells), eyes, jukebox, pet, dice, message, photo, ID card, torch,
           and a charging screen that appears when you plug it in.
 
   Touch:
@@ -74,7 +74,7 @@ struct EyeShape { float w, h, rad, lidT, slope, lidB; };
 #define SVC_UUID    "6e400001-c4a7-4d2e-9b3c-c4a2d7c0ffee"
 #define RX_UUID     "6e400002-c4a7-4d2e-9b3c-c4a2d7c0ffee"
 #define STATUS_UUID "6e400003-c4a7-4d2e-9b3c-c4a2d7c0ffee"
-#define FW_VERSION  "9.0"
+#define FW_VERSION  "9.1"
 #define DEVICE_NAME "Larp Charm"
 
 enum Cmd : uint8_t {
@@ -104,12 +104,13 @@ enum Cmd : uint8_t {
   CMD_SONG_LIST   = 0x1A, // -> "song=id,notes,name" ... "songs=end"
   CMD_SONG_DELETE = 0x1B, // [song id 100..107]
   // 0x1C, 0x1D were the Cotton profile and mood (removed in 8.0)
+  CMD_REC         = 0x20, // [op] 0 label: [take u16][goal u16] label 0x1F hint · 1 exit · 2 timed take [ms u16] · 3 stop · 4 send the last take again
   CMD_WEATHER     = 0x1F, // [cond][day][t][feels][hi][lo][hum][wind][rain%][fahr][n] n*[hour][cond][t] place
   CMD_CC          = 0x1E, // [op] the live link to Claude Code (larp-bridge): 0 state, 1 log, 2 clear, 3 permission, 4 permission over, 5 presets, 6 status
 };
 
 void setMode(int m, bool announce = true);
-enum Mode : uint8_t { M_CLOCK = 0, M_TEXT, M_PHOTO, M_GONE3 /* was clips, then the sing-along */, M_MUSIC, M_PET, M_TOY, M_CARD, M_DECK, M_EYES, M_JUKE, M_TORCH, M_CHARGE, M_TERM, M_CLAUDE, M_WEATHER, M_COUNT };
+enum Mode : uint8_t { M_CLOCK = 0, M_TEXT, M_PHOTO, M_GONE3 /* was clips, then the sing-along */, M_MUSIC, M_PET, M_TOY, M_CARD, M_DECK, M_EYES, M_JUKE, M_TORCH, M_CHARGE, M_TERM, M_CLAUDE, M_WEATHER, M_REC, M_COUNT };
 
 // ───────────── Display ─────────────
 Arduino_DataBus *bus   = new Arduino_ESP32SPI(LCD_DC, LCD_CS, LCD_SCK, LCD_MOSI);
@@ -228,6 +229,7 @@ uint8_t tiltBits = 0;            // bit0 flip X, bit1 flip Y, bit2 swap axes
 // motion sensor (QMI8658)
 bool     imuOK = false, imuBE = false;
 float    accX = 0, accY = 0, accZ = 1;      // g, mapped to the screen
+volatile bool recSampling = false, recOn = false;   // the spell recorder has the sensor / is taking a take
 float    tiltX = 0, tiltY = 0;              // smoothed
 uint32_t lastImuRead = 0, shakeHitAt = 0, lastShakeAt = 0, moveTicks = 0;
 uint8_t  shakeHits = 0;
@@ -496,7 +498,7 @@ void imuInit() {
 
 // Reads the accelerometer. Returns true when the charm was shaken.
 bool imuUpdate() {
-  if (!imuOK) return false;
+  if (!imuOK || recSampling) return false;          // the spell recorder has the sensor (in another range)
   uint32_t now = millis();
   if (now - lastImuRead < (sleeping ? 70u : 20u)) return false;
   lastImuRead = now;
@@ -3472,6 +3474,241 @@ void wxTap() {
 }
 void wxShake() { wxSpinUntil = millis() + 1200; wxSay = "waaa~"; wxSayUntil = millis() + 1200; sfx(3); }
 
+// ═════════════ 9.1: the spell recorder ═════════════
+// For teaching the charm air-gesture "spells". The website's spells tab picks what to record (a label, how
+// many takes); you hold your thumb on the screen while you draw the gesture in the air, and the take goes to
+// the website as raw accelerometer + gyro samples at 100 Hz. The website can also start timed takes (the
+// calibration ones, with the charm lying untouched). The gyro is on only while this screen is open.
+// A task on core 0 samples the sensor at exactly 100 Hz, so drawing the screen can't make the timing jitter.
+#define REC_HZ    100
+#define REC_MAX   1200                 // 12 s
+#define REC_LIVE  128
+#define REC_A_LSB 4096                 // accelerometer +-8 g
+#define REC_G_LSB 16                   // gyro +-2048 dps
+int16_t *recBuf = nullptr;             // REC_MAX x [ax ay az gx gy gz], raw
+volatile uint16_t recN = 0, recMissed = 0;
+int16_t  recLive[REC_LIVE][6];
+volatile uint16_t recLiveHead = 0;
+String   recLabel = "", recHint = "";
+uint16_t recTake = 0, recGoal = 0, recId = 0, recLastN = 0;
+uint8_t  recState = 0;                 // 0 ready, 1 recording, 2 sending, 3 sent, 4 too short, 5 no link
+uint32_t recStateAt = 0, recStartAt = 0, recTimedMs = 0;
+bool     recByThumb = false;
+const uint16_t REC_COL[6] = {c565(255, 96, 96), c565(96, 224, 128), c565(96, 160, 255), c565(255, 176, 64), c565(200, 120, 255), c565(80, 230, 230)};
+
+bool imuRead6(int16_t *v) {
+  Wire.beginTransmission(IMU_ADDR); Wire.write(0x35);
+  if (Wire.endTransmission(false) != 0) return false;
+  if (Wire.requestFrom((uint8_t)IMU_ADDR, (uint8_t)12) != 12) return false;
+  uint8_t b[12];
+  for (int i = 0; i < 12; i++) b[i] = Wire.read();
+  for (int i = 0; i < 6; i++) v[i] = imuBE ? (int16_t)((b[2 * i] << 8) | b[2 * i + 1]) : (int16_t)((b[2 * i + 1] << 8) | b[2 * i]);
+  return true;
+}
+
+void recTask(void *) {
+  TickType_t last = xTaskGetTickCount();
+  for (;;) {
+    if (!recSampling) { vTaskDelay(pdMS_TO_TICKS(20)); last = xTaskGetTickCount(); continue; }
+    if (xTaskDelayUntil(&last, pdMS_TO_TICKS(1000 / REC_HZ)) == pdFALSE && recOn) recMissed++;
+    int16_t v[6];
+    if (!imuRead6(v)) { if (recOn) recMissed++; continue; }
+    memcpy(recLive[recLiveHead % REC_LIVE], v, sizeof(v));
+    recLiveHead++;
+    if (recOn && recBuf && recN < REC_MAX) { memcpy(recBuf + recN * 6, v, sizeof(v)); recN++; }
+  }
+}
+
+// accelerometer +-8 g and gyro +-2048 dps at 224 Hz with a ~30 Hz low-pass, sampled at 100 Hz; back to normal after
+void recSensor(bool on) {
+  if (!imuOK) return;
+  if (on) {
+    imuWrite(0x03, 0x25); imuWrite(0x04, 0x75); imuWrite(0x06, 0x77); imuWrite(0x08, 0x03);
+    delay(60);
+    recSampling = true;
+  } else {
+    recSampling = false; recOn = false;
+    delay(25);
+    imuWrite(0x08, 0x01); imuWrite(0x06, 0x00); imuWrite(0x04, 0x00); imuWrite(0x03, 0x16);
+  }
+}
+
+static size_t b64(const uint8_t *s, size_t n, char *o) {
+  static const char T[] = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+  size_t k = 0;
+  for (size_t i = 0; i < n; i += 3) {
+    uint32_t v = s[i] << 16 | (i + 1 < n ? s[i + 1] << 8 : 0) | (i + 2 < n ? s[i + 2] : 0);
+    o[k++] = T[(v >> 18) & 63]; o[k++] = T[(v >> 12) & 63];
+    o[k++] = i + 1 < n ? T[(v >> 6) & 63] : '=';
+    o[k++] = i + 2 < n ? T[v & 63] : '=';
+  }
+  return k;
+}
+
+// rec0=id,samples,hz,accel lsb/g,gyro lsb/dps,missed,trigger   rec1=id,seq,base64 (360 bytes)   rec2=id,chunks,bytesum
+void recSend(bool fresh) {
+  if (!recBuf || !recLastN) return;
+  if (fresh) recId++;
+  recState = 2;
+  char b[512];
+  snprintf(b, sizeof(b), "rec0=%u,%u,%u,%u,%u,%u,%c", recId, recLastN, REC_HZ, REC_A_LSB, REC_G_LSB, recMissed, recByThumb ? 't' : 'w');
+  notifyText(b); delay(20);
+  const uint8_t *src = (const uint8_t *)recBuf;
+  uint32_t bytes = (uint32_t)recLastN * 12, sum = 0;
+  uint16_t seq = 0;
+  for (uint32_t off = 0; off < bytes; off += 360, seq++) {
+    uint32_t len = min<uint32_t>(360, bytes - off);
+    int k = snprintf(b, sizeof(b), "rec1=%u,%u,", recId, seq);
+    k += b64(src + off, len, b + k);
+    b[k] = 0;
+    for (uint32_t i = 0; i < len; i++) sum += src[off + i];
+    notifyText(b); delay(20);
+  }
+  snprintf(b, sizeof(b), "rec2=%u,%u,%lu", recId, seq, (unsigned long)sum);
+  notifyText(b);
+  recState = 3; recStateAt = millis();
+}
+
+void recStart(bool thumb, uint32_t timedMs) {
+  if (!recSampling || recOn || recState == 2) return;
+  recN = 0; recMissed = 0;
+  recByThumb = thumb; recTimedMs = min<uint32_t>(timedMs, REC_MAX * 10); recStartAt = millis();
+  recOn = true; recState = 1; recStateAt = millis();
+  if (bleConnected) notifyText("recst=1");
+}
+
+void recStop() {
+  if (!recOn) return;
+  recOn = false;
+  delay(12);                                         // let the sampler finish the sample it is on
+  if (bleConnected) notifyText("recst=0");
+  if (recN < 30) { recState = 4; recStateAt = millis(); sfx(4); return; }     // under 0.3 s
+  recLastN = recN;
+  {                                                  // a summary on USB serial, for checking the sampler
+    long m[6] = {0}; int peak = 0;
+    for (int i = 0; i < recLastN; i++) { for (int c = 0; c < 6; c++) m[c] += recBuf[i * 6 + c]; peak = max(peak, abs((int)recBuf[i * 6 + 3]) + abs((int)recBuf[i * 6 + 4]) + abs((int)recBuf[i * 6 + 5])); }
+    Serial.printf("rec: n=%u missed=%u ms=%lu mean a=%.3f,%.3f,%.3f g  w=%.2f,%.2f,%.2f dps  peak|w|1=%d dps\n", recLastN, recMissed, (unsigned long)(millis() - recStartAt),
+                  m[0] / (float)recLastN / REC_A_LSB, m[1] / (float)recLastN / REC_A_LSB, m[2] / (float)recLastN / REC_A_LSB,
+                  m[3] / (float)recLastN / REC_G_LSB, m[4] / (float)recLastN / REC_G_LSB, m[5] / (float)recLastN / REC_G_LSB, peak / REC_G_LSB);
+  }
+  if (!bleConnected) { recState = 5; recStateAt = millis(); return; }
+  klog("rec: %s, %u.%02us", recLabel.length() ? recLabel.c_str() : "take", recLastN / 100, recLastN % 100);
+  recSend(true);
+}
+
+void recPoll() {
+  if (mode != M_REC) return;
+  lastInteraction = millis();                        // no sleeping in the middle of a session
+  if (recOn && ((!recByThumb && millis() - recStartAt >= recTimedMs) || recN >= REC_MAX)) recStop();
+}
+
+// the path the charm's pointing direction took, from the gyro (bias taken from the still start of the take)
+void recStroke(int x0, int y0, int w, int h, uint16_t col) {
+  uint16_t n = recOn ? recN : recLastN;
+  if (n < 6 || !recBuf) return;
+  int nb = min<int>(20, n);
+  float bx = 0, by = 0;
+  for (int i = 0; i < nb; i++) { bx += recBuf[i * 6 + 3]; by += recBuf[i * 6 + 4]; }
+  bx /= nb; by /= nb;
+  const float k = 1.0f / REC_G_LSB / REC_HZ;            // raw -> degrees per sample
+  float px = 0, py = 0, mnx = 0, mxx = 0, mny = 0, mxy = 0;
+  for (int i = 0; i < n; i++) {
+    px += (recBuf[i * 6 + 4] - by) * k; py += (recBuf[i * 6 + 3] - bx) * k;
+    mnx = min(mnx, px); mxx = max(mxx, px); mny = min(mny, py); mxy = max(mxy, py);
+  }
+  float span = max(max(mxx - mnx, mxy - mny), 8.0f), s = min(w - 16, h - 16) / span;
+  float cx = x0 + w / 2 - (mnx + mxx) / 2 * s, cy = y0 + h / 2 - (mny + mxy) / 2 * s;
+  px = py = 0;
+  int lx = (int)cx, ly = (int)cy;
+  for (int i = 0; i < n; i++) {
+    px += (recBuf[i * 6 + 4] - by) * k; py += (recBuf[i * 6 + 3] - bx) * k;
+    int x = (int)(cx + px * s), y = (int)(cy + py * s);
+    gfx->drawLine(lx, ly, x, y, mix565(ACC_DIM, col, min(255, i * 255 / max(1, (int)n - 1))));
+    lx = x; ly = y;
+  }
+  gfx->fillCircle(lx, ly, 3, COL_WHITE);
+}
+
+void drawRec() {
+  uint32_t now = millis();
+  gfx->fillScreen(TTY_BG);
+  char b[48];
+  textAt("$", 14, 3, 1, ACC); textAt("spell --rec", 26, 3, 1, COL_WHITE);
+  textAt(imuOK ? "100hz" : "no imu", 196, 3, 1, imuOK ? TTY_DIM : COL_RED);
+
+  // what to record, and how many so far
+  String lab = recLabel.length() ? recLabel : String("no label");
+  if (lab.length() > 12) lab = lab.substring(0, 12);
+  textAt(lab, 12, 20, 2, recLabel.length() ? COL_WHITE : TTY_DIM);
+  if (recGoal) {
+    snprintf(b, sizeof(b), "%u/%u", recTake, recGoal);
+    textAt(b, 228 - (int)strlen(b) * 12, 20, 2, recTake >= recGoal ? COL_LIME : ACC);
+  }
+  String h = recLabel.length() ? recHint : String("pick one in the spells tab");
+  textAt(h.substring(0, 36), 12, 40, 1, TTY_DIM);
+  if (h.length() > 36) textAt(h.substring(36, 72), 12, 50, 1, TTY_DIM);
+
+  // the box: live sensor traces when idle, the stroke while and after recording
+  const int bx = 6, by = 68, bw = 228, bh = 118;
+  bool showStroke = recOn || ((recState == 2 || recState == 3) && now - recStateAt < 2500);
+  ttyPane(bx, by, bw, bh, showStroke ? "stroke" : "imu --raw", recOn);
+  if (showStroke) recStroke(bx, by, bw, bh, recOn ? COL_RED : ACC);
+  else {
+    uint16_t head = recLiveHead;
+    for (int ch = 0; ch < 6; ch++) {
+      bool gyro = ch >= 3;
+      int mid = gyro ? by + 89 : by + 31;
+      float sc = gyro ? 26.0f / (400.0f * REC_G_LSB) : 26.0f / (2.0f * REC_A_LSB);
+      if (ch == 0 || ch == 3) for (int x = bx + 4; x < bx + bw - 4; x += 4) gfx->drawPixel(x, mid, ACC_LOW);
+      int lx = 0, ly = 0;
+      for (int i = 0; i < REC_LIVE - 1; i++) {
+        int16_t v = recLive[(uint16_t)(head + i) % REC_LIVE][ch];
+        int x = bx + 4 + i * (bw - 8) / (REC_LIVE - 1), y = constrain(mid - (int)(v * sc), mid - 27, mid + 27);
+        if (i) gfx->drawLine(lx, ly, x, y, REC_COL[ch]);
+        lx = x; ly = y;
+      }
+    }
+    textAt("acc", bx + 6, by + 6, 1, TTY_DIM); textAt("gyro", bx + 6, by + 64, 1, TTY_DIM);
+  }
+
+  // what's happening
+  int sy = 196;
+  if (recOn) {
+    float t = (now - recStartAt) / 1000.0f;
+    if ((now / 300) % 2) gfx->fillCircle(17, sy + 3, 4, COL_RED);
+    snprintf(b, sizeof(b), "REC %.2fs", t);
+    textAt(b, 26, sy - 4, 2, COL_RED);
+    if (!recByThumb && recTimedMs) {
+      snprintf(b, sizeof(b), "/ %.0fs", recTimedMs / 1000.0f);
+      textAt(b, 150, sy, 1, TTY_DIM);
+      gfx->fillRect(12, sy + 16, 216, 3, ACC_LOW);
+      gfx->fillRect(12, sy + 16, (int)(216 * min(1.0f, (now - recStartAt) / (float)recTimedMs)), 3, COL_RED);
+    } else textAt("let go to stop", 12, sy + 16, 1, TTY_DIM);
+  } else {
+    const char *msg; uint16_t col = TTY_TEXT;
+    bool fresh = now - recStateAt < 2200;
+    if (recState == 2) { msg = "sending..."; col = ACC; }
+    else if (recState == 3 && fresh) { msg = "ok: take saved"; col = COL_LIME; }
+    else if (recState == 4 && fresh) { msg = "too short: hold longer"; col = COL_AMBER; }
+    else if (recState == 5 && fresh) { msg = "no link: take not saved"; col = COL_RED; }
+    else if (!bleConnected) { msg = "no link: open spells tab"; col = COL_AMBER; }
+    else msg = "hold thumb, draw, let go";
+    textAt(msg, 12, sy, 1, col);
+    if (col == TTY_TEXT && (now / 500) % 2) gfx->fillRect(12 + strlen(msg) * 6 + 4, sy - 1, 6, 9, ACC);
+    textAt("still 0.5s, draw, still 0.5s", 12, sy + 14, 1, TTY_DIM);
+  }
+
+  // live readout
+  int16_t v[6]; memcpy(v, recLive[(uint16_t)(recLiveHead - 1) % REC_LIVE], sizeof(v));
+  float am = sqrtf((float)v[0] * v[0] + (float)v[1] * v[1] + (float)v[2] * v[2]) / REC_A_LSB;
+  float gm = sqrtf((float)v[3] * v[3] + (float)v[4] * v[4] + (float)v[5] * v[5]) / REC_G_LSB;
+  const char *nm[6] = {"ax", "ay", "az", "gx", "gy", "gz"};
+  for (int i = 0; i < 6; i++) textAt(nm[i], 12 + i * 20, 228, 1, REC_COL[i]);
+  snprintf(b, sizeof(b), "|a| %.2fg", am); textAt(b, 136, 228, 1, TTY_TEXT);
+  snprintf(b, sizeof(b), "|w| %.0f dps", gm); textAt(b, 136, 240, 1, TTY_TEXT);
+  textAt("pwr: exit", 12, 240, 1, TTY_DIM);
+}
+
 // ═════════════ v5: torch ═════════════
 const uint16_t TORCH_COL[4] = { COL_WHITE, c565(255, 206, 150), c565(255, 0, 0), c565(120, 230, 255) };
 const char *TORCH_NAMES[4] = {"white", "warm", "red", "ice"};
@@ -3561,6 +3798,7 @@ void drawScene() {
     case M_TERM:  drawTty();   break;
     case M_CLAUDE: drawClaude(); break;
     case M_WEATHER: drawWeather(); break;
+    case M_REC:   drawRec();   break;
     case M_JUKE:  drawJuke();  break;
     case M_TORCH: drawTorch(); break;
     case M_CHARGE: drawCharge(); break;
@@ -3589,7 +3827,9 @@ void setMode(int m, bool announce) {
   uint8_t old = mode;
   mode = ((m % M_COUNT) + M_COUNT) % M_COUNT;
   if (mode == M_GONE3) mode = M_DECK;
-  if (mode != M_CHARGE && mode != M_TORCH && !idleEyesOn) prefs.putUChar("mode", mode);
+  if (mode != M_CHARGE && mode != M_TORCH && mode != M_REC && !idleEyesOn) prefs.putUChar("mode", mode);
+  if (mode == M_REC && old != M_REC) recSensor(true);
+  if (old == M_REC && mode != M_REC) recSensor(false);
   if (old == M_TORCH && mode != M_TORCH && !sleeping) analogWrite(LCD_BL, brightness);
   if (mode == M_TORCH && old != M_TORCH) { analogWrite(LCD_BL, 255); chromeUntil = millis() + 2500; }
   if (mode == M_EYES && old != M_EYES) { chromeUntil = millis() + 1500; tiltBaseX = tiltX; tiltBaseY = tiltY; nextIdleExpr = millis() + 4000; exprShown = 255; }
@@ -3940,6 +4180,19 @@ void handlePacket(const uint8_t *d, uint16_t n) {
 
     case CMD_CC: ccPacket(p, len); break;
     case CMD_WEATHER: wxPacket(p, len); break;
+    case CMD_REC:
+      if (len < 1) break;
+      if (p[0] == 0 && len >= 5) {
+        recTake = p[1] | (p[2] << 8); recGoal = p[3] | (p[4] << 8);
+        String s((const char *)(p + 5), len - 5);
+        int k = s.indexOf('\x1F');
+        recLabel = asciiOnly(k >= 0 ? s.substring(0, k) : s); recHint = k >= 0 ? asciiOnly(s.substring(k + 1)) : String("");
+        if (mode != M_REC) openModule(M_REC);
+      } else if (p[0] == 1) { if (mode == M_REC) closeModule(); }
+      else if (p[0] == 2 && len >= 3) { if (mode != M_REC) openModule(M_REC); recStart(false, p[1] | (p[2] << 8)); }
+      else if (p[0] == 3) recStop();
+      else if (p[0] == 4 && !recOn) recSend(false);
+      break;
 
     case CMD_EYES:
       if (len >= 1) {
@@ -4248,6 +4501,7 @@ void handleTouch() {
       if (sleeping) { touchActivity(); tch.consumed = true; return; }   // first touch only wakes
       if (idleEyesOn) { touchActivity(); tch.consumed = true; return; } // and wakes you out of the idle eyes
       touchActivity();
+      if (mode == M_REC) { tch.consumed = true; recStart(true, 0); return; }     // thumb down: record a take
     }
     tch.x = x; tch.y = y;
     lastInteraction = now;
@@ -4262,6 +4516,7 @@ void handleTouch() {
     }
   } else if (tch.down) {
     tch.down = false;
+    if (mode == M_REC && recOn && recByThumb) { recStop(); return; }               // thumb up: send it
     if (tch.consumed) return;
     int dx = tch.x - tch.x0, dy = tch.y - tch.y0;
     uint32_t dt = now - tch.t0;
@@ -4453,6 +4708,7 @@ void setup() {
   touchInit();
   bootLine("touch", "CST816", true);
   imuInit();
+  xTaskCreatePinnedToCore(recTask, "rec", 3072, nullptr, 3, nullptr, 0);   // the spell recorder's 100 Hz sampler (idle until used)
   bootLine("motion", imuOK ? "QMI8658" : "no reply", imuOK);
   initFx();
 
@@ -4460,6 +4716,7 @@ void setup() {
   artBuf   = (uint16_t *)ps_malloc(FB_BYTES);
   artThumb = (uint16_t *)ps_malloc(NP_ART * NP_ART * 2);
   artSrc   = (uint16_t *)ps_malloc(ART_SRC * ART_SRC * 2);
+  recBuf   = (int16_t *)ps_malloc(REC_MAX * 12);
   artJpg   = (uint8_t *)ps_malloc(ART_JPG_MAX);
   prevFb   = (uint16_t *)ps_malloc(FB_BYTES);
   jbNotesBuf = (uint8_t *)ps_malloc(MY_SONG_MAX * 2);
@@ -4530,6 +4787,16 @@ void klogWatch() {
   if (npTitle != trackWas) { trackWas = npTitle; if (npTitle.length()) klog("np: %s", asciiOnly(npTitle).c_str()); }
 }
 
+// USB serial, for development: r = open the spell recorder, t = a 2 s timed take, x = close it
+void serialDev() {
+  while (Serial.available()) {
+    char c = Serial.read();
+    if (c == 'r' && mode != M_REC) openModule(M_REC);
+    else if (c == 't' && mode == M_REC) recStart(false, 2000);
+    else if (c == 'x' && mode == M_REC) closeModule();
+  }
+}
+
 void loop() {
   static Packet pkt;
   bool gotData = false;
@@ -4550,12 +4817,14 @@ void loop() {
   handleButton();
   klogWatch();
   if (imuUpdate()) onShake();
+  recPoll();
+  serialDev();
   serviceTimers();
   updateBattery();
   updatePet();
 
   jbService();
-  uint32_t idleLimit = mode == M_TORCH ? 300000UL : sleepSec * 1000UL;   // the torch stays on for 5 minutes
+  uint32_t idleLimit = mode == M_TORCH || mode == M_REC ? 300000UL : sleepSec * 1000UL;   // the torch stays on for 5 minutes
   if (!sleeping && sleepSec > 0 && !xferActive && !alarmUntil && millis() - lastInteraction > idleLimit) {
     uint8_t idleMode = idleKind == 1 ? M_EYES : idleKind == 2 ? M_TERM : M_CLAUDE;
     if (idleKind && !idleEyesOn && mode != M_TORCH && mode != idleMode && mode != M_CHARGE) {

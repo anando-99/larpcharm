@@ -5,3 +5,5 @@ build/
 # third-party font files used by the generators (download them yourself, see firmware/tools)
 firmware/tools/fonts/
 firmware/tools/quest/fonts/
+data/
+larp-spells-*.json
