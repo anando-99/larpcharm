@@ -2,7 +2,7 @@
 
 **A wearable bag charm with a touchscreen, a Web Bluetooth control app that looks and works like a terminal, and a pocket remote for Claude Code.**
 
-Larp Charm runs on a Waveshare ESP32-S3-Touch-LCD-1.69 (240×280 IPS, capacitive touch, 6-axis IMU, buzzer, LiPo). The firmware is a small single-sketch "OS" with a cyberdeck interface and a dozen apps. The companion web app pairs over Bluetooth LE: no install, no backend, no native app. It also runs a live copy of the charm's screen in the page.
+Larp Charm runs on a Waveshare ESP32-S3-Touch-LCD-1.69 (240×280 IPS, capacitive touch, 6-axis IMU, buzzer, LiPo). The firmware is a small single-sketch "OS" with a cyberdeck interface and a dozen apps. The companion web app pairs over Bluetooth LE: no install, no backend, no native app. It also runs a live copy of the charm's screen in the page, which follows the real charm while it's connected: it switches screens with it, shows the weather, pet, message and ID card the charm has kept, and the cover going full screen.
 
 **Live web app: [anando-99.github.io/larpcharm](https://anando-99.github.io/larpcharm/)**
 
@@ -105,7 +105,7 @@ arduino-cli compile --upload -p <port> \
   firmware/LarpCharm
 ```
 
-The web app and the firmware are versioned together; this app expects firmware **8.9** (shown on the charm's status screen and in the app once connected).
+The web app and the firmware are versioned together; this app expects firmware **9.0** (shown on the charm's status screen and in the app once connected).
 
 ## Using the charm
 

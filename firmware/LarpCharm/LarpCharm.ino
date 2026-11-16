@@ -1,5 +1,5 @@
 /*
-  LARP CHARM firmware v8.9
+  LARP CHARM firmware v9.0
   Board : Waveshare ESP32-S3-Touch-LCD-1.69 (240x280 ST7789V2, CST816T touch)
   Control: Bluetooth LE from the Larp Charm web app
 
@@ -74,7 +74,7 @@ struct EyeShape { float w, h, rad, lidT, slope, lidB; };
 #define SVC_UUID    "6e400001-c4a7-4d2e-9b3c-c4a2d7c0ffee"
 #define RX_UUID     "6e400002-c4a7-4d2e-9b3c-c4a2d7c0ffee"
 #define STATUS_UUID "6e400003-c4a7-4d2e-9b3c-c4a2d7c0ffee"
-#define FW_VERSION  "8.9"
+#define FW_VERSION  "9.0"
 #define DEVICE_NAME "Larp Charm"
 
 enum Cmd : uint8_t {
@@ -3448,6 +3448,20 @@ void drawWeather() {
     gfx->drawLine(x + w, y + 10, 166, y + 30, ACC);
   }
 }
+// What the charm is showing, sent to the web app when it connects so its preview mirrors the real screen:
+// the weather, the pet, the message and the ID card (each kept on the charm, maybe sent from another browser).
+void shareScreens() {
+  char b[512];
+  if (wx.have) {
+    int n = snprintf(b, sizeof(b), "wx=%u,%u,%d,%d,%d,%d,%u,%u,%u,%u|", wx.cond, wx.isDay, wx.t, wx.feels, wx.hi, wx.lo, wx.hum, wx.wind, wx.rain, wx.fahr);
+    for (int i = 0; i < wx.hn; i++) n += snprintf(b + n, sizeof(b) - n, "%s%u.%u.%d", i ? "," : "", wx.hHour[i], wx.hCond[i], wx.hT[i]);
+    snprintf(b + n, sizeof(b) - n, "|%s", wx.place);
+    notifyText(b); delay(20);
+  }
+  snprintf(b, sizeof(b), "pet=%u,%u\x1F%s", petSpecies, petColor, asciiOnly(petName).c_str()); notifyText(b); delay(20);
+  snprintf(b, sizeof(b), "card=%u\x1F%s\x1F%s", cardAccent, asciiOnly(cardName).c_str(), asciiOnly(cardSub).c_str()); notifyText(b); delay(20);
+  snprintf(b, sizeof(b), "motd=%u,%u,%u\x1F%s", textStyle, textFg, textBg, asciiOnly(textMsg).substring(0, 400).c_str()); notifyText(b);
+}
 void wxTap() {
   int tc = wxCelsius(wx.t);
   bool day = !wx.have || wx.isDay;
@@ -3648,10 +3662,10 @@ void sendStatus(const char *extra = nullptr) {
   char buf[300];
   unsigned long used = fsOK ? (unsigned long)FFat.usedBytes() : 0;
   unsigned long total = fsOK ? (unsigned long)FFat.totalBytes() : 0;
-  snprintf(buf, sizeof(buf), "b=%d;v=%.2f;c=%d;m=%d;fw=%s;fs=%lu,%lu;lk=%d,%d;imu=%d;toy=%d;th=%d;st=%lu;eye=%d;jb=%d;q=%d%s%s",
+  snprintf(buf, sizeof(buf), "b=%d;v=%.2f;c=%d;m=%d;fw=%s;fs=%lu,%lu;lk=%d,%d;imu=%d;toy=%d;th=%d;st=%lu;eye=%d;jb=%d;q=%d;nb=%d%s%s",
            batPct, batVolts, charging ? 1 : 0, mode, FW_VERSION, used, total,
            bgStyle, faceStyle, imuOK ? 1 : 0, toyKind, theme, (unsigned long)stepsToday,
-           exprAuto ? 255 : exprSet, jbPlaying ? jbSong : -1, jbQLen,
+           exprAuto ? 255 : exprSet, jbPlaying ? jbSong : -1, jbQLen, npBig ? 1 : 0,
            extra ? ";" : "", extra ? extra : "");
   notifyText(buf);
 }
@@ -3973,7 +3987,7 @@ void handlePacket(const uint8_t *d, uint16_t n) {
       sendStatus("songs=changed");
       break;
 
-    case CMD_PING:      sendStatus(); break;
+    case CMD_PING:      sendStatus(); shareScreens(); break;
     case CMD_BUZZ:      beep(len >= 1 ? constrain((int)p[0], 1, 10) : 3); break;
   }
 }
@@ -4560,7 +4574,10 @@ void loop() {
     }
   }
 
-  if (bleConnected && (millis() - lastStatus > 15000 || jbDirty)) { lastStatus = millis(); jbDirty = false; sendStatus(); }
+  // tell the web app straight away when the screen changes, so its preview follows the charm
+  static uint32_t lastSig = 0;
+  uint32_t sig = mode | (theme << 5) | ((uint32_t)npBig << 8) | ((uint32_t)toyKind << 9) | ((uint32_t)(exprAuto ? 255 : exprSet) << 13) | ((uint32_t)bgStyle << 21) | ((uint32_t)faceStyle << 26);
+  if (bleConnected && (millis() - lastStatus > 15000 || jbDirty || (sig != lastSig && millis() - lastStatus > 120))) { lastStatus = millis(); jbDirty = false; lastSig = sig; sendStatus(); }
 
   if (sleeping) { delay(10); return; }
 

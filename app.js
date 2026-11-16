@@ -101,12 +101,14 @@ function onStatus(s){
     return;
   }
   if (s.startsWith('media=')) { mediaControl(s.slice(6)); return; }
+  const sh = /^(wx|pet|card|motd)=/.exec(s); if (sh) { mirrorFromCharm(sh[1], s.slice(sh[0].length)); return; }
   if (s.startsWith('cc=')) { ccFromCharm(s.slice(3)); return; }
   if (s.startsWith('song=')) { const p = s.slice(5).split(','); if (songCollect) songCollect.push({ id: +p[0], n: +p[1], name: p.slice(2).join(',') || 'Song' }); return; }
   const kv = Object.fromEntries(s.split(';').map(x => { const i = x.indexOf('='); return [x.slice(0, i), x.slice(i + 1)]; }));
   if (kv.b !== undefined) setBattery(+kv.b, kv.c === '1');
   if (kv.fw) $('fw').textContent = kv.fw;
   if (kv.m !== undefined) setActiveMode(+kv.m);
+  if (kv.nb !== undefined && window.npSetBig) window.npSetBig(kv.nb === '1');     // the cover full screen on the charm
   if (kv.lk) { const [b, f] = kv.lk.split(',').map(Number); setLook(b, f, false); }
   if (kv.toy !== undefined) setToy(+kv.toy, false);
   if (kv.th !== undefined) setTheme(+kv.th, false);
@@ -132,6 +134,25 @@ function setBattery(pct, chg){
   ui.bat = pct; ui.charging = chg;
 }
 
+// ─────────── The preview mirrors the charm ───────────
+// When it connects, the charm says what it is showing (the weather, pet, message and ID card it has kept),
+// and the controls here take those values, so the preview on this page draws what the real screen shows.
+const hex565 = v => '#' + [((v >> 11) & 31) * 255 / 31, ((v >> 5) & 63) * 255 / 63, (v & 31) * 255 / 31].map(x => Math.round(x).toString(16).padStart(2, '0')).join('');
+const same565 = (hex, v) => { const [a, b] = rgb565(hex); return ((a << 8) | b) === v; };
+function setSeg(id, v){ const el = $(id); el.querySelectorAll('button').forEach(b => b.classList.toggle('on', b.dataset.v === String(v))); el.value = String(v); }
+function setSwatch(id, v565){
+  const t = $(id); if (same565(t.value, v565)) return;
+  t.value = hex565(v565); localStorage.setItem('f_' + id, t.value);
+  const box = document.querySelector(`.swatches[data-target="${id}"]`); if (box) box.querySelectorAll('.sw').forEach(s => s.classList.toggle('on', s.dataset.c.toLowerCase() === t.value));
+}
+function setField(id, v){ $(id).value = v; localStorage.setItem('f_' + id, v); }
+function mirrorFromCharm(kind, body){
+  const [head, ...rest] = body.split('\x1F'), n = head.split(',').map(Number);
+  if (kind === 'pet') { setSeg('petSp', n[0]); setSwatch('petCol', n[1]); setField('petName', rest[0] || ''); }
+  else if (kind === 'card') { setSwatch('cAcc', n[0]); setField('cName', rest[0] || ''); setField('cSub', rest[1] || ''); }
+  else if (kind === 'motd') { setSeg('txtStyle', n[0]); setSwatch('txtFg', n[1]); setSwatch('txtBg', n[2]); setField('txt', rest.join('\x1F')); }
+  else if (kind === 'wx') wxFromCharm(body);
+}
 function setActiveMode(m){ ui.mode = m; document.querySelectorAll('#modes .tile').forEach(b => b.classList.toggle('active', +b.dataset.m === m)); }
 
 async function syncTime(){
@@ -845,6 +866,14 @@ async function wxFetch(){
     hum: Math.round(c.relative_humidity_2m), wind: Math.round(c.wind_speed_10m), rain: j.daily.precipitation_probability_max[0] | 0, fahr: wxS.fahr, hours, place: p.name, at: Date.now(), localTime: c.time.slice(11, 16) };
   wxRender(); wxSend();
   klog(`wx: ${wxS.data.t}${wxS.fahr ? 'F' : 'C'} ${WX_NAMES[wxS.data.cond]}, ${p.name}`);
+}
+// The charm's own weather, for when this page has none yet (it then shows what the charm shows).
+function wxFromCharm(s){
+  if (wxS.data) return;                 // this page has its own, and sends it to the charm
+  const [a, hs, place] = s.split('|'), v = a.split(',').map(Number);
+  wxS.data = { cond: v[0], isDay: !!v[1], t: v[2], feels: v[3], hi: v[4], lo: v[5], hum: v[6], wind: v[7], rain: v[8], fahr: !!v[9], place: place || '', at: 0,
+    hours: (hs ? hs.split(',') : []).map(x => { const [h, c, t] = x.split('.').map(Number); return { h, cond: c, t }; }) };
+  wxRender();
 }
 // The weather tab prints the same `curl wttr.in` report as the charm (drawn by charm.js), and animates it.
 function wxRender(){

@@ -1,4 +1,4 @@
-// A working copy of the charm's screen. It draws the same deck and blocks as firmware 8.9,
+// A working copy of the charm's screen. It draws the same deck and blocks as firmware 9.0,
 // follows the controls on this page, and opens a block when you tap it.
 (() => {
   const $ = id => document.getElementById(id);
@@ -152,7 +152,7 @@
   const boot = performance.now();
   const klog = [];
   const charmLog = window.charmLog = msg => { klog.push({ t: performance.now() - boot, s: String(msg).replace(/[^\x20-\x7e]/g, '?').slice(0, 31) }); if (klog.length > 8) klog.shift(); };
-  ['kernel: larp-os 8.9 up', 'imu: qmi8658 online', 'fs: ffat mounted', 'rtc: clock ok'].forEach(charmLog);
+  ['kernel: larp-os 9.0 up', 'imu: qmi8658 online', 'fs: ffat mounted', 'rtc: clock ok'].forEach(charmLog);
   const typing = { cmd: '', at: 0, tile: -1 };
   const scope = new Array(74).fill(0); let scopeHead = 0, lastTilt = 0;
   const bar = (f, n, fill, head, empty) => { const k = Math.round(Math.max(0, Math.min(1, f)) * (n - 2)); let s = '['; for (let i = 0; i < n - 2; i++) s += i < k - 1 ? fill : i === k - 1 ? head : empty; return s + ']'; };
@@ -381,6 +381,7 @@
     // keys
     npKey(12, 40, 'prev', false); npKey(58, 124, 'toggle', ui.playing); npKey(188, 40, 'next', false);
   }
+  window.npSetBig = v => { npBig = !!v; };
   window.npPreviewTap = (x, y) => {
     if (npBig) { npBig = false; glitch = Math.max(glitch, 2); return true; }
     if (x < 135 && y >= 25 && y < 157) { npBig = true; glitch = Math.max(glitch, 2); return true; }
@@ -958,7 +959,7 @@
       const s = String(h.t), w = s.length * 6, x0 = cx - ((w + 4) >> 1); G(s, x0, ty + 29, 1, '#fff'); c.strokeStyle = '#fff'; c.strokeRect(x0 + w + 1.5, ty + 29.5, 1, 1);
     } else G(d ? 'no forecast' : 'set a place: app > weather', tx + 6, ty + 4, 1, TTY_DIM);
     G('$', 14, 248, 1, ACC); if ((now / 500 | 0) % 2) R(26, 247, 6, 9, ACC);
-    if (d) { const m = (Date.now() - d.at) / 60000 | 0, s = m ? m + 'm ago' : 'just now'; G(s, 226 - s.length * 6, 248, 1, TTY_DIM); }
+    if (d) { const m = (Date.now() - d.at) / 60000 | 0, s = !d.at ? 'cached' : m ? m + 'm ago' : 'just now'; G(s, 226 - s.length * 6, 248, 1, TTY_DIM); }
     if (now < wxb.sayUntil) {
       const w = wxb.say.length * 6 + 12, x = Math.max(6, 156 - w), y = 136;
       R(x, y, w, 19, TTY_BG); c.strokeStyle = ACC; c.strokeRect(x + .5, y + .5, w - 1, 18); G(wxb.say, x + 6, y + 6, 1, '#fff'); line(x + w, y + 10, 166, y + 30, ACC);
@@ -1068,7 +1069,7 @@
     ACC = ui.playing && s.title && mx >= 40 ? `rgb(${r * 255 / mx | 0},${g * 255 / mx | 0},${b * 255 / mx | 0})` : THEMES[ui.theme] || THEMES[0];
     if (ACC[0] !== '#') ACC = '#' + ACC.match(/\d+/g).map(v => (+v).toString(16).padStart(2, '0')).join('');
 
-    if (shownMode !== 4) npBig = false;
+    if (ui.mode !== 4) npBig = false;
     if (shownMode !== 15) wxb.shownMode = -1;
     if (ui.mode !== shownMode && !zoom) {
       const opening = shownMode === 8, ti = tileOf(opening ? ui.mode : shownMode);
