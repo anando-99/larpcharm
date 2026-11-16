@@ -160,7 +160,9 @@
     const d = take.data, n = take.n, k = 1 / take.gLsb / take.hz, nb = Math.min(20, n);
     let bx = 0, by = 0; for (let i = 0; i < nb; i++) { bx += d[i * 6 + 3]; by += d[i * 6 + 4]; } bx /= nb; by /= nb;
     const pts = []; let x = 0, y = 0;
-    for (let i = 0; i < n; i++) { x += (d[i * 6 + 4] - by) * k; y += (d[i * 6 + 3] - bx) * k; pts.push([x, y]); }
+    // sensor axes: +X screen top, +Y right edge, +Z into the screen (the calibrate takes); the back of the charm
+    // swings left as it turns about +X and up as it turns about +Y
+    for (let i = 0; i < n; i++) { x -= (d[i * 6 + 3] - bx) * k; y -= (d[i * 6 + 4] - by) * k; pts.push([x, y]); }
     return pts;
   }
   function drawStroke(cv, take){

@@ -3602,7 +3602,9 @@ void recPoll() {
   if (recOn && ((!recByThumb && millis() - recStartAt >= recTimedMs) || recN >= REC_MAX)) recStop();
 }
 
-// the path the charm's pointing direction took, from the gyro (bias taken from the still start of the take)
+// the path the charm's pointing direction took, from the gyro (bias taken from the still start of the take).
+// Sensor axes (from the calibrate takes): +X screen top, +Y right edge, +Z into the screen; the back of the
+// charm swings left as it turns about +X and up as it turns about +Y.
 void recStroke(int x0, int y0, int w, int h, uint16_t col) {
   uint16_t n = recOn ? recN : recLastN;
   if (n < 6 || !recBuf) return;
@@ -3613,7 +3615,7 @@ void recStroke(int x0, int y0, int w, int h, uint16_t col) {
   const float k = 1.0f / REC_G_LSB / REC_HZ;            // raw -> degrees per sample
   float px = 0, py = 0, mnx = 0, mxx = 0, mny = 0, mxy = 0;
   for (int i = 0; i < n; i++) {
-    px += (recBuf[i * 6 + 4] - by) * k; py += (recBuf[i * 6 + 3] - bx) * k;
+    px -= (recBuf[i * 6 + 3] - bx) * k; py -= (recBuf[i * 6 + 4] - by) * k;
     mnx = min(mnx, px); mxx = max(mxx, px); mny = min(mny, py); mxy = max(mxy, py);
   }
   float span = max(max(mxx - mnx, mxy - mny), 8.0f), s = min(w - 16, h - 16) / span;
@@ -3621,7 +3623,7 @@ void recStroke(int x0, int y0, int w, int h, uint16_t col) {
   px = py = 0;
   int lx = (int)cx, ly = (int)cy;
   for (int i = 0; i < n; i++) {
-    px += (recBuf[i * 6 + 4] - by) * k; py += (recBuf[i * 6 + 3] - bx) * k;
+    px -= (recBuf[i * 6 + 3] - bx) * k; py -= (recBuf[i * 6 + 4] - by) * k;
     int x = (int)(cx + px * s), y = (int)(cy + py * s);
     gfx->drawLine(lx, ly, x, y, mix565(ACC_DIM, col, min(255, i * 255 / max(1, (int)n - 1))));
     lx = x; ly = y;
