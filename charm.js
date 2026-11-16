@@ -1099,5 +1099,5 @@
     requestAnimationFrame(tick);
   }
   requestAnimationFrame(tick);
-  if (window.wxRender) window.wxRender();      // the weather tab can draw its report now
+  try { if (window.wxRender) window.wxRender(); } catch (_) {}      // the weather tab can draw its report now
 })();

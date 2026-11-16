@@ -460,7 +460,6 @@ $('findMe').onclick = act(() => write(packet(CMD.BUZZ, [5])));
   const el = $(id), v = localStorage.getItem('f_' + id); if (v !== null) el.value = v;
   el.addEventListener('change', () => localStorage.setItem('f_' + id, el.value));
 });
-buildShow();
 
 // ─────────── Colour theme ───────────
 function setTheme(t, send = true){
