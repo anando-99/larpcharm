@@ -2,6 +2,12 @@
 const SVC = '6e400001-c4a7-4d2e-9b3c-c4a2d7c0ffee';
 const RX  = '6e400002-c4a7-4d2e-9b3c-c4a2d7c0ffee';
 const ST  = '6e400003-c4a7-4d2e-9b3c-c4a2d7c0ffee';
+// A tab left open (or a cached page) notices a newer build on GitHub Pages and reloads into it once.
+const BUILD = (document.querySelector('meta[name="build"]') || {}).content || '';
+if (/^https:/.test(location.protocol)) fetch(location.pathname + '?b=' + Date.now(), { cache: 'no-store' }).then(r => r.text()).then(t => {
+  const m = t.match(/<meta name="build" content="([^"]+)"/);
+  if (m && m[1] !== BUILD && !sessionStorage.getItem('o_build' + m[1])) { sessionStorage.setItem('o_build' + m[1], '1'); location.reload(); }
+}).catch(() => {});
 const CMD = {MODE:1, TEXT:2, TIME:3, NOWPLAYING:4, XFER_BEGIN:5, XFER_DATA:6, XFER_END:7, BRIGHT:8, PET:9, CARD:10, SETTINGS:11, PING:12, BUZZ:13, FEED:14, LOOK:18, TIMER:19, TOY:20, THEME:21, SKIN:22, EYES:23, TUNE:24, TORCH:25, SONG_LIST:26, SONG_DELETE:27, CC:30, WEATHER:31};
 const MODE = {CLOCK:0, TEXT:1, PHOTO:2, MUSIC:4, PET:5, TOY:6, CARD:7, DECK:8, EYES:9, JUKE:10, TORCH:11, CHARGE:12, TERM:13, CLAUDE:14, WEATHER:15};
 const THEMES = ['#00E5FF', '#FF2BD6', '#FFB000', '#39FF14', '#FF3B30', '#C8DCFF'];
@@ -841,14 +847,15 @@ async function wxFetch(){
   wxRender(); wxSend();
   klog(`wx: ${wxS.data.t}${wxS.fahr ? 'F' : 'C'} ${WX_NAMES[wxS.data.cond]}, ${p.name}`);
 }
+// The weather tab prints the same `curl wttr.in` report as the charm (drawn by charm.js), and animates it.
 function wxRender(){
-  const d = wxS.data, U = wxS.fahr ? '°F' : '°C';
-  if (!d) { $('wxOut').textContent = wxS.place ? `${wxS.place.name}: fetching...` : 'no place yet. search for a city or use your location.'; return; }
-  $('wxOut').textContent = [`${wxS.place.name}${wxS.place.country ? ', ' + wxS.place.country : ''}   (local time ${d.localTime})`,
-    `${WX_NAMES[d.cond]}${d.isDay ? '' : ' (night)'}  ${d.t}${U}, feels ${d.feels}${U}`,
-    `H ${d.hi}  L ${d.lo}   humidity ${d.hum}%   wind ${d.wind} km/h   rain ${d.rain}%`,
-    'next: ' + d.hours.map(h => `${String(h.h).padStart(2, '0')}h ${h.t}${U} ${WX_NAMES[h.cond]}`).join('  ·  ')].join('\n');
+  const d = wxS.data, p = wxS.place;
+  if (!d && p) { $('wxOut').textContent = `$ curl wttr.in/${p.name.toLowerCase().replace(/ /g, '+')}\nfetching...`; return; }
+  if (window.wxReportHTML) $('wxOut').innerHTML = window.wxReportHTML(d, p && [p.name, p.country].filter(Boolean).join(', '));
+  else $('wxOut').textContent = d ? `${d.place}: ${WX_NAMES[d.cond]}, ${d.t}` : 'no place yet. search for a city or use your location.';
 }
+window.wxRender = wxRender;
+setInterval(() => { if ($('wxOut').offsetParent && !document.hidden) wxRender(); }, 250);
 function wxSend(){
   const d = wxS.data; if (!d || !rxChar) return;
   const i8 = v => Math.max(-128, Math.min(127, v)) & 255;

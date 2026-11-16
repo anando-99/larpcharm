@@ -274,7 +274,7 @@ const server = http.createServer(async (req, res) => {
       if (!file.startsWith(WEB_ROOT + path.sep) || rel.includes('/.') || /\/(larp-bridge|firmware|scrapped)\//.test(rel)) return send(res, 404, { error: 'not found' });
       return fs.readFile(file, (err, data) => {
         if (err) return send(res, 404, { error: 'not found' });
-        res.writeHead(200, { 'Content-Type': MIME[path.extname(file)] || 'application/octet-stream' });
+        res.writeHead(200, { 'Content-Type': MIME[path.extname(file)] || 'application/octet-stream', 'Cache-Control': 'no-cache' });
         res.end(data);
       });
     }

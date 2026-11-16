@@ -964,6 +964,59 @@
       R(x, y, w, 19, TTY_BG); c.strokeStyle = ACC; c.strokeRect(x + .5, y + .5, w - 1, 18); G(wxb.say, x + 6, y + 6, 1, '#fff'); line(x + w, y + 10, 166, y + 30, ACC);
     }
   }
+  // The same report as text, for the weather tab: `curl wttr.in` in the page, sprite and all.
+  function wxGrid(d, now) {
+    const g = Array.from({ length: 5 }, () => Array.from({ length: 13 }, () => [' ', null]));
+    const put = (k, cloud) => { const [L, M] = WXS[k]; for (let r = 0; r < 5; r++) for (let i = 0; i < 13; i++) { let m = M[r][i]; if (L[r][i] === ' ') continue; if (m === 'w') m = cloud; if (m === 'd' && (((now / 600 | 0) + i + r) & 1)) m = 's'; g[r][i] = [L[r][i], WXCOL[m]]; } };
+    if (!d) { put('UNKNOWN', 'w'); return g; }
+    const day = d.isDay;
+    if (d.cond === 0) put(day ? ((now / 700 | 0) % 2 ? 'SUN_B' : 'SUN_A') : 'MOON', 'w');
+    else if (d.cond === 1) put(day ? 'PARTLY' : 'PARTLYN', 'w');
+    else if (d.cond === 2) put('CLOUDY', 'w');
+    else if (d.cond === 3) { put('FOG', 'w'); const sh = (now / 900 | 0) % 2; [1, 3].forEach(r => { if (sh) g[r].push(g[r].shift()); else g[r].unshift(g[r].pop()); }); }
+    else {
+      put('CLOUD', d.cond === 7 && wxFlash(now) ? 's' : d.cond === 5 || d.cond === 7 ? 'g' : 'w');
+      for (let r = 3; r <= 4; r++) for (let i = 3; i <= 10; i++) {
+        let ch = '', k = 'b';
+        if (d.cond === 6) { const ph = now / 420 | 0; if ((i + r * 2 + ph) % 3 === 0) { ch = '*'; k = 's'; } }
+        else if (d.cond === 4) { const ph = now / 260 | 0; if ((i + r * 2 + ph) % 4 === 0) ch = "'"; }
+        else { const ph = now / 180 | 0; if ((i + r + ph) % 2 === 0) ch = ((i + ph) & 1) ? ',' : "'"; }
+        if (d.cond === 7 && i >= 5 && i <= 8) ch = '';
+        if (ch) g[r][i] = [ch, WXCOL[k]];
+      }
+      if (d.cond === 7) { const bc = wxFlash(now) ? WXCOL.o : '#786428'; g[3][6] = ['_', bc]; g[3][7] = ['/', bc]; g[4][6] = ['/', bc]; }
+    }
+    return g;
+  }
+  window.wxReportHTML = (d, place) => {
+    const now = performance.now(), esc = s => String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+    const sp = (s, col, b) => col ? `<span style="color:${col}${b ? ';font-weight:700' : ''}">${esc(s)}</span>` : esc(s);
+    const U = d && d.fahr ? '°F' : '°C', dim = '#606a78', out = [];
+    out.push(sp('$ ', ACC) + 'curl wttr.in/' + sp((d ? d.place : 'here').toLowerCase().replace(/ /g, '+'), ACC));
+    out.push(sp('Weather report: ', dim) + esc(place || (d ? d.place : 'unknown')) + (d && d.localTime ? sp(`   local ${d.localTime}`, dim) : ''));
+    out.push('');
+    const right = !d ? [sp('no data', '#fff', 1), sp('search for a city, or use your location', dim), '', '', ''] : [
+      sp(WXN[d.cond] + (d.isDay ? '' : ' (night)'), '#fff', 1),
+      sp(d.t + U, '#fff', 1) + sp(` (feels ${d.feels}${U})`, dim),
+      `H ${d.hi}${U}  L ${d.lo}${U}`,
+      `${sp('wind', dim)} ${d.wind} km/h  ${sp('hum', dim)} ${d.hum}%`,
+      `${sp('rain', dim)} ${d.rain >= 50 ? sp(d.rain + '%', WXCOL.b) : d.rain + '%'}`];
+    wxGrid(d, now).forEach((row, r) => out.push(row.map(([ch, col]) => sp(ch, col)).join('') + '  ' + right[r]));
+    if (d && d.hours.length) {
+      const cells = d.hours.slice(0, 4), seg = '───────';
+      const mini = h => { const e = WXMINI[h.cond] || ['???', 'www'], day = h.h >= 6 && h.h < 19, [s, m] = !day && e[2] ? [e[2], e[3]] : [e[0], e[1]]; return '  ' + [...s].map((ch, i) => sp(ch === '\x0F' ? '☼' : ch, WXCOL[m[i]])).join('') + '  '; };
+      const c7 = s => { const p = 7 - s.length; return ' '.repeat(p >> 1) + s + ' '.repeat(p - (p >> 1)); };
+      const B = s => sp(s, mixk(ACC, .45));
+      out.push('');
+      out.push(B('┌' + cells.map(() => seg).join('┬') + '┐'));
+      out.push(B('│') + cells.map(h => sp(c7(String(h.h).padStart(2, '0') + 'h'), ACC)).join(B('│')) + B('│'));
+      out.push(B('├' + cells.map(() => seg).join('┼') + '┤'));
+      out.push(B('│') + cells.map(mini).join(B('│')) + B('│'));
+      out.push(B('│') + cells.map(h => sp(c7(h.t + '°'), '#fff')).join(B('│')) + B('│'));
+      out.push(B('└' + cells.map(() => seg).join('┴') + '┘'));
+    }
+    return out.join('\n');
+  };
   window.wxPreviewTap = () => {
     const d = window.wxData && window.wxData(), tc = wxC(d), day = !d || d.isDay;
     wxb.say = !d ? 'eh? where am i?' : d.cond === 7 ? 'kaminari!! eek' : d.cond === 5 || d.cond === 4 ? 'ame da~ puddles!' : d.cond === 6 ? 'yuki da!! snowball!' : d.cond === 3 ? "kiri... can't see" : !day ? 'oyasumi~ zzz' : tc >= 28 ? 'atsui~ so hot' : tc < 5 ? 'samui! brrr' : d.cond === 2 ? 'kumori... meh' : 'ii tenki da!';
@@ -1046,4 +1099,5 @@
     requestAnimationFrame(tick);
   }
   requestAnimationFrame(tick);
+  if (window.wxRender) window.wxRender();      // the weather tab can draw its report now
 })();
