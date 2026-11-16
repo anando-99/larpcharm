@@ -102,7 +102,7 @@ function onStatus(s){
     return;
   }
   if (s.startsWith('media=')) { mediaControl(s.slice(6)); return; }
-  if (/^(rec(st|[012])|cast|teach|spb|spc)=/.test(s)) { if (window.spellsOnStatus) window.spellsOnStatus(s); return; }   // spells (spells.js)
+  if (/^(rec(st|[012])|cast|teach|spb|spc|sk)=/.test(s)) { if (window.spellsOnStatus) window.spellsOnStatus(s); return; }   // spells (spells.js)
   const sh = /^(wx|pet|card|motd)=/.exec(s); if (sh) { mirrorFromCharm(sh[1], s.slice(sh[0].length)); return; }
   if (s.startsWith('cc=')) { ccFromCharm(s.slice(3)); return; }
   if (s.startsWith('song=')) { const p = s.slice(5).split(','); if (songCollect) songCollect.push({ id: +p[0], n: +p[1], name: p.slice(2).join(',') || 'Song' }); return; }
@@ -111,6 +111,7 @@ function onStatus(s){
   if (kv.fw) $('fw').textContent = kv.fw;
   if (kv.m !== undefined) setActiveMode(+kv.m);
   if (kv.nb !== undefined && window.npSetBig) window.npSetBig(kv.nb === '1');     // the cover full screen on the charm
+  if (kv.wv !== undefined && window.spellsWandView) window.spellsWandView(+kv.wv);   // the spell screen's view
   if (kv.lk) { const [b, f] = kv.lk.split(',').map(Number); setLook(b, f, false); }
   if (kv.toy !== undefined) setToy(+kv.toy, false);
   if (kv.th !== undefined) setTheme(+kv.th, false);
@@ -412,13 +413,19 @@ async function pollSpotify(){
 async function mediaControl(kind){
   try {
     if ($('musicSrc').value !== 'spotify' || !spotifyToken()) {
-      if (kind !== 'toggle') { hud(kind.startsWith('vol') ? 'Volume from the charm needs Spotify.' : 'Skipping songs from the charm needs Spotify.'); return; }
+      if (kind !== 'toggle') { if (!kind.startsWith('vol:')) hud(kind.startsWith('vol') ? 'Volume from the charm needs Spotify.' : 'Skipping songs from the charm needs Spotify.'); return; }
       $('mPlaying').checked = !$('mPlaying').checked; ui.playing = $('mPlaying').checked;
       const [m, s] = $('mLen').value.split(':').map(Number);
       await write(nowPlayingPacket(hexRgb($('mColor').value), ui.playing, 0, ((m || 0) * 60 + (s || 0)) * 1000, $('mTitle').value || 'Untitled', $('mArtist').value));
       return;
     }
     if (!(await ensureToken())) { hud('Sign in with Spotify again.'); return; }
+    if (kind.startsWith('vol:')) {                                   // the wand's knob: an exact volume
+      const v = Math.max(0, Math.min(100, +kind.slice(4) | 0));
+      const r = await fetch('https://api.spotify.com/v1/me/player/volume?volume_percent=' + v, { method: 'PUT', headers: { Authorization: 'Bearer ' + spotifyToken() } });
+      if (r.ok) { if (ui.np) ui.np.vol = v; } else if (r.status === 403) hud('That device won’t let Spotify change its volume.');
+      return;
+    }
     if (kind === 'volup' || kind === 'voldown') {
       const np = ui.np || {}, v = Math.max(0, Math.min(100, (np.vol >= 0 ? np.vol : 50) + (kind === 'volup' ? 10 : -10)));
       const r = await fetch('https://api.spotify.com/v1/me/player/volume?volume_percent=' + v, { method: 'PUT', headers: { Authorization: 'Bearer ' + spotifyToken() } });

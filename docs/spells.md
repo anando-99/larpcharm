@@ -56,6 +56,22 @@ keeps the 5 recordings and their mean fingerprint in its flash, and recognises t
 plan, an animation of how to draw each spell, a plot of every take, and an export to JSON. It also shows what the
 current network thinks of every take, which flags mislabelled ones.
 
+## 1½. The wand
+
+Recognising a gesture is only one way to use the motion. The spell screen has four views along its top, like tmux windows:
+
+| view | what you do | how it works |
+| --- | --- | --- |
+| **cast** | cast spells, **charged up**: bigger, faster casts give bigger effects, and past 80% they are *overcharged* (a flick skips two songs, a zigzag jumps to a random colour, a heart also fills the pet with hearts) | power = the angle the charm swept (out of 90°) and its peak turning speed (out of 500 °/s), half each |
+| **knob** | hold your thumb and twist the charm like a dial: Spotify volume, or the screen's brightness when nothing is playing | the gyro's Z axis (into the screen) integrated while your thumb is down: a quarter turn is 30%. The volume goes to Spotify at most every 300 ms |
+| **draw** | the charm is a laser pointer: hold your thumb and draw in the air; let go to lift the pen; shake to wipe. The website mirrors the sketch, saves it as a PNG, or sends it back as the charm's photo | yaw and pitch from the gyro move a pointer (2.4 px per degree), like an air mouse; lifting the pen keeps the pointer where it is |
+| **map** | the **constellation**: cast and watch your gesture's fingerprint land among the spells' clusters, live on the charm | the 32-number fingerprint projected to 2D with the PCA basis the training fitted (exported with the weights); no actions |
+
+Knob and draw read the gyro live rather than one take at a time, so its drifting offset matters. The firmware keeps
+re-measuring it whenever the charm has been still for half a second. Shake detection is off while the gyro is in
+use (the accelerometer is in a different range then), so the draw view has its own: three jolts over 2.2 g within
+0.7 s wipe the sketch.
+
 ## 2. The sensor
 
 The charm has a QMI8658 6-axis IMU. For spells, the firmware switches the gyro on (it is off otherwise, to save power).
@@ -201,6 +217,12 @@ none     fingerprint max diff vs pytorch 1.49e-07   class none    0.949 ok
 **Memory.** The weights are 155 KB in flash, and the app is 1.07 MB of its 3 MB. Working memory is 45 KB of internal
 RAM plus about 100 KB of PSRAM for the take and the stored recordings. Each taught spell is a file in flash (`/spl/<slot>.bin`)
 holding its name, action, mean fingerprint, spread and its 5 recordings at 50 Hz.
+
+## 7½. The constellation, on the website too
+
+The spells tab draws the same map as the charm: the recorded takes as dots, the spells' prototypes as rings, every
+cast the charm reports as a star. *Show my recorded takes* runs the website's copy of the network over the whole
+dataset, which shows at a glance where the clusters are tight and which takes sit oddly.
 
 ## 8. Reproduce it
 

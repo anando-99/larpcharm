@@ -1,5 +1,5 @@
 /*
-  LARP CHARM firmware v9.2
+  LARP CHARM firmware v9.3
   Board : Waveshare ESP32-S3-Touch-LCD-1.69 (240x280 ST7789V2, CST816T touch)
   Control: Bluetooth LE from the Larp Charm web app
 
@@ -8,7 +8,7 @@
   windows. Tap a pane and the prompt types `open <pane>` before it zooms in.
   Swipe down (or the side button) closes whatever is open.
 
-  Blocks: weather (`curl wttr.in`: ASCII-art skies and a critter dressed for them), tty (a kaomoji in the terminal), cc (Claude Code: a live remote through larp-bridge, or a demo), clock, spotify (a terminal music player), spells (draw them in the air: a 1D CNN on the charm recognises them; teach your own), spell recorder, eyes, jukebox, pet, dice, message, photo, ID card, torch,
+  Blocks: weather (`curl wttr.in`: ASCII-art skies and a critter dressed for them), tty (a kaomoji in the terminal), cc (Claude Code: a live remote through larp-bridge, or a demo), clock, spotify (a terminal music player), spells and the wand (cast spells with a 1D CNN on the charm, teach your own, twist it like a knob, draw in the air, see the fingerprint map), spell recorder, eyes, jukebox, pet, dice, message, photo, ID card, torch,
           and a charging screen that appears when you plug it in.
 
   Touch:
@@ -74,7 +74,7 @@ struct EyeShape { float w, h, rad, lidT, slope, lidB; };
 #define SVC_UUID    "6e400001-c4a7-4d2e-9b3c-c4a2d7c0ffee"
 #define RX_UUID     "6e400002-c4a7-4d2e-9b3c-c4a2d7c0ffee"
 #define STATUS_UUID "6e400003-c4a7-4d2e-9b3c-c4a2d7c0ffee"
-#define FW_VERSION  "9.2"
+#define FW_VERSION  "9.3"
 #define DEVICE_NAME "Larp Charm"
 
 enum Cmd : uint8_t {
@@ -104,7 +104,7 @@ enum Cmd : uint8_t {
   CMD_SONG_LIST   = 0x1A, // -> "song=id,notes,name" ... "songs=end"
   CMD_SONG_DELETE = 0x1B, // [song id 100..107]
   // 0x1C, 0x1D were the Cotton profile and mood (removed in 8.0)
-  CMD_SPELL       = 0x21, // [op] 0 action: [spell 0..3 or 10+slot][action] · 1 teach: [slot][action] name · 2 stop teaching · 3 forget [slot] · 4 list · 5 open
+  CMD_SPELL       = 0x21, // [op] 0 action: [spell 0..3 or 10+slot][action] · 1 teach: [slot][action] name · 2 stop teaching · 3 forget [slot] · 4 list · 5 open · 6 wipe the sketch · 7 view [0 cast 1 knob 2 draw 3 map]
   CMD_REC         = 0x20, // [op] 0 label: [take u16][goal u16] label 0x1F hint · 1 exit · 2 timed take [ms u16] · 3 stop · 4 send the last take again
   CMD_WEATHER     = 0x1F, // [cond][day][t][feels][hi][lo][hum][wind][rain%][fahr][n] n*[hour][cond][t] place
   CMD_CC          = 0x1E, // [op] the live link to Claude Code (larp-bridge): 0 state, 1 log, 2 clear, 3 permission, 4 permission over, 5 presets, 6 status
@@ -231,6 +231,8 @@ uint8_t tiltBits = 0;            // bit0 flip X, bit1 flip Y, bit2 swap axes
 bool     imuOK = false, imuBE = false;
 float    accX = 0, accY = 0, accZ = 1;      // g, mapped to the screen
 volatile bool recSampling = false, recOn = false;   // the spell recorder has the sensor / is taking a take
+uint8_t  wandView = 0;                               // the spell screen's view: 0 cast, 1 knob, 2 draw, 3 map
+bool     castActed = true;                           // the last spell has done its thing
 float    tiltX = 0, tiltY = 0;              // smoothed
 uint32_t lastImuRead = 0, shakeHitAt = 0, lastShakeAt = 0, moveTicks = 0;
 uint8_t  shakeHits = 0;
@@ -3583,8 +3585,10 @@ void recStop() {
   recOn = false;
   delay(12);                                         // let the sampler finish the sample it is on
   if (bleConnected) notifyText("recst=0");
+  if (mode == M_CAST && (wandView == 1 || wandView == 2)) { wandEnd(); return; }      // the knob and the pen don't cast
   if (recN < 30) { recState = 4; recStateAt = millis(); sfx(4); if (mode == M_CAST) toast("too short", 700); return; }     // under 0.3 s
   recLastN = recN;
+  if (mode == M_CAST && wandView == 3) { recState = 0; castRun(); castActed = true; return; }   // the map: explore, no actions
   if (mode == M_CAST) { recState = 0; castRun(); return; }
   {                                                  // a summary on USB serial, for checking the sampler
     long m[6] = {0}; int peak = 0;
@@ -3736,10 +3740,200 @@ uint32_t splBaseOff[SPL_TPL_N];
 // the last cast
 int8_t   castKind = -1;               // -1 none yet, 0..3 base spell, 10+k taught spell k, 99 fizzle
 float    castSim = 0, castTop[3]; const char *castTopName[3]; char castTopBuf[3][17];
-uint32_t castAt = 0, castMs = 0; bool castActed = true; uint8_t castActNow = SA_NONE;
+uint32_t castAt = 0, castMs = 0; uint8_t castActNow = SA_NONE;
 // teaching
 int8_t   teachSlot = -1; uint8_t teachN = 0, teachAct = SA_NONE; char teachName[17] = "";
 float    teachEmb[SPL_TEACH][SPL_EMB];
+
+// ═════════════ 9.3: the wand ═════════════
+// The spell screen has four views along its top: cast (spells, with charge-up), knob (twist the charm like a dial:
+// Spotify volume, or brightness when nothing plays), draw (the charm is a laser pointer: hold your thumb and draw in
+// the air; shake to wipe) and map (the constellation: the network's fingerprint space, every cast landing as a star).
+// Knob and draw read the gyro live: its offset is tracked whenever the charm is still, so they don't drift.
+const char *WAND_TABS[4] = {"cast", "knob", "draw", "map"};
+float    gyroBias[3] = {0, 0, 0};       // dps, kept up to date while still
+uint16_t wandFrom = 0;                  // next sample of the current hold still to read
+// knob
+float    knobAng = 0, knobStart = 0; int knobVal = -1, knobSent = -1; bool knobVol = false; uint32_t knobSentAt = 0;
+// draw: points in the 228 x 196 canvas; x = -1 lifts the pen
+#define SK_MAX 2400
+#define SK_W 228
+#define SK_H 196
+int16_t *skX = nullptr, *skY = nullptr; uint16_t skN = 0, skStroke = 0;
+float    skPx = SK_W / 2, skPy = SK_H / 2;
+uint32_t skShakeAt = 0; uint8_t skShakeHits = 0;
+// map: the last casts, as stars
+struct MapStar { float x, y; int8_t kind; uint32_t at; };
+MapStar  mapStars[10]; uint8_t mapStarN = 0;
+float    castPower = 0; uint32_t castBonusAt = 0;
+
+void wandSet(uint8_t v) {
+  if (recOn) return;
+  wandView = v % 4; sfx(1); glitchFrames = 2;
+  if (wandView == 1) { knobVal = npVol >= 0 && bleConnected ? npVol : (brightness - 8) * 100 / 247; }
+}
+
+void mapProject(const float *emb, float &x, float &y) {
+  float z0 = 0, z1 = 0;
+  for (int e = 0; e < SPL_EMB; e++) { float d = emb[e] - SPL_MAP_MEAN[e]; z0 += d * SPL_MAP_V[e]; z1 += d * SPL_MAP_V[SPL_EMB + e]; }
+  x = (z0 - SPL_MAP_BOX[0]) / (SPL_MAP_BOX[2] - SPL_MAP_BOX[0]); y = (z1 - SPL_MAP_BOX[1]) / (SPL_MAP_BOX[3] - SPL_MAP_BOX[1]);
+}
+void mapAdd(const float *emb, int8_t kind) {
+  if (mapStarN == 10) { memmove(mapStars, mapStars + 1, sizeof(MapStar) * 9); mapStarN = 9; }
+  MapStar &s = mapStars[mapStarN++]; mapProject(emb, s.x, s.y); s.kind = kind; s.at = millis();
+}
+
+// how hard you cast: the angle the charm swept through and how fast it turned (0..1)
+float castPowerOf(const float *seg, int n) {
+  float ang[3] = {0, 0, 0}, lo[3] = {0, 0, 0}, hi[3] = {0, 0, 0}, peak = 0;
+  for (int i = 0; i < n; i++) {
+    float m = 0;
+    for (int c = 0; c < 3; c++) { float w = seg[i * 6 + 3 + c] * 200; ang[c] += w / REC_HZ; lo[c] = min(lo[c], ang[c]); hi[c] = max(hi[c], ang[c]); m += w * w; }
+    peak = max(peak, sqrtf(m));
+  }
+  float span = max(hi[0] - lo[0], max(hi[1] - lo[1], hi[2] - lo[2]));
+  return constrain(0.5f * min(1.0f, span / 90.0f) + 0.5f * min(1.0f, peak / 500.0f), 0.0f, 1.0f);
+}
+
+void skSendStroke(uint16_t from) {
+  if (!bleConnected || !skX) return;
+  char b[512]; uint8_t raw[280];
+  bool first = true;
+  for (uint16_t i = from; i < skN; ) {
+    int k = 0;
+    while (i < skN && k < 280) { if (skX[i] >= 0) { raw[k++] = (uint8_t)skX[i]; raw[k++] = (uint8_t)skY[i]; } i++; }
+    int m = snprintf(b, sizeof(b), "sk=%c,", first ? 's' : 'c');
+    m += b64(raw, k, b + m); b[m] = 0;
+    notifyText(b); delay(12); first = false;
+  }
+}
+void skClear() { skN = 0; skPx = SK_W / 2; skPy = SK_H / 2; if (bleConnected) notifyText("sk=x"); }
+
+// thumb down on the knob or draw view
+void wandBegin() {
+  wandFrom = 0;
+  if (wandView == 1) {
+    knobVol = npVol >= 0 && bleConnected;
+    knobStart = knobVol ? npVol : (brightness - 8) * 100.0f / 247; knobAng = 0; knobVal = (int)knobStart;
+  } else if (wandView == 2 && skX) {
+    if (skN && skN < SK_MAX) { skX[skN] = -1; skY[skN] = -1; skN++; }
+    skStroke = skN;
+    if (skN < SK_MAX) { skX[skN] = (int16_t)skPx; skY[skN] = (int16_t)skPy; skN++; }
+  }
+}
+// thumb up
+void wandEnd() {
+  if (wandView == 1) {
+    if (knobVol && knobVal != knobSent) { char b[24]; snprintf(b, sizeof(b), "media=vol:%d", knobVal); notifyText(b); knobSent = knobVal; }
+    if (!knobVol) prefs.putUChar("bright", brightness);
+    sfx(1);
+  } else if (wandView == 2) skSendStroke(skStroke);
+}
+
+// every loop on the spell screen: follow the gyro's offset, read the twist or the stroke, spot a shake
+void wandPoll() {
+  if (mode != M_CAST || !recSampling) return;
+  uint32_t now = millis();
+  static uint32_t lastTrack = 0;
+  if (now - lastTrack > 100) {                       // still for half a second? then that's the gyro's offset
+    lastTrack = now;
+    uint16_t head = recLiveHead; float mean[3] = {0, 0, 0}, dev = 0; float amax = 0;
+    for (int i = 0; i < 50; i++) for (int c = 0; c < 3; c++) mean[c] += recLive[(uint16_t)(head - 1 - i) % REC_LIVE][3 + c] / (float)REC_G_LSB / 50;
+    for (int i = 0; i < 50; i++) {
+      const int16_t *v = recLive[(uint16_t)(head - 1 - i) % REC_LIVE];
+      for (int c = 0; c < 3; c++) dev = max(dev, fabsf(v[3 + c] / (float)REC_G_LSB - mean[c]));
+      if (i < 12) amax = max(amax, sqrtf((float)v[0] * v[0] + (float)v[1] * v[1] + (float)v[2] * v[2]) / REC_A_LSB);
+    }
+    if (dev < 3 && fabsf(mean[0]) < 20 && fabsf(mean[1]) < 20 && fabsf(mean[2]) < 20) for (int c = 0; c < 3; c++) gyroBias[c] = gyroBias[c] * 0.7f + mean[c] * 0.3f;
+    if (wandView == 2 && !recOn && amax > 2.2f) {    // shake to wipe the sketch
+      if (now - skShakeAt > 700) skShakeHits = 0;
+      skShakeAt = now;
+      if (++skShakeHits >= 3) { skShakeHits = 0; skClear(); toast("wiped", 600); sfx(3); }
+    }
+  }
+  if (!recOn || wandView == 0 || wandView == 3) return;
+  uint16_t n = recN;
+  for (; wandFrom < n; wandFrom++) {
+    const int16_t *v = recBuf + wandFrom * 6;
+    float gx = v[3] / (float)REC_G_LSB - gyroBias[0], gy = v[4] / (float)REC_G_LSB - gyroBias[1], gz = v[5] / (float)REC_G_LSB - gyroBias[2];
+    if (wandView == 1) knobAng += gz / REC_HZ;      // clockwise (as you look at the screen) is +Z
+    else if (skX) {
+      skPx = constrain(skPx - gx / REC_HZ * 2.4f, 0.0f, (float)SK_W - 1); skPy = constrain(skPy - gy / REC_HZ * 2.4f, 0.0f, (float)SK_H - 1);
+      int16_t lx = skX[skN - 1], ly = skY[skN - 1];
+      if (skN < SK_MAX && (abs((int)skPx - lx) + abs((int)skPy - ly)) >= 2) { skX[skN] = (int16_t)skPx; skY[skN] = (int16_t)skPy; skN++; }
+    }
+  }
+  if (wandView == 1) {
+    knobVal = constrain((int)lroundf(knobStart + knobAng / 3), 0, 100);   // a quarter turn = 30%
+    if (knobVol) {
+      npVol = knobVal;
+      if (knobVal != knobSent && now - knobSentAt > 300) { char b[24]; snprintf(b, sizeof(b), "media=vol:%d", knobVal); notifyText(b); knobSent = knobVal; knobSentAt = now; }
+    } else setBacklight(8 + knobVal * 247 / 100);
+  }
+}
+
+void drawKnob(int bx, int by, int bw, int bh) {
+  int cx = bx + bw / 2, cy = by + bh / 2 + 6, r = 62;
+  int v = knobVal < 0 ? 0 : knobVal;
+  for (int i = 0; i <= 40; i++) {                    // a 270 degree dial, lit up to the value
+    float a = (135 + i * 270 / 40.0f) * 0.017453f;
+    uint16_t c = i * 100 / 40 <= v ? ACC : ACC_LOW;
+    int x0 = cx + (int)(cosf(a) * (r - 8)), y0 = cy + (int)(sinf(a) * (r - 8)), x1 = cx + (int)(cosf(a) * r), y1 = cy + (int)(sinf(a) * r);
+    gfx->drawLine(x0, y0, x1, y1, c); if (i % 10 == 0) gfx->drawLine(x0, y0, cx + (int)(cosf(a) * (r + 5)), cy + (int)(sinf(a) * (r + 5)), TTY_DIM);
+  }
+  float a = (135 + v * 2.7f) * 0.017453f;
+  gfx->drawLine(cx, cy, cx + (int)(cosf(a) * (r - 14)), cy + (int)(sinf(a) * (r - 14)), COL_WHITE);
+  gfx->fillCircle(cx, cy, 4, ACC);
+  char b[16]; snprintf(b, sizeof(b), "%d", v);
+  textAt(b, cx - (int)strlen(b) * 9, cy + 18, 3, COL_WHITE);
+  bool vol = recOn ? knobVol : (npVol >= 0 && bleConnected);
+  textAt(vol ? "spotify volume" : "brightness", cx - (vol ? 42 : 30), by + 8, 1, vol ? ACC : TTY_TEXT);
+}
+
+void drawSketch(int bx, int by) {
+  if (!skX) return;
+  for (uint16_t i = 1; i < skN; i++) {
+    if (skX[i] < 0 || skX[i - 1] < 0) continue;
+    uint16_t c = recOn && i >= skStroke ? COL_WHITE : ACC;
+    gfx->drawLine(bx + skX[i - 1], by + skY[i - 1], bx + skX[i], by + skY[i], c);
+    gfx->drawLine(bx + skX[i - 1] + 1, by + skY[i - 1], bx + skX[i] + 1, by + skY[i], c);
+  }
+  int px = bx + (int)skPx, py = by + (int)skPy;                      // the pointer
+  uint16_t pc = recOn ? COL_RED : ((millis() / 400) % 2 ? COL_WHITE : ACC);
+  gfx->drawFastHLine(px - 5, py, 4, pc); gfx->drawFastHLine(px + 2, py, 4, pc); gfx->drawFastVLine(px, py - 5, 4, pc); gfx->drawFastVLine(px, py + 2, 4, pc);
+}
+
+uint16_t mapCol(int k) {
+  static const uint16_t C[5] = {c565(0, 229, 255), c565(255, 96, 96), c565(255, 176, 64), c565(244, 114, 182), c565(110, 120, 135)};
+  return k >= 0 && k < 5 ? C[k] : k >= 10 ? COL_LIME : COL_WHITE;
+}
+void drawMap(int bx, int by, int bw, int bh) {
+  uint32_t now = millis();
+  auto sx = [&](float x) { return bx + 8 + (int)(constrain(x, 0.0f, 1.0f) * (bw - 16)); };
+  auto sy = [&](float y) { return by + bh - 8 - (int)(constrain(y, 0.0f, 1.0f) * (bh - 16)); };
+  for (int i = 0; i < SPL_MAP_N; i++) {               // stars: recorded takes of each spell
+    float x = (SPL_MAP_PTS[i * 3] - SPL_MAP_BOX[0]) / (SPL_MAP_BOX[2] - SPL_MAP_BOX[0]), y = (SPL_MAP_PTS[i * 3 + 1] - SPL_MAP_BOX[1]) / (SPL_MAP_BOX[3] - SPL_MAP_BOX[1]);
+    int k = (int)SPL_MAP_PTS[i * 3 + 2]; uint16_t c = mapCol(k);
+    if ((now / 300 + i * 7) % 11 == 0) sparkle(sx(x), sy(y), 1, c); else gfx->drawPixel(sx(x), sy(y), c);
+  }
+  for (int c = 0; c < SPL_CLASSES; c++) {             // constellations: the class prototypes, named
+    float x, y; mapProject(SPL_PROTO + c * SPL_EMB, x, y);
+    gfx->drawCircle(sx(x), sy(y), 3, mapCol(c));
+    textAt(SPL_NAMES[c], constrain(sx(x) + 6, bx + 2, bx + bw - 6 * (int)strlen(SPL_NAMES[c]) - 2), sy(y) - 3, 1, mapCol(c));
+  }
+  for (int k = 0; k < SPL_CUSTOM; k++) if (splC[k].used) {
+    float x, y; mapProject(splC[k].proto, x, y);
+    gfx->drawCircle(sx(x), sy(y), 3, COL_LIME);
+    textAt(splC[k].name, constrain(sx(x) + 6, bx + 2, bx + bw - 6 * (int)strlen(splC[k].name) - 2), sy(y) - 3, 1, COL_LIME);
+  }
+  for (int i = 0; i < mapStarN; i++) {                // your casts
+    const MapStar &s = mapStars[i]; bool last = i == mapStarN - 1;
+    int x = sx(s.x), y = sy(s.y); uint16_t c = s.kind == 99 ? TTY_DIM : COL_WHITE;
+    if (last) { int r = 3 + (int)((now - s.at) / 120) % 5; gfx->drawCircle(x, y, r, c); sparkle(x, y, 3, c); }
+    else gfx->fillCircle(x, y, 1, mix565(TTY_BG, c, 120 + i * 12));
+  }
+}
+
 
 String splPath(int k) { return String("/spl/") + k + ".bin"; }
 const char *splName(int8_t kind) { return kind >= 10 && kind < 10 + SPL_CUSTOM ? splC[kind - 10].name : kind >= 0 && kind < 4 ? SPL_NAMES[kind] : "fizzle"; }
@@ -3772,6 +3966,7 @@ void splLoad() {
 void splInit() {
   // the network's working memory in the fast internal RAM (about 45 KB), the rest in PSRAM
   auto fast = [](size_t n) { void *p = heap_caps_malloc(n, MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT); return (float *)(p ? p : ps_malloc(n)); };
+  skX = (int16_t *)malloc(SK_MAX * 2); skY = (int16_t *)malloc(SK_MAX * 2);
   splSeg = (float *)ps_malloc(SPL_MAX_ROWS * 6 * 4); splIn = fast(SPL_IN * SPL_T * 4);
   splA = fast(SPL_BUF * 4); splB = fast(SPL_BUF * 4);
   splFeat = fast(SPL_TROWS * 6 * 4); splRows = fast((SPL_TROWS + 2) * 2 * 4);
@@ -3824,6 +4019,7 @@ void castRun() {
   if (teachSlot >= 0) {                                  // one more recording of the spell being taught
     SplCustom &c = splC[teachSlot];
     memcpy(teachEmb[teachN], emb, sizeof(emb));
+    mapAdd(emb, 10 + teachSlot);
     memcpy(c.tpl[teachN], splFeat, fm * 24); c.rows[teachN] = fm;
     teachN++;
     snprintf(b, sizeof(b), "teach=%d,%u,%u", teachSlot, teachN, SPL_TEACH); notifyText(b);
@@ -3871,6 +4067,8 @@ void castRun() {
     int c = 0; for (int i = 1; i < SPL_CLASSES; i++) if (sim[i] > sim[c]) c = i;
     if (c != SPL_NONE && sim[c] >= SPL_BASE_THR) { kind = c; s = sim[c]; } else s = sim[c];
   }
+  castPower = castPowerOf(splSeg, n);
+  mapAdd(emb, kind);
   castKind = kind; castSim = s; castAt = millis(); castMs = castAt - t0; castActed = false;
   castActNow = kind >= 10 ? splC[kind - 10].act : kind < 4 ? splBaseAct[kind] : SA_NONE;
   klog("spl: %s %.2f %lums", splName(kind), s, (unsigned long)castMs);
@@ -3878,15 +4076,22 @@ void castRun() {
   Serial.printf("cast: %s %.3f (%c) in %lu ms, %d rows; top %s %.3f, %s %.3f, %s %.3f; dtw base %.3f\n", splName(kind), s, how, (unsigned long)castMs, n,
                 castTopName[0], castTop[0], castTopName[1], castTop[1], castTopName[2], castTop[2], db);
   sfx(kind == 99 ? 4 : 3);
-  snprintf(b, sizeof(b), "cast=%s,%.3f,%c,%u,%lu,%s,%.3f,%s,%.3f,%s,%.3f", kind == 99 ? "-" : splName(kind), s, how, castActNow, (unsigned long)castMs,
-           castTopName[0], castTop[0], castTopName[1], castTop[1], castTopName[2], castTop[2]);
+  const MapStar &ms = mapStars[mapStarN - 1];
+  snprintf(b, sizeof(b), "cast=%s,%.3f,%c,%u,%lu,%s,%.3f,%s,%.3f,%s,%.3f,%.2f,%.3f,%.3f", kind == 99 ? "-" : splName(kind), s, how, castActNow, (unsigned long)castMs,
+           castTopName[0], castTop[0], castTopName[1], castTop[1], castTopName[2], castTop[2], castPower, ms.x, ms.y);
   if (bleConnected) notifyText(b);
 }
 
 void castPoll() {                                      // the effect plays, then the spell does its thing
+  if (castBonusAt && millis() > castBonusAt) { castBonusAt = 0; mediaCmd(1); }      // an overcharged flick skips twice
   if (mode != M_CAST || castActed || millis() - castAt < 1500) return;
   castActed = true;
-  if (castKind != 99 && castActNow != SA_NONE) splAct(castActNow);
+  if (castKind == 99 || castActNow == SA_NONE) return;
+  bool over = castPower >= 0.8f;                         // overcharged: a little extra
+  if (over && castActNow == SA_THEME) { theme = (theme + 1 + random(0, THEME_COUNT - 1)) % THEME_COUNT; prefs.putUChar("theme", theme); themePreviewUntil = millis() + 2500; toast(THEME_NAMES[theme], 900); return; }
+  splAct(castActNow);
+  if (over && castActNow == SA_NEXT) castBonusAt = millis() + 800;
+  if (over && castActNow == SA_LOVE) { petHeartsUntil = millis() + 3000; petMood = min(100, petMood + 5); }
 }
 
 // ── the effects ──
@@ -3911,29 +4116,32 @@ void castEffect(int x0, int y0, int w, int h, uint32_t t) {
   float u = min(1.0f, t / 900.0f);
   switch (castKind) {
     case 0:                                         // circle: a ring of light opens
-      for (int k = 0; k < 4; k++) gfx->drawCircle(cx, cy, (int)(u * 52) + k, mix565(COL_WHITE, ACC, k * 60));
-      fxSparkles(cx, cy, (int)(u * 52), t, COL_WHITE);
+      for (int k = 0; k < 2 + (int)(castPower * 4); k++) gfx->drawCircle(cx, cy, (int)(u * (34 + 30 * castPower)) + k, mix565(COL_WHITE, ACC, k * 50));
+      fxSparkles(cx, cy, (int)(u * (34 + 30 * castPower)), t, COL_WHITE);
       break;
     case 1: {                                       // zigzag: lightning
       if ((t / 70) % 4 == 0) gfx->fillRect(x0 + 1, y0 + 1, w - 2, h - 2, mix565(TTY_BG, COL_WHITE, 70));
-      int px = cx - 30, py = y0 + 6;
-      for (int i = 1; i <= 6; i++) {
-        int nx = cx + ((i % 2) ? 28 : -24) - i * 2, ny = y0 + 6 + i * (h - 12) / 6;
-        if (i <= (int)(u * 7)) for (int o = -1; o <= 1; o++) gfx->drawLine(px + o, py, nx + o, ny, o ? ACC : COL_WHITE);
-        px = nx; py = ny;
+      int bolts = 1 + (castPower > 0.45f) + (castPower > 0.8f);
+      for (int bo = 0; bo < bolts; bo++) {
+        int ox = (bo - (bolts - 1) / 2.0f) * 62, px = cx - 30 + ox, py = y0 + 6;
+        for (int i = 1; i <= 6; i++) {
+          int nx = cx + ox + ((i % 2) ? 28 : -24) - i * 2, ny = y0 + 6 + i * (h - 12) / 6;
+          if (i <= (int)(u * 7)) for (int o = -1; o <= 1; o++) gfx->drawLine(px + o, py, nx + o, ny, o ? ACC : COL_WHITE);
+          px = nx; py = ny;
+        }
       }
       break;
     }
     case 2:                                         // flick: streaks fly off to the right
-      for (int i = 0; i < 9; i++) {
-        int y = y0 + 14 + i * (h - 28) / 8, x = x0 + (int)((t / 2 + i * 41) % (w + 60)) - 40;
+      for (int i = 0, ns = 5 + (int)(castPower * 8); i < ns; i++) {
+        int y = y0 + 14 + i * (h - 28) / max(1, ns - 1), x = x0 + (int)((t / 2 + i * 41) % (w + 60)) - 40;
         gfx->drawFastHLine(max(x0 + 2, x - 30), y, 30, mix565(ACC, COL_WHITE, i * 25));
         textAt(">", min(x0 + w - 8, x), y - 3, 1, COL_WHITE);
       }
       break;
     case 3: {                                       // heart: a heart beats, little ones rise
       float beat = 1.0f + 0.12f * fabsf(sinf(t / 140.0f));
-      fxHeart(cx, cy + 4, 2.3f * u * beat, COL_PINK);
+      fxHeart(cx, cy + 4, (1.6f + 1.2f * castPower) * u * beat, COL_PINK);
       for (int i = 0; i < 6; i++) { int hx = x0 + 20 + i * 36, hy = y0 + h - 10 - (int)((t / 6 + i * 23) % (h - 20)); textAt("\x03", hx, hy, 1, COL_PINK); }
       break;
     }
@@ -3952,8 +4160,33 @@ void drawCast() {
   uint32_t now = millis();
   gfx->fillScreen(TTY_BG);
   char b[48];
-  textAt("$", 14, 3, 1, ACC); textAt("spell --cast", 26, 3, 1, COL_WHITE);
-  if (teachSlot >= 0) { snprintf(b, sizeof(b), "teach %u/%u", teachN, SPL_TEACH); textAt(b, 226 - (int)strlen(b) * 6, 3, 1, COL_AMBER); }
+  for (int i = 0; i < 4; i++) {                         // the views, like tmux windows: tap one
+    int x = 14 + i * 36; bool on = i == wandView;
+    if (on) gfx->fillRect(x, 1, 34, 11, ACC);
+    textAt(WAND_TABS[i], x + (34 - (int)strlen(WAND_TABS[i]) * 6) / 2, 3, 1, on ? TTY_BG : ACC);
+  }
+  if (teachSlot >= 0) { snprintf(b, sizeof(b), "%u/%u", teachN, SPL_TEACH); textAt(b, 226 - (int)strlen(b) * 6, 3, 1, COL_AMBER); }
+  else textAt("spl", 208, 3, 1, TTY_DIM);
+  if (wandView != 0) {
+    const int bx = 6, by = 18, bw = 228, bh = 200;
+    ttyPane(bx, by, bw, bh, wandView == 1 ? "knob" : wandView == 2 ? "air --draw" : "fingerprints --map", recOn);
+    if (wandView == 1) {
+      drawKnob(bx, by, bw, bh);
+      textAt(recOn ? "twist: clockwise = up" : "hold thumb, twist like a dial", 12, 226, 1, recOn ? ACC : TTY_TEXT);
+      textAt("a quarter turn = 30%", 12, 238, 1, TTY_DIM);
+    } else if (wandView == 2) {
+      drawSketch(bx, by + 2);
+      textAt(recOn ? "drawing... let go to lift the pen" : "hold thumb and draw in the air", 12, 226, 1, recOn ? ACC : TTY_TEXT);
+      textAt("shake to wipe, the website keeps it", 12, 238, 1, TTY_DIM);
+    } else {
+      drawMap(bx, by, bw, bh);
+      if (castKind >= 0 && mapStarN) { snprintf(b, sizeof(b), "> %s %.2f", splName(castKind), castSim); textAt(b, 12, 226, 1, castKind == 99 ? TTY_DIM : COL_WHITE); }
+      else textAt("cast here: your fingerprint lands", 12, 226, 1, TTY_TEXT);
+      textAt("32-d fingerprints, 2-d pca, no actions", 12, 238, 1, TTY_DIM);
+    }
+    textAt("pwr: exit", 12, 250, 1, TTY_DIM);
+    return;
+  }
   const int bx = 6, by = 20, bw = 228, bh = 140;
   bool fresh = castKind >= 0 && now - castAt < 2600;
   ttyPane(bx, by, bw, bh, recOn ? "stroke" : fresh ? "fx" : teachSlot >= 0 ? "teach" : "spellbook", recOn || fresh);
@@ -3995,6 +4228,10 @@ void drawCast() {
     String word = castKind == 99 ? String("fizzle") : castKind < 4 ? String(SPL_WORD[castKind]) + "!" : String(splName(castKind)) + "!";
     word.toUpperCase();
     textAt(word, 12, 206, 2, castKind == 99 ? TTY_DIM : ACC);
+    if (castKind != 99) {                                 // how hard it was cast
+      int pw = 6 + (int)(castPower * 10); for (int i = 0; i < 16; i++) gfx->fillRect(150 + i * 5, 210, 4, 7, i < pw ? (castPower >= 0.8f ? COL_AMBER : ACC) : ACC_LOW);
+      textAt(castPower >= 0.8f ? "overcharged" : "power", 150, 200, 1, castPower >= 0.8f ? COL_AMBER : TTY_DIM);
+    }
     if (castKind != 99) { snprintf(b, sizeof(b), "-> %s  (%lums)", SA_NAMES[castActNow], (unsigned long)castMs); textAt(b, 12, 226, 1, TTY_TEXT); }
     else textAt("no match. draw it bigger?", 12, 226, 1, TTY_DIM);
   } else if (recOn) {
@@ -4207,10 +4444,10 @@ void sendStatus(const char *extra = nullptr) {
   char buf[300];
   unsigned long used = fsOK ? (unsigned long)FFat.usedBytes() : 0;
   unsigned long total = fsOK ? (unsigned long)FFat.totalBytes() : 0;
-  snprintf(buf, sizeof(buf), "b=%d;v=%.2f;c=%d;m=%d;fw=%s;fs=%lu,%lu;lk=%d,%d;imu=%d;toy=%d;th=%d;st=%lu;eye=%d;jb=%d;q=%d;nb=%d%s%s",
+  snprintf(buf, sizeof(buf), "b=%d;v=%.2f;c=%d;m=%d;fw=%s;fs=%lu,%lu;lk=%d,%d;imu=%d;toy=%d;th=%d;st=%lu;eye=%d;jb=%d;q=%d;nb=%d;wv=%d%s%s",
            batPct, batVolts, charging ? 1 : 0, mode, FW_VERSION, used, total,
            bgStyle, faceStyle, imuOK ? 1 : 0, toyKind, theme, (unsigned long)stepsToday,
-           exprAuto ? 255 : exprSet, jbPlaying ? jbSong : -1, jbQLen, npBig ? 1 : 0,
+           exprAuto ? 255 : exprSet, jbPlaying ? jbSong : -1, jbQLen, npBig ? 1 : 0, wandView,
            extra ? ";" : "", extra ? extra : "");
   notifyText(buf);
 }
@@ -4499,6 +4736,8 @@ void handlePacket(const uint8_t *d, uint16_t n) {
       } else if (p[0] == 2) teachSlot = -1;
       else if (p[0] == 3 && len >= 2 && p[1] < SPL_CUSTOM) { splC[p[1]].used = false; if (fsOK) FFat.remove(splPath(p[1])); }
       else if (p[0] == 5) { if (mode != M_CAST) openModule(M_CAST); }
+      else if (p[0] == 6) { skClear(); break; }
+      else if (p[0] == 7 && len >= 2) { if (mode != M_CAST) openModule(M_CAST); wandSet(p[1]); break; }
       splListToApp();
       break;
 
@@ -4729,6 +4968,7 @@ void onTap(bool dbl) {
       marqueeX = SCR_W; typeStart = millis();
       break;
     case M_PHOTO: chromeUntil = millis() + 1500; break;
+    case M_CAST:  if (tch.y0 < 18 && tch.x0 >= 14 && tch.x0 < 158) wandSet((tch.x0 - 14) / 36); break;
     case M_MUSIC:
       if (npBig) { npBig = false; glitchFrames = 2; }
       else if (tch.y0 >= NP_KEY_Y - 4) mediaCmd(tch.x0 < 54 ? 2 : tch.x0 > 186 ? 1 : 0);
@@ -4823,7 +5063,9 @@ void handleTouch() {
       if (sleeping) { touchActivity(); tch.consumed = true; return; }   // first touch only wakes
       if (idleEyesOn) { touchActivity(); tch.consumed = true; return; } // and wakes you out of the idle eyes
       touchActivity();
-      if (mode == M_REC || mode == M_CAST) { tch.consumed = true; recStart(true, 0); return; }     // thumb down: record a take / cast
+      if (mode == M_REC || (mode == M_CAST && y >= 18)) {     // thumb down: record a take / cast / twist / draw
+        tch.consumed = true; recStart(true, 0); if (mode == M_CAST) wandBegin(); return;
+      }
     }
     tch.x = x; tch.y = y;
     lastInteraction = now;
@@ -5118,6 +5360,7 @@ void serialDev() {
     else if (c == 'c' && mode != M_CAST) openModule(M_CAST);
     else if (c == 't' && (mode == M_REC || mode == M_CAST)) recStart(false, 2000);
     else if (c == 'x' && (mode == M_REC || mode == M_CAST)) closeModule();
+    else if (c == 'k' && mode == M_CAST) wandSet(wandView + 1);
   }
 }
 
@@ -5143,6 +5386,7 @@ void loop() {
   if (imuUpdate()) onShake();
   recPoll();
   castPoll();
+  wandPoll();
   serialDev();
   serviceTimers();
   updateBattery();
@@ -5170,7 +5414,7 @@ void loop() {
 
   // tell the web app straight away when the screen changes, so its preview follows the charm
   static uint32_t lastSig = 0;
-  uint32_t sig = mode | (theme << 5) | ((uint32_t)npBig << 8) | ((uint32_t)toyKind << 9) | ((uint32_t)(exprAuto ? 255 : exprSet) << 13) | ((uint32_t)bgStyle << 21) | ((uint32_t)faceStyle << 26);
+  uint32_t sig = mode | (theme << 5) | ((uint32_t)npBig << 8) | ((uint32_t)toyKind << 9) | ((uint32_t)(exprAuto ? 255 : exprSet) << 13) | ((uint32_t)bgStyle << 21) | ((uint32_t)faceStyle << 26) | ((uint32_t)wandView << 28);
   if (bleConnected && (millis() - lastStatus > 15000 || jbDirty || (sig != lastSig && millis() - lastStatus > 120))) { lastStatus = millis(); jbDirty = false; lastSig = sig; sendStatus(); }
 
   if (sleeping) { delay(10); return; }

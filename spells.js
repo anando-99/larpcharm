@@ -353,7 +353,7 @@
   const esc = s => String(s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[c]);
   function renderCasts(){
     const box = $('spCastLog'); if (!book.casts.length) return;
-    box.innerHTML = book.casts.map(k => `<div class="sp-cast"><div class="r"><b class="${k.label ? '' : 'no'}">${k.label ? esc(k.label) + ' · ' + k.sim.toFixed(2) : 'no match'}</b><small>${k.label ? '→ ' + ACTS[k.act] + ' · ' : ''}${k.how === 'd' ? 'taught (dtw)' : 'cnn'} · ${k.ms} ms · ${k.time}</small></div>
+    box.innerHTML = book.casts.map(k => `<div class="sp-cast"><div class="r"><b class="${k.label ? '' : 'no'}">${k.label ? esc(k.label) + ' · ' + k.sim.toFixed(2) : 'no match'}</b><small>${k.label ? '→ ' + ACTS[k.act] + ' · ' : ''}${k.power != null && k.label ? (k.power >= .8 ? 'overcharged' : 'power ' + Math.round(k.power * 100) + '%') + ' · ' : ''}${k.how === 'd' ? 'taught (dtw)' : 'cnn'} · ${k.ms} ms · ${k.time}</small></div>
       <div class="sp-bars">${k.top.map(([n, s]) => `<span>${esc(n)}</span><span>${s.toFixed(2)}</span><i style="width:${Math.max(0, s) * 100}%;opacity:${n === k.label ? 1 : .45}"></i>`).join('')}</div></div>`).join('');
   }
   function renderCard(){
@@ -393,8 +393,9 @@
     }
     if (k === 'cast') {
       const f = v.split(','), top = [];
-      for (let i = 5; i + 1 < f.length; i += 2) if (f[i]) top.push([f[i], +f[i + 1]]);
-      const c = { label: f[0] === '-' ? null : f[0], sim: +f[1], how: f[2], act: +f[3], ms: +f[4], top, time: new Date().toLocaleTimeString(), at: performance.now() };
+      for (let i = 5; i + 1 < 11 && i + 1 < f.length; i += 2) if (f[i]) top.push([f[i], +f[i + 1]]);
+      const c = { label: f[0] === '-' ? null : f[0], sim: +f[1], how: f[2], act: +f[3], ms: +f[4], top: top.slice(0, 3), time: new Date().toLocaleTimeString(), at: performance.now(),
+        power: f.length > 11 ? +f[11] : null, mx: f.length > 13 ? +f[12] : null, my: f.length > 13 ? +f[13] : null };
       book.casts.unshift(c); book.casts.length = Math.min(book.casts.length, 20); book.last = c;
       renderCasts(); return true;
     }
@@ -418,6 +419,87 @@
   window.spellsOnConnect = () => { book.live = false; renderBook(); if ($('spMode').value === 'rec') prevConnect(); };
   renderBook(); renderCard();
   window.spellsCastView = () => ({ last: book.last, base: book.base, custom: book.custom, teach: book.teach, acts: ACTS, book: BOOK });
+  // ───────────── the wand: views on the charm's spell screen, the air sketch, the constellation ─────────────
+  const VIEWS = ['cast', 'knob', 'draw', 'map'];
+  const wand = sp.wand = { view: 0, strokes: [], showTakes: false };
+  window.spellsWandView = v => { wand.view = v; document.querySelectorAll('#spViews button').forEach(b => b.classList.toggle('on', +b.dataset.v === v)); };
+  document.querySelectorAll('#spViews button').forEach(b => b.onclick = () => { spellCmd([7, +b.dataset.v]); setActiveMode(17); window.spellsWandView(+b.dataset.v); });
+
+  // the sketch: strokes of [x, y] in the charm's 228 x 196 canvas
+  const SKW = 228, SKH = 196;
+  function drawSketchTo(cv, bg, lw){
+    const c = cv.getContext('2d'), sx = cv.width / SKW, sy = cv.height / SKH, acc = getComputedStyle(document.documentElement).getPropertyValue('--acc').trim() || '#00e5ff';
+    c.fillStyle = bg; c.fillRect(0, 0, cv.width, cv.height);
+    c.strokeStyle = acc; c.lineWidth = lw; c.lineCap = c.lineJoin = 'round';
+    for (const s of wand.strokes) { if (s.length < 2) continue; c.beginPath(); s.forEach(([x, y], i) => i ? c.lineTo(x * sx, y * sy) : c.moveTo(x * sx, y * sy)); c.stroke(); }
+  }
+  function renderSketch(){
+    drawSketchTo($('spSketch'), '#000', 4);
+    const n = wand.strokes.length; $('spSketchInfo').textContent = n ? `${n} stroke${n === 1 ? '' : 's'}, ${wand.strokes.reduce((a, s) => a + s.length, 0)} points` : 'nothing drawn yet: the charm\'s draw view, hold your thumb and draw in the air';
+  }
+  $('spSketchPng').onclick = () => {
+    if (!wand.strokes.length) return hud('Nothing drawn yet');
+    const cv = document.createElement('canvas'); cv.width = SKW * 4; cv.height = SKH * 4; drawSketchTo(cv, '#05080b', 10);
+    cv.toBlob(b => { const a = document.createElement('a'); a.href = URL.createObjectURL(b); a.download = `air-sketch-${Date.now()}.png`; a.click(); setTimeout(() => URL.revokeObjectURL(a.href), 4000); });
+  };
+  $('spSketchPhoto').onclick = act(async () => {
+    if (!wand.strokes.length) throw new Error('Nothing drawn yet');
+    if (!conn()) throw new Error('Connect the charm first.');
+    const cv = document.createElement('canvas'); cv.width = 240; cv.height = 280; const c = cv.getContext('2d', { willReadFrequently: true });
+    c.fillStyle = '#05080b'; c.fillRect(0, 0, 240, 280);
+    const tmp = document.createElement('canvas'); tmp.width = SKW; tmp.height = SKH; drawSketchTo(tmp, '#05080b', 3); c.drawImage(tmp, 6, 42);
+    await sendBlob(0, toRGB565(c, 240, 280), 0); setActiveMode(2); hud('Your sketch is the charm\'s photo now');
+  });
+  $('spSketchWipe').onclick = () => { wand.strokes = []; renderSketch(); spellCmd([6]); };
+
+  // the constellation: the 32-number fingerprints projected to 2D the same way the charm does it
+  const COLS5 = ['#00e5ff', '#ff6060', '#ffb040', '#f472b6', '#6e7887'];
+  function mapProj(e){
+    const M = window.SPELL_MODEL, mp = M && M.map; if (!mp) return null;
+    if (!mp._mean) { const f = s => { const b = atob(s), u = new Uint8Array(b.length); for (let i = 0; i < b.length; i++) u[i] = b.charCodeAt(i); return new Float32Array(u.buffer); }; mp._mean = f(mp.mean); mp._v = f(mp.v); }
+    let z0 = 0, z1 = 0; for (let k = 0; k < M.emb; k++) { const d = e[k] - mp._mean[k]; z0 += d * mp._v[k]; z1 += d * mp._v[M.emb + k]; }
+    return [(z0 - mp.box[0]) / (mp.box[2] - mp.box[0]), (z1 - mp.box[1]) / (mp.box[3] - mp.box[1])];
+  }
+  function renderMap(){
+    const cv = $('spMap'), r = cv.getBoundingClientRect(), dpr = devicePixelRatio || 1;
+    cv.width = Math.max(300, r.width * dpr | 0); cv.height = Math.round(cv.width * 0.72);
+    const c = cv.getContext('2d'), W = cv.width, H = cv.height, M = window.SPELL_MODEL; c.fillStyle = '#000'; c.fillRect(0, 0, W, H);
+    if (!M || !M.map) return;
+    const X = x => 16 * dpr + Math.max(0, Math.min(1, x)) * (W - 32 * dpr), Y = y => H - 16 * dpr - Math.max(0, Math.min(1, y)) * (H - 32 * dpr);
+    const box = M.map.box, nx = v => (v - box[0]) / (box[2] - box[0]), ny = v => (v - box[1]) / (box[3] - box[1]);
+    c.font = `${11 * dpr}px ` + getComputedStyle(document.body).fontFamily;
+    for (const [x, y, k] of M.map.pts) { c.fillStyle = COLS5[k]; c.globalAlpha = .55; c.beginPath(); c.arc(X(nx(x)), Y(ny(y)), 2.2 * dpr, 0, 7); c.fill(); }
+    c.globalAlpha = 1;
+    if (wand.showTakes) for (const t of sp.takes) { const p = predict(t); if (!p) continue; const q = mapProj(p.emb); if (!q) continue; c.strokeStyle = t.group === 'custom' ? '#39ff14' : COLS5[Math.max(0, M.classes.indexOf(t.label))]; c.lineWidth = dpr; c.beginPath(); c.arc(X(q[0]), Y(q[1]), 3.5 * dpr, 0, 7); c.stroke(); }
+    const P = SpellNet.model().proto;
+    M.classes.forEach((n, k) => { const q = mapProj(P.subarray(k * M.emb, (k + 1) * M.emb)); c.strokeStyle = c.fillStyle = COLS5[k]; c.lineWidth = 1.5 * dpr; c.beginPath(); c.arc(X(q[0]), Y(q[1]), 6 * dpr, 0, 7); c.stroke(); c.fillText(n, X(q[0]) + 9 * dpr, Y(q[1]) + 4 * dpr); });
+    book.casts.slice().reverse().forEach((k, i, all) => {
+      if (k.mx == null) return; const last = i === all.length - 1, x = X(k.mx), y = Y(k.my);
+      c.fillStyle = k.label ? '#fff' : '#6b7785'; c.globalAlpha = last ? 1 : .35 + .5 * i / all.length; c.beginPath(); c.arc(x, y, (last ? 4.5 : 3) * dpr, 0, 7); c.fill();
+      if (last) { c.strokeStyle = '#fff'; c.lineWidth = dpr; c.beginPath(); c.arc(x, y, 9 * dpr, 0, 7); c.stroke(); c.fillText(k.label || 'fizzle', x + 12 * dpr, y - 8 * dpr); }
+    });
+    c.globalAlpha = 1;
+  }
+  $('spMapTakes').onchange = () => { wand.showTakes = $('spMapTakes').checked; renderMap(); };
+
+  const statusWand = s => {
+    if (!s.startsWith('sk=')) return false;
+    const v = s.slice(3);
+    if (v === 'x') wand.strokes = [];
+    else {
+      const b = atob(v.slice(2)), pts = []; for (let i = 0; i + 1 < b.length; i += 2) pts.push([b.charCodeAt(i), b.charCodeAt(i + 1)]);
+      if (v[0] === 's' || !wand.strokes.length) wand.strokes.push(pts); else wand.strokes.at(-1).push(...pts);
+    }
+    renderSketch(); return true;
+  };
+  const prevStatus2 = window.spellsOnStatus;
+  window.spellsOnStatus = s => { if (!statusWand(s)) prevStatus2(s); if (s.startsWith('cast=')) renderMap(); };
+  addEventListener('resize', () => { if ($('spBook').offsetParent) renderMap(); });
+  document.querySelectorAll('.tab[data-tab="spells"]').forEach(t => t.addEventListener('click', () => setTimeout(renderMap, 50)));
+  $('spMode').querySelectorAll('button').forEach(b => b.addEventListener('click', () => setTimeout(renderMap, 50)));
+  renderSketch(); setTimeout(renderMap, 100);
+  window.spellsWandState = () => ({ view: wand.view, strokes: wand.strokes });
+
 
   // for the charm preview
   window.spellsView = () => { const it = item(sp.label); return { label: it ? it.label : '', hint: it ? it.hint : '', take: it ? count(it.label) : 0, goal: it ? it.goal : 0, recording: sp.recording, recAt: sp.recAt, timed: it && it.timed, last: sp.view, stroke: sp.view ? stroke(sp.view) : null }; };

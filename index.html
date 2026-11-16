@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
 <meta charset="utf-8">
-<meta name="build" content="9.2">
+<meta name="build" content="9.3">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <meta name="theme-color" content="#07090c">
 <meta name="description" content="Control panel for the Larp Charm, an ESP32-S3 touchscreen bag charm, over Web Bluetooth. Also links the charm to Claude Code.">
@@ -262,6 +262,9 @@ code{font-size:12px;background:var(--bg);border:1px solid var(--line);padding:1p
 .sp-take span{font-size:12.5px}.sp-take small{color:var(--dim);font-size:11px}
 .sp-take .sp-x{position:absolute;top:2px;right:2px}
 .sp-mode{margin-bottom:16px}
+.sp-wandhelp{margin:0;padding-left:18px;display:grid;gap:4px;font-size:12.5px;color:var(--dim)}.sp-wandhelp b{color:var(--text);font-weight:500}
+#spSketch{width:100%;max-width:456px;aspect-ratio:228/196;height:auto;background:#000;border:1px solid var(--line)}
+#spMap{width:100%;aspect-ratio:1/.72;height:auto;background:#000;border:1px solid var(--line)}
 .sp-book{display:grid;gap:6px}
 .sp-spell{display:grid;grid-template-columns:64px 1fr;gap:10px;align-items:center;border:1px solid var(--line);background:var(--bg);padding:8px}
 .sp-spell canvas{width:64px;height:64px;background:#000}
@@ -543,6 +546,26 @@ $ node larp-bridge/bridge.mjs    # keep it running
           </div>
           <div class="stack">
             <div class="box"><h3>last casts</h3><div id="spCastLog" class="sp-log"><p class="meta">nothing cast yet</p></div></div>
+            <div class="box"><h3>the wand</h3>
+              <p class="meta">the charm's spell screen has four views along its top. tap one there, or here.</p>
+              <div class="seg" id="spViews"><button data-v="0" class="on">cast</button><button data-v="1">knob</button><button data-v="2">draw</button><button data-v="3">map</button></div>
+              <ul class="sp-wandhelp">
+                <li><b>cast</b> spells. cast big and fast to <b>overcharge</b> them: bigger effects, and a bonus (a second skip, a random colour, extra hearts)</li>
+                <li><b>knob</b>: hold your thumb and twist the charm like a dial. spotify volume, or brightness when nothing plays</li>
+                <li><b>draw</b>: the charm is a laser pointer. hold your thumb and draw in the air; let go to lift the pen; shake to wipe</li>
+                <li><b>map</b>: cast and watch your gesture's fingerprint land among the spells. no actions, just looking</li>
+              </ul>
+            </div>
+            <div class="box"><h3>air sketch</h3>
+              <canvas id="spSketch" width="456" height="392" aria-label="what you drew in the air"></canvas>
+              <p class="meta" id="spSketchInfo"></p>
+              <div class="actions"><button class="btn sm" id="spSketchPng">download png</button><button class="btn sm" id="spSketchPhoto">make it the charm's photo</button><button class="btn plain sm" id="spSketchWipe">wipe</button></div>
+            </div>
+            <div class="box"><h3>constellation</h3>
+              <canvas id="spMap" aria-label="the fingerprint space"></canvas>
+              <p class="meta">every gesture becomes 32 numbers; here they are squashed to 2D (PCA). dots are recorded takes, rings the spells, white stars your casts.</p>
+              <label class="switch">show my recorded takes<input type="checkbox" id="spMapTakes"></label>
+            </div>
             <div class="box"><h3>the model</h3><div id="spModelCard" class="sp-card"></div></div>
           </div>
         </div>
@@ -722,11 +745,11 @@ $ node larp-bridge/bridge.mjs    # keep it running
 })();
 </script>
 <!-- bump ?v= and the build meta together on every release, so browsers fetch the new scripts -->
-<script src="songs.js?v=9.2"></script>
-<script src="app.js?v=9.2"></script>
-<script src="spells-model.js?v=9.2"></script>
-<script src="spells-net.js?v=9.2"></script>
-<script src="spells.js?v=9.2"></script>
-<script src="charm.js?v=9.2"></script>
+<script src="songs.js?v=9.3"></script>
+<script src="app.js?v=9.3"></script>
+<script src="spells-model.js?v=9.3"></script>
+<script src="spells-net.js?v=9.3"></script>
+<script src="spells.js?v=9.3"></script>
+<script src="charm.js?v=9.3"></script>
 </body>
 </html>

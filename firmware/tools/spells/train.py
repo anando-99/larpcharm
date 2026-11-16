@@ -60,9 +60,21 @@ for c, name in enumerate(BASE[:-1]):
     for a in np.argsort(tot)[:TPL_PER_SPELL]: tpl.append((c, F[a]))
 n_params = sum(p.numel() for p in Net().parameters())
 
+# the constellation: a 2D map of the fingerprint space (PCA of the training fingerprints), with stars for some takes
+map_mean = E.mean(0).astype(np.float32); _, _, Vt = np.linalg.svd(E - map_mean, full_matrices=False); map_v = Vt[:2].astype(np.float32)
+Z = (E - map_mean) @ map_v.T
+map_pts = []
+for c in range(len(BASE)):
+    idx = np.where(Y == c)[0]
+    for i in idx[np.linspace(0, len(idx) - 1, min(10, len(idx))).astype(int)]: map_pts.append((Z[i, 0], Z[i, 1], c))
+map_lo, map_hi = Z.min(0) - 0.08, Z.max(0) + 0.08
+
 # ── C header ──
-def carr(name, a, ctype='float', fmt='{:.8g}f'):
-    flat = np.asarray(a).ravel(); vals = [fmt.format(v) for v in flat]
+def cfloat(v):
+    t = f'{float(v):.8g}'
+    return (t if ('.' in t or 'e' in t or 'n' in t) else t + '.0') + 'f'
+def carr(name, a, ctype='float', fmt=None):
+    flat = np.asarray(a).ravel(); vals = [cfloat(v) for v in flat] if fmt is None else [fmt.format(v) for v in flat]
     lines = [', '.join(vals[i:i + 10]) for i in range(0, len(vals), 10)]
     return f'static const {ctype} {name}[{len(flat)}] = {{\n  ' + ',\n  '.join(lines) + '\n};\n'
 stamp = datetime.date.today().isoformat()
@@ -83,6 +95,10 @@ h.append(carr('SPL_LIN_W', lw)); h.append(carr('SPL_LIN_B', lb)); h.append(carr(
 off, data = [], []
 for c, f in tpl: off.append((c, len(data) // 6, len(f))); data += list(np.clip(np.round(f.ravel() * TPL_SCALE), -32767, 32767).astype(int))
 h.append(carr('SPL_TPL_DATA', data, 'int16_t', '{:d}'))
+h.append('// the constellation: fingerprint -> 2D (PCA), the box it fits in, and stars (x, y, class) for some training takes')
+h.append(carr('SPL_MAP_MEAN', map_mean)); h.append(carr('SPL_MAP_V', map_v))
+h.append(f'static const float SPL_MAP_BOX[4] = {{{map_lo[0]:.6f}f, {map_lo[1]:.6f}f, {map_hi[0]:.6f}f, {map_hi[1]:.6f}f}};')
+h.append(carr('SPL_MAP_PTS', [v for pt in map_pts for v in pt])); h.append(f'#define SPL_MAP_N {len(map_pts)}')
 h.append('// recording: class, first row, rows (6 channels per row, at 50 Hz)')
 h.append(carr('SPL_TPL_INFO', [v for o in off for v in o], 'uint16_t', '{:d}'))
 open(os.path.join(ROOT, 'firmware', 'LarpCharm', 'spells_model.h'), 'w').write('\n'.join(h))
@@ -93,7 +109,9 @@ js = {'version': stamp, 'params': n_params, 'classes': BASE, 'T': T, 'actDps': A
       'baseThr': BASE_THR, 'teachSpread': TEACH_SPREAD, 'teachMinSim': TEACH_MIN_SIM,
       'layers': [dict(w=b64(L['w']), b=b64(L['b']), i=L['i'], o=L['o'], k=L['k'], s=L['s'], p=L['p']) for L in layers],
       'linW': b64(lw), 'linB': b64(lb), 'emb': int(lw.shape[0]), 'proto': b64(P),
-      'tpl': [dict(c=int(c), d=b64(f)) for c, f in tpl]}
+      'tpl': [dict(c=int(c), d=b64(f)) for c, f in tpl],
+      'map': {'mean': b64(map_mean), 'v': b64(map_v), 'box': [float(map_lo[0]), float(map_lo[1]), float(map_hi[0]), float(map_hi[1])],
+              'pts': [[round(float(x), 4), round(float(y), 4), int(c)] for x, y, c in map_pts]}}
 if len(sys.argv) > 2:
     ev = json.load(open(sys.argv[2])); sw = next(x for x in ev['base']['sweep'] if abs(x['threshold'] - BASE_THR) < 1e-6)
     js['metrics'] = {'takes': ev['takes'], 'spells_right': sw['spells_right'], 'spells_wrong': sw['spells_wrong'], 'none_rejected': sw['none_rejected'],

@@ -10,7 +10,7 @@ Larp Charm runs on a Waveshare ESP32-S3-Touch-LCD-1.69 (240×280 IPS, capacitive
 
 ## Highlights
 
-- **Spells: air-gesture recognition, on the charm.** Draw a circle, zigzag, flick or heart in the air and the charm recognises it, plays an effect and does something (torch, new colour, next song, eyes in love, or whatever you choose in the spellbook). A 1D CNN of 38,848 parameters, trained on accelerometer + gyro takes recorded with the charm itself, runs on the ESP32-S3 in 69 ms and turns a gesture into a 32-number fingerprint. **Teach it your own** gestures by drawing them 5 times: it learns them on the spot, with no retraining, using DTW on your recordings with the network able to veto. Cross-validated: the built-in spells are 100% right with 96.7% of "not a spell" rejected, and new gestures are recognised 91.9% of the time with 0.2% false matches. The C engine and the website's JS port both match PyTorch to about 1e-7. **The full story, with figures: [docs/spells.md](docs/spells.md).**
+- **Spells: air-gesture recognition, on the charm.** Draw a circle, zigzag, flick or heart in the air and the charm recognises it, plays an effect and does something (torch, new colour, next song, eyes in love, or whatever you choose in the spellbook). A 1D CNN of 38,848 parameters, trained on accelerometer + gyro takes recorded with the charm itself, runs on the ESP32-S3 in 69 ms and turns a gesture into a 32-number fingerprint. **Teach it your own** gestures by drawing them 5 times: it learns them on the spot, with no retraining, using DTW on your recordings with the network able to veto. It is also a **wand**: twist it like a knob to set the volume, draw in the air and see the sketch on the screen (and on the website), cast big to overcharge a spell, and watch your gesture's fingerprint land on a live 2D map of the network's fingerprint space. Cross-validated: the built-in spells are 100% right with 96.7% of "not a spell" rejected, and new gestures are recognised 91.9% of the time with 0.2% false matches. The C engine and the website's JS port both match PyTorch to about 1e-7. **The full story, with figures: [docs/spells.md](docs/spells.md).**
 
   <img src="docs/spells/embedding.png" width="440" alt="Every take's fingerprint, projected to 2D: the spells form separate clusters, and a gesture the network never trained on lands in its own place">
 
@@ -114,7 +114,7 @@ arduino-cli compile --upload -p <port> \
   firmware/LarpCharm
 ```
 
-The web app and the firmware are versioned together; this app expects firmware **9.2** (shown on the charm's status screen and in the app once connected).
+The web app and the firmware are versioned together; this app expects firmware **9.3** (shown on the charm's status screen and in the app once connected).
 
 ## Using the charm
 

@@ -1,4 +1,4 @@
-// A working copy of the charm's screen. It draws the same deck and blocks as firmware 9.2,
+// A working copy of the charm's screen. It draws the same deck and blocks as firmware 9.3,
 // follows the controls on this page, and opens a block when you tap it.
 (() => {
   const $ = id => document.getElementById(id);
@@ -152,7 +152,7 @@
   const boot = performance.now();
   const klog = [];
   const charmLog = window.charmLog = msg => { klog.push({ t: performance.now() - boot, s: String(msg).replace(/[^\x20-\x7e]/g, '?').slice(0, 31) }); if (klog.length > 8) klog.shift(); };
-  ['kernel: larp-os 9.2 up', 'imu: qmi8658 online', 'fs: ffat mounted', 'rtc: clock ok'].forEach(charmLog);
+  ['kernel: larp-os 9.3 up', 'imu: qmi8658 online', 'fs: ffat mounted', 'rtc: clock ok'].forEach(charmLog);
   const typing = { cmd: '', at: 0, tile: -1 };
   const scope = new Array(74).fill(0); let scopeHead = 0, lastTilt = 0;
   const bar = (f, n, fill, head, empty) => { const k = Math.round(Math.max(0, Math.min(1, f)) * (n - 2)); let s = '['; for (let i = 0; i < n - 2; i++) s += i < k - 1 ? fill : i === k - 1 ? head : empty; return s + ']'; };
@@ -1087,11 +1087,42 @@
     } else if (!kind) { for (let i = 0; i < 5; i++) G('~', cx - 30 + i * 13 + Math.sin(t / 200 + i) * 4, cy - ((t / 25 | 0) % 40) + (i % 2) * 8, 2, TTY_DIM); G('*poof*', cx - 36, cy + 22, 2, TTY_DIM); }
     else { for (let i = 0; i < 14; i++) { const a = i * .449 + t / 400, r = 40 * (.6 + .5 * ((i * 37) % 10) / 10) + t / 30; R(cx + Math.cos(a) * r, cy + Math.sin(a) * r, 2, 2, ACC); } G(kind.toUpperCase(), cx - kind.length * 6, cy - 8, 2, '#fff'); }
   }
+  const WAND_TABS = ['cast', 'knob', 'draw', 'map'], MAPC = ['#00e5ff', '#ff6060', '#ffb040', '#f472b6', '#6e7887'];
+  function wandPane(cmd) { const LOW = mixk(ACC, .18); c.strokeStyle = LOW; c.strokeRect(6.5, 18.5, 227, 199); R(12, 14, (cmd.length + 4) * 6, 9, TTY_BG); G('$', 15, 15, 1, TTY_DIM); G(cmd, 27, 15, 1, ACC); }
   function castScreen() {
-    const v = window.spellsCastView ? window.spellsCastView() : null, now = performance.now(), LOW = mixk(ACC, .18);
+    const v = window.spellsCastView ? window.spellsCastView() : null, ws = window.spellsWandState ? window.spellsWandState() : { view: 0, strokes: [] }, now = performance.now(), LOW = mixk(ACC, .18);
     R(0, 0, W, H, TTY_BG);
-    G('$', 14, 3, 1, ACC); G('spell --cast', 26, 3, 1, '#fff');
-    if (v && v.teach) { const s = `teach ${v.teach.n}/5`; G(s, 226 - s.length * 6, 3, 1, '#ffb000'); }
+    WAND_TABS.forEach((t, i) => { const x = 14 + i * 36; if (i === ws.view) R(x, 1, 34, 11, ACC); G(t, x + (34 - t.length * 6) / 2, 3, 1, i === ws.view ? TTY_BG : ACC); });
+    if (v && v.teach) { const s = `${v.teach.n}/5`; G(s, 226 - s.length * 6, 3, 1, '#ffb000'); } else G('spl', 208, 3, 1, TTY_DIM);
+    if (ws.view === 1) {
+      wandPane('knob');
+      const vol = ui.np && ui.np.vol >= 0, val = vol ? ui.np.vol : 60, cx = 120, cy = 124, r = 62;
+      for (let i = 0; i <= 40; i++) { const a = (135 + i * 6.75) * Math.PI / 180; c.strokeStyle = i * 2.5 <= val ? ACC : LOW; c.beginPath(); c.moveTo(cx + Math.cos(a) * (r - 8), cy + Math.sin(a) * (r - 8)); c.lineTo(cx + Math.cos(a) * r, cy + Math.sin(a) * r); c.stroke(); }
+      const a = (135 + val * 2.7) * Math.PI / 180; line(cx, cy, cx + Math.cos(a) * (r - 14), cy + Math.sin(a) * (r - 14), '#fff'); circle(cx, cy, 4, ACC, true);
+      G(String(val), cx - String(val).length * 9, cy + 18, 3, '#fff'); G(vol ? 'spotify volume' : 'brightness', vol ? cx - 42 : cx - 30, 26, 1, vol ? ACC : TTY_TEXT);
+      G('hold thumb, twist like a dial', 12, 226, 1, TTY_TEXT); G('a quarter turn = 30%', 12, 238, 1, TTY_DIM); G('pwr: exit', 12, 250, 1, TTY_DIM);
+      return;
+    }
+    if (ws.view === 2) {
+      wandPane('air --draw');
+      c.strokeStyle = ACC; c.lineWidth = 2; c.lineCap = 'round';
+      for (const st of ws.strokes) { if (st.length < 2) continue; c.beginPath(); st.forEach(([x, y], i) => i ? c.lineTo(6 + x, 20 + y) : c.moveTo(6 + x, 20 + y)); c.stroke(); }
+      c.lineWidth = 1;
+      G('hold thumb and draw in the air', 12, 226, 1, TTY_TEXT); G('shake to wipe, the website keeps it', 12, 238, 1, TTY_DIM); G('pwr: exit', 12, 250, 1, TTY_DIM);
+      return;
+    }
+    if (ws.view === 3) {
+      wandPane('fingerprints --map');
+      const M = window.SPELL_MODEL, mp = M && M.map, X = x => 14 + Math.max(0, Math.min(1, x)) * 212, Y = y => 210 - Math.max(0, Math.min(1, y)) * 184;
+      if (mp) {
+        const nx = q => (q - mp.box[0]) / (mp.box[2] - mp.box[0]), ny = q => (q - mp.box[1]) / (mp.box[3] - mp.box[1]);
+        mp.pts.forEach(([x, y, k], i) => R(X(nx(x)), Y(ny(y)), (frame / 18 + i * 7 | 0) % 11 ? 1 : 2, 1, MAPC[k]));
+        const last = v && v.last; (v ? (window.spells.book.casts || []).slice(0, 10) : []).forEach((k, i) => { if (k.mx == null) return; circle(X(k.mx), Y(k.my), i ? 1 : 3 + (frame / 7 | 0) % 5, k.label ? '#fff' : TTY_DIM, !!i); });
+        G(last ? `> ${last.label || 'fizzle'} ${last.sim.toFixed(2)}` : 'cast here: your fingerprint lands', 12, 226, 1, last && last.label ? '#fff' : TTY_TEXT);
+      }
+      G('32-d fingerprints, 2-d pca, no actions', 12, 238, 1, TTY_DIM); G('pwr: exit', 12, 250, 1, TTY_DIM);
+      return;
+    }
     const bx = 6, by = 20, bw = 228, bh = 140, last = v && v.last, fresh = last && now - last.at < 2600;
     const cmd = fresh ? 'fx' : v && v.teach ? 'teach' : 'spellbook';
     c.strokeStyle = fresh ? ACC : LOW; c.strokeRect(bx + .5, by + .5, bw - 1, bh - 1);
@@ -1116,6 +1147,7 @@
       });
       const word = last.label ? (SPL_WORD[last.label] || last.label.toUpperCase()) + '!' : 'FIZZLE';
       G(word, 12, 206, 2, last.label ? ACC : TTY_DIM);
+      if (last.label && last.power != null) { const pw = 6 + (last.power * 10 | 0), over = last.power >= .8; for (let i = 0; i < 16; i++) R(150 + i * 5, 210, 4, 7, i < pw ? (over ? '#ffb000' : ACC) : LOW); G(over ? 'overcharged' : 'power', 150, 200, 1, over ? '#ffb000' : TTY_DIM); }
       G(last.label ? `-> ${v.acts[last.act]}  (${last.ms}ms)` : 'no match. draw it bigger?', 12, 226, 1, last.label ? TTY_TEXT : TTY_DIM);
     } else {
       G('hold thumb, draw a spell,', 12, ry, 1, TTY_TEXT); G('let go', 12, ry + 11, 1, TTY_TEXT);
