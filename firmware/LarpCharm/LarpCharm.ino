@@ -1,5 +1,5 @@
 /*
-  LARP CHARM firmware v8.7
+  LARP CHARM firmware v8.8
   Board : Waveshare ESP32-S3-Touch-LCD-1.69 (240x280 ST7789V2, CST816T touch)
   Control: Bluetooth LE from the Larp Charm web app
 
@@ -76,7 +76,7 @@ struct EyeShape { float w, h, rad, lidT, slope, lidB; };
 #define SVC_UUID    "6e400001-c4a7-4d2e-9b3c-c4a2d7c0ffee"
 #define RX_UUID     "6e400002-c4a7-4d2e-9b3c-c4a2d7c0ffee"
 #define STATUS_UUID "6e400003-c4a7-4d2e-9b3c-c4a2d7c0ffee"
-#define FW_VERSION  "8.7"
+#define FW_VERSION  "8.8"
 #define DEVICE_NAME "Larp Charm"
 
 enum Cmd : uint8_t {
@@ -191,6 +191,9 @@ uint16_t *photoBuf = nullptr;
 bool      photoLoaded = false;
 uint16_t *artBuf = nullptr;      // album cover as decoded (up to full screen)
 uint16_t *artThumb = nullptr;    // the 120x120 cover the player shows
+uint16_t *artSrc = nullptr;      // the cover as decoded, up to 280x280
+#define ART_SRC 280
+bool      npBig = false;          // the cover full screen, with the song and its length along the bottom
 bool      artLoaded = false;
 #define ART_JPG_MAX (96 * 1024)
 uint8_t  *artJpg = nullptr;
@@ -1063,14 +1066,14 @@ void drawSprite(const char *const *spr, int ox, int oy, int scale, uint16_t body
 // ───────────── The deck: a live tmux session ─────────────
 // Every pane is labelled with the command that would print it. Tap a pane and the prompt types
 // "open <pane>" before it zooms in. The bottom pane tails the charm's own event log (klog).
-#define TILE_COUNT 12
-const int16_t TILE_X[TILE_COUNT] = {2, 2, 152, 2, 92, 10, 41, 73, 104, 136, 167, 199};
-const int16_t TILE_Y[TILE_COUNT] = {15, 81, 81, 141, 141, 258, 258, 258, 258, 258, 258, 258};
-const int16_t TILE_W[TILE_COUNT] = {236, 146, 86, 86, 146, 31, 32, 31, 32, 31, 32, 31};
-const int16_t TILE_H[TILE_COUNT] = {62, 56, 56, 54, 54, 22, 22, 22, 22, 22, 22, 22};
-const uint8_t TILE_MODE[TILE_COUNT] = {M_CLOCK, M_MUSIC, M_PET, M_TOY, M_TEXT, M_PHOTO, M_CARD, M_EYES, M_JUKE, M_TERM, M_CLAUDE, M_WEATHER};
-const char *TILE_CMD[TILE_COUNT]   = {"date", "np", "ps pet", "imu --scope", "cat motd", "img", "id", "eye", "jbx", "tty", "cc", "wx"};
-const char *TILE_OPEN[TILE_COUNT]  = {"clock", "spotify", "pet", "rng", "motd", "img", "id", "eyes", "jukebox", "tty", "claude", "weather"};
+#define TILE_COUNT 13
+const int16_t TILE_X[TILE_COUNT] = {2, 2, 152, 2, 92, 10, 37, 65, 92, 120, 147, 175, 202};
+const int16_t TILE_Y[TILE_COUNT] = {15, 81, 81, 141, 141, 258, 258, 258, 258, 258, 258, 258, 258};
+const int16_t TILE_W[TILE_COUNT] = {236, 146, 86, 86, 146, 27, 28, 27, 28, 27, 28, 27, 28};
+const int16_t TILE_H[TILE_COUNT] = {62, 56, 56, 54, 54, 22, 22, 22, 22, 22, 22, 22, 22};
+const uint8_t TILE_MODE[TILE_COUNT] = {M_CLOCK, M_MUSIC, M_PET, M_TOY, M_TEXT, M_MUSIC, M_PHOTO, M_CARD, M_EYES, M_JUKE, M_TERM, M_CLAUDE, M_WEATHER};
+const char *TILE_CMD[TILE_COUNT]   = {"date", "np", "ps pet", "imu --scope", "cat motd", "spt", "img", "id", "eye", "jbx", "tty", "cc", "wx"};
+const char *TILE_OPEN[TILE_COUNT]  = {"clock", "spotify", "pet", "rng", "motd", "spotify", "img", "id", "eyes", "jukebox", "tty", "claude", "weather"};
 #define LOG_X 2
 #define LOG_Y 199
 #define LOG_W 236
@@ -1093,7 +1096,9 @@ int tileAt(int x, int y) {
   return -1;
 }
 
+int8_t openedTile = -1;           // the pane or window last opened, so closing shrinks back into it
 int tileOfMode(uint8_t m) {
+  if (openedTile >= 0 && TILE_MODE[openedTile] == m) return openedTile;
   for (int i = 0; i < TILE_COUNT; i++) if (TILE_MODE[i] == m) return i;
   return -1;
 }
@@ -1138,6 +1143,7 @@ void drawDeck() {
   if (deckPending >= 0 && now - deckCmdAt >= deckCmd.length() * DECK_TYPE_MS + 160) {
     int ti = deckPending;
     deckPending = -1;
+    openedTile = ti;
     klog("sh: open %s", TILE_OPEN[ti]);
     deckCmd = "";
     openModule(TILE_MODE[ti]);
@@ -1451,7 +1457,7 @@ void drawPhoto() {
 
 // Music: a Spotify player in a terminal. The cover sits top left, `ls`-style facts and a `cava` spectrum
 // beside it, the song below, block-character bars for time and volume, and three keys along the bottom.
-// Tap the keys (or the left / middle / right of the screen) = previous / play-pause / next.
+// Tap the keys = previous / play-pause / next. Tap the cover to see it full screen (tap again to come back).
 // Tap the volume row: left half quieter, right half louder. Everything is sent to the phone.
 #define NP_ART 120
 #define NP_AX  9
@@ -1472,22 +1478,34 @@ void mediaCmd(uint8_t kind) {
   notifyText(M[kind % 5]);
 }
 
-// box-averages the middle square of the decoded cover down to the 120x120 thumbnail
-void artMakeThumb(int w, int h) {
-  if (!artThumb || !artBuf) return;
-  w = min(w, (int)SCR_W); h = min(h, (int)SCR_H);
-  int side = min(w, h), ox = (w - side) / 2, oy = (h - side) / 2;
-  if (side < 8) return;
-  for (int ty = 0; ty < NP_ART; ty++) {
-    int y0 = oy + ty * side / NP_ART, y1 = max(y0 + 1, oy + (ty + 1) * side / NP_ART);
-    for (int tx = 0; tx < NP_ART; tx++) {
-      int x0 = ox + tx * side / NP_ART, x1 = max(x0 + 1, ox + (tx + 1) * side / NP_ART);
-      uint32_t r = 0, g = 0, b = 0, n = 0;
-      for (int y = y0; y < y1; y++) for (int x = x0; x < x1; x++) {
-        uint16_t v = artBuf[y * SCR_W + x];
-        r += v >> 11; g += (v >> 5) & 63; b += v & 31; n++;
+// From the decoded cover: a 120x120 thumbnail (box-averaged middle square) and a
+// full-screen view (the cover scaled to fill 240x280, cropped at the sides).
+void artMakeViews(int w, int h) {
+  if (!artSrc) return;
+  w = min(w, ART_SRC); h = min(h, ART_SRC);
+  if (w < 8 || h < 8) return;
+  if (artThumb) {
+    int side = min(w, h), ox = (w - side) / 2, oy = (h - side) / 2;
+    for (int ty = 0; ty < NP_ART; ty++) {
+      int y0 = oy + ty * side / NP_ART, y1 = max(y0 + 1, oy + (ty + 1) * side / NP_ART);
+      for (int tx = 0; tx < NP_ART; tx++) {
+        int x0 = ox + tx * side / NP_ART, x1 = max(x0 + 1, ox + (tx + 1) * side / NP_ART);
+        uint32_t r = 0, g = 0, b = 0, n = 0;
+        for (int y = y0; y < y1; y++) for (int x = x0; x < x1; x++) {
+          uint16_t v = artSrc[y * ART_SRC + x];
+          r += v >> 11; g += (v >> 5) & 63; b += v & 31; n++;
+        }
+        artThumb[ty * NP_ART + tx] = ((r / n) << 11) | ((g / n) << 5) | (b / n);
       }
-      artThumb[ty * NP_ART + tx] = ((r / n) << 11) | ((g / n) << 5) | (b / n);
+    }
+  }
+  if (artBuf) {
+    // source pixels per screen pixel, in 1/1024ths: the smaller of w/240 and h/280 so the cover fills
+    int k = min(w * 1024 / SCR_W, h * 1024 / SCR_H);
+    int ox = (w * 1024 - SCR_W * k) / 2048, oy = (h * 1024 - SCR_H * k) / 2048;
+    for (int y = 0; y < SCR_H; y++) {
+      int sy = min(h - 1, oy + (y * k + k / 2) / 1024);
+      for (int x = 0; x < SCR_W; x++) artBuf[y * SCR_W + x] = artSrc[sy * ART_SRC + min(w - 1, ox + (x * k + k / 2) / 1024)];
     }
   }
 }
@@ -1523,7 +1541,71 @@ static void npKey(int x, int w, uint8_t kind, bool lit) {
   }
 }
 
+// The cover full screen with the song, its length and a little equaliser along the bottom (the 8.6 look).
+void drawMusicBig() {
+  if (artLoaded && artBuf && FB) memcpy(FB, artBuf, FB_BYTES);
+  else {
+    gfx->fillScreen(COL_VOID);
+    float beat = npPlaying ? (sinf(frameNo * 0.35f) * 0.5f + 0.5f) : 0.2f;
+    for (int i = 0; i < 6; i++) gfx->drawCircle(120, 108, 20 + i * 14 + (int)(beat * 6), mix565(ACC, COL_BLACK, 50 + i * 32));
+    float a = frameNo * (npPlaying ? 0.08f : 0.0f);
+    gfx->drawLine(120, 108, 120 + (int)(cosf(a) * 96), 108 + (int)(sinf(a) * 96), ACC);
+    gfx->fillRect(116, 104, 9, 9, ACC);
+  }
+  shadeRows(140, SCR_H, 256, 22);
+  topBar(npPlaying ? "//AUDIO" : "//PAUSED", true);
+
+  String title  = asciiOnly(npTitle.length() ? npTitle : String("NO SIGNAL"));
+  String artist = asciiOnly(npArtist.length() || npTitle.length() ? npArtist : String("play something on your phone"));
+  int tw = title.length() * 12;
+  gfx->setTextWrap(false);
+  gfx->setTextSize(2);
+  gfx->setTextColor(COL_WHITE);
+  if (tw <= 212) { gfx->setCursor(14, 190); gfx->print(title); npTitleX = 0; }
+  else {
+    gfx->setCursor(14 - npTitleX, 190); gfx->print(title);
+    gfx->setCursor(14 - npTitleX + tw + 60, 190); gfx->print(title);
+    npTitleX = (npTitleX + 2) % (tw + 60);
+  }
+  gfx->setTextWrap(true);
+  if (artist.length() > 35) artist = artist.substring(0, 34) + ".";
+  textAt(artist, 14, 212, 1, ACC);
+
+  uint32_t pos = npPosition();
+  char buf[16];
+  gfx->fillRect(14, 228, 212, 2, c565(70, 70, 80));
+  if (npDurMs) {
+    int w = max(2, (int)(212.0f * pos / npDurMs));
+    gfx->fillRect(14, 227, w, 4, ACC);
+    gfx->fillRect(12 + w, 224, 3, 10, COL_WHITE);
+    fmtMs(buf, sizeof(buf), npDurMs);
+    textAt(buf, 226 - (int)strlen(buf) * 6, 240, 1, COL_WHITE);
+  }
+  fmtMs(buf, sizeof(buf), pos);
+  textAt(buf, 14, 240, 1, COL_WHITE);
+  for (int i = 0; i < 20; i++) {
+    float v = npPlaying ? fabsf(sinf(frameNo * 0.3f + i * 0.9f) * sinf(i * 1.7f + frameNo * 0.11f)) : 0.05f;
+    int h = 2 + (int)(v * 16);
+    gfx->fillRect(60 + i * 6, 258 - h, 4, h, mix565(ACC, COL_WHITE, i * 6));
+  }
+
+  if (millis() < mediaFlashUntil && mediaFlashKind < 3) {       // swipes skip here too
+    const int cx = 120, cy = 104;
+    dimRect(84, 68, 72, 72, 2);
+    brackets(84, 68, 72, 72, 10, ACC);
+    int d = mediaFlashKind == 1 ? 1 : -1;
+    if (mediaFlashKind == 0) {
+      if (npPlaying) gfx->fillTriangle(cx - 12, cy - 18, cx - 12, cy + 18, cx + 18, cy, COL_WHITE);
+      else { gfx->fillRect(cx - 14, cy - 18, 10, 36, COL_WHITE); gfx->fillRect(cx + 4, cy - 18, 10, 36, COL_WHITE); }
+    } else {
+      gfx->fillTriangle(cx - 16 * d, cy - 16, cx - 16 * d, cy + 16, cx + 2 * d, cy, COL_WHITE);
+      gfx->fillTriangle(cx - 2 * d, cy - 16, cx - 2 * d, cy + 16, cx + 16 * d, cy, COL_WHITE);
+    }
+  }
+}
+
 void drawMusic() {
+  if (npBig) { drawMusicBig(); return; }
   gfx->fillScreen(TTY_BG);
   char buf[24];
   bool have = npTitle.length() > 0;
@@ -3633,6 +3715,7 @@ void setMode(int m, bool announce) {
   if (mode == M_TORCH && old != M_TORCH) { analogWrite(LCD_BL, 255); chromeUntil = millis() + 2500; }
   if (mode == M_EYES && old != M_EYES) { chromeUntil = millis() + 1500; tiltBaseX = tiltX; tiltBaseY = tiltY; nextIdleExpr = millis() + 4000; exprShown = 255; }
   if (mode == M_PHOTO) chromeUntil = millis() + 1500;
+  if (mode == M_MUSIC && old != M_MUSIC) npBig = false;
   if (mode != M_CLAUDE) { ccBig = false; ccBigT = 0; }
   if (mode == M_TEXT) typeStart = millis();
   glitchFrames = 3;
@@ -3720,14 +3803,14 @@ void xferFlush() {
   if ((xferKind == 2 || xferKind == 4) && xferFile && xferBufLen) { xferFile.write(xferBuf, xferBufLen); xferBufLen = 0; }
 }
 
-// decodes the album-cover JPEG straight into its own full-screen buffer
+// decodes the album-cover JPEG into its own buffer (up to 280x280)
 int jpegToArt(JPEGDRAW *p) {
-  if (p->x < 0 || p->x >= SCR_W) return 1;
-  int w = min((int)p->iWidth, SCR_W - (int)p->x);
+  if (p->x < 0 || p->x >= ART_SRC) return 1;
+  int w = min((int)p->iWidth, ART_SRC - (int)p->x);
   for (int row = 0; row < p->iHeight; row++) {
     int y = p->y + row;
-    if (y < 0 || y >= SCR_H) continue;
-    memcpy(artBuf + y * SCR_W + p->x, p->pPixels + row * p->iWidth, w * 2);
+    if (y < 0 || y >= ART_SRC) continue;
+    memcpy(artSrc + y * ART_SRC + p->x, p->pPixels + row * p->iWidth, w * 2);
   }
   return 1;
 }
@@ -3745,7 +3828,7 @@ void xferBegin(const uint8_t *p, uint16_t len) {
   bool ok = false;
   const char *why = "bad";
   if (xferKind == 0)      { ok = photoBuf && xferSize == FB_BYTES; if (ok) photoLoaded = false; }
-  else if (xferKind == 3) { ok = artBuf && artJpg && xferSize > 100 && xferSize <= ART_JPG_MAX; }
+  else if (xferKind == 3) { ok = artSrc && artJpg && xferSize > 100 && xferSize <= ART_JPG_MAX; }
   else if (xferKind == 4) {                        // a song: written to /s/<slot>.sng
     int slot = -1;
     for (int i = 0; i < MY_SONGS; i++) if (!mySongHas[i]) { slot = i; break; }
@@ -3793,7 +3876,7 @@ void xferEnd() {
       int aw = jpeg.getWidth(), ah = jpeg.getHeight();
       ok = jpeg.decode(0, 0, 0);
       jpeg.close();
-      if (ok) artMakeThumb(aw, ah);
+      if (ok) artMakeViews(aw, ah);
     }
     artLoaded = ok;
     if (!ok) { sendStatus("xfer=err;why=format"); return; }
@@ -4189,9 +4272,10 @@ void onTap(bool dbl) {
       break;
     case M_PHOTO: chromeUntil = millis() + 1500; break;
     case M_MUSIC:
-      if (tch.y0 >= NP_KEY_Y - 4) mediaCmd(tch.x0 < 54 ? 2 : tch.x0 > 186 ? 1 : 0);
+      if (npBig) { npBig = false; glitchFrames = 2; }
+      else if (tch.y0 >= NP_KEY_Y - 4) mediaCmd(tch.x0 < 54 ? 2 : tch.x0 > 186 ? 1 : 0);
       else if (tch.y0 >= NP_VOL_Y - 8) mediaCmd(tch.x0 < 120 ? 4 : 3);
-      else mediaCmd(tch.x0 < 80 ? 2 : tch.x0 > 160 ? 1 : 0);
+      else if (tch.x0 < NP_AX + NP_ART + 6 && tch.y0 >= NP_AY - 6 && tch.y0 < NP_AY + NP_ART + 6) { npBig = true; glitchFrames = 2; }
       break;
     case M_PET:
       petMood = min(100, petMood + (dbl ? 25 : 3));
@@ -4492,6 +4576,7 @@ void setup() {
   photoBuf = (uint16_t *)ps_malloc(FB_BYTES);
   artBuf   = (uint16_t *)ps_malloc(FB_BYTES);
   artThumb = (uint16_t *)ps_malloc(NP_ART * NP_ART * 2);
+  artSrc   = (uint16_t *)ps_malloc(ART_SRC * ART_SRC * 2);
   artJpg   = (uint8_t *)ps_malloc(ART_JPG_MAX);
   prevFb   = (uint16_t *)ps_malloc(FB_BYTES);
   jbNotesBuf = (uint8_t *)ps_malloc(MY_SONG_MAX * 2);

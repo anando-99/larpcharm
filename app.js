@@ -288,7 +288,7 @@ function vibeColor(ctx, w, h){
   return c.map(v => Math.round(Math.min(255, v * (220 / mx))));
 }
 const actx = $('artCv').getContext('2d', { willReadFrequently: true });
-const AW = 240;      // the cover goes over square; the charm shrinks it to 120×120 for its player
+const AW = 280;      // the cover goes over square: the charm shrinks it to 120×120 for its player and crops it to 240×280 full screen
 let manualArt = null;
 async function artJpeg(){ return new Uint8Array(await (await jpegBlob($('artCv'), 0.82)).arrayBuffer()); }
 const toHex = rgb => '#' + rgb.map(v => v.toString(16).padStart(2, '0')).join('');

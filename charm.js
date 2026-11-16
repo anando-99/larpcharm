@@ -1,4 +1,4 @@
-// A working copy of the charm's screen. It draws the same deck and blocks as firmware 8.7,
+// A working copy of the charm's screen. It draws the same deck and blocks as firmware 8.8,
 // follows the controls on this page, and opens a block when you tap it.
 (() => {
   const $ = id => document.getElementById(id);
@@ -133,10 +133,12 @@
     const a = glyphs(col, size); s = String(s);
     for (let i = 0; i < s.length; i++) { const ch = s.charCodeAt(i) & 255; c.drawImage(a, ch * 6 * size, 0, 6 * size, 8 * size, x + i * 6 * size, y, 6 * size, 8 * size); }
   }
-  const TX = [2, 2, 152, 2, 92, 10, 41, 73, 104, 136, 167, 199], TY = [15, 81, 81, 141, 141, 258, 258, 258, 258, 258, 258, 258], TW = [236, 146, 86, 86, 146, 31, 32, 31, 32, 31, 32, 31], TH = [62, 56, 56, 54, 54, 22, 22, 22, 22, 22, 22, 22];
-  const TMODE = [0, 4, 5, 6, 1, 2, 7, 9, 10, 13, 14, 15];
-  const TCMD = ['date', 'np', 'ps pet', 'imu --scope', 'cat motd', 'img', 'id', 'eye', 'jbx', 'tty', 'cc', 'wx'];
-  const TOPEN = ['clock', 'spotify', 'pet', 'rng', 'motd', 'img', 'id', 'eyes', 'jukebox', 'tty', 'claude', 'weather'];
+  const TX = [2, 2, 152, 2, 92, 10, 37, 65, 92, 120, 147, 175, 202], TY = [15, 81, 81, 141, 141, 258, 258, 258, 258, 258, 258, 258, 258], TW = [236, 146, 86, 86, 146, 27, 28, 27, 28, 27, 28, 27, 28], TH = [62, 56, 56, 54, 54, 22, 22, 22, 22, 22, 22, 22, 22];
+  const TMODE = [0, 4, 5, 6, 1, 4, 2, 7, 9, 10, 13, 14, 15];
+  const TCMD = ['date', 'np', 'ps pet', 'imu --scope', 'cat motd', 'spt', 'img', 'id', 'eye', 'jbx', 'tty', 'cc', 'wx'];
+  const TOPEN = ['clock', 'spotify', 'pet', 'rng', 'motd', 'spotify', 'img', 'id', 'eyes', 'jukebox', 'tty', 'claude', 'weather'];
+  let openedTile = -1;      // the pane or window last opened, so closing shrinks back into it
+  const tileOf = m => openedTile >= 0 && TMODE[openedTile] === m ? openedTile : TMODE.indexOf(m);
   const DAYS = ['SUN', 'MON', 'TUE', 'WED', 'THU', 'FRI', 'SAT'], MON = ['JAN', 'FEB', 'MAR', 'APR', 'MAY', 'JUN', 'JUL', 'AUG', 'SEP', 'OCT', 'NOV', 'DEC'];
   const SPR = [
     ['K..........K', 'KK........KK', 'KBK......KBK', 'KBBKKKKKKBBK', 'KBBBBBBBBBBK', 'KBBKBBBBKBBK', 'KBBKBBBBKBBK', 'KBPBBKKBBPBK', 'KBBBBBBBBBBK', '.KBBBBBBBBK.', '..KBBBBBBK..', '...KKKKKK...'],
@@ -150,7 +152,7 @@
   const boot = performance.now();
   const klog = [];
   const charmLog = window.charmLog = msg => { klog.push({ t: performance.now() - boot, s: String(msg).replace(/[^\x20-\x7e]/g, '?').slice(0, 31) }); if (klog.length > 8) klog.shift(); };
-  ['kernel: larp-os 8.7 up', 'imu: qmi8658 online', 'fs: ffat mounted', 'rtc: clock ok'].forEach(charmLog);
+  ['kernel: larp-os 8.8 up', 'imu: qmi8658 online', 'fs: ffat mounted', 'rtc: clock ok'].forEach(charmLog);
   const typing = { cmd: '', at: 0, tile: -1 };
   const scope = new Array(74).fill(0); let scopeHead = 0, lastTilt = 0;
   const bar = (f, n, fill, head, empty) => { const k = Math.round(Math.max(0, Math.min(1, f)) * (n - 2)); let s = '['; for (let i = 0; i < n - 2; i++) s += i < k - 1 ? fill : i === k - 1 ? head : empty; return s + ']'; };
@@ -164,7 +166,7 @@
   function deckRun(i) { if (i < 0 || typing.tile >= 0) return; typing.cmd = 'open ' + TOPEN[i]; typing.at = performance.now(); typing.tile = i; }
   function deck() {
     const now = performance.now(), up = now - boot, d = new Date(), on = document.body.classList.contains('connected');
-    if (typing.tile >= 0 && now - typing.at >= typing.cmd.length * 18 + 160) { const i = typing.tile; typing.tile = -1; typing.cmd = ''; charmLog('sh: open ' + TOPEN[i]); window.charmGoto(TMODE[i]); }
+    if (typing.tile >= 0 && now - typing.at >= typing.cmd.length * 18 + 160) { const i = typing.tile; openedTile = i; typing.tile = -1; typing.cmd = ''; charmLog('sh: open ' + TOPEN[i]); window.charmGoto(TMODE[i]); }
     const act = typing.tile, LOW = mixk(ACC, .2);
     R(0, 0, W, H, TTY_BG);
     // prompt
@@ -310,7 +312,31 @@
       R(d > 0 ? cx + 7 : cx - 9, cy - 6, 2, 13, fg);
     }
   }
+  // the cover full screen with the song and its length along the bottom (the 8.6 look); tap to go back
+  function musicBig() {
+    const s = song(), np = ui.np || {}, now = performance.now();
+    if (ui.artReady) { const a = $('artCv'), k = Math.min(a.width / W, a.height / H); c.drawImage(a, (a.width - W * k) / 2, (a.height - H * k) / 2, W * k, H * k, 0, 0, W, H); }
+    else { R(0, 0, W, H, VOID); const beat = ui.playing ? Math.sin(frame * 0.35) * 3 + 3 : 1; for (let i = 0; i < 6; i++) circle(120, 108, 20 + i * 14 + beat, mixk(ACC, .8 - i * .12)); const a = frame * (ui.playing ? 0.08 : 0); line(120, 108, 120 + Math.cos(a) * 96, 108 + Math.sin(a) * 96, ACC); R(116, 104, 9, 9, ACC); }
+    const g = c.createLinearGradient(0, 140, 0, H); g.addColorStop(0, 'rgba(0,0,0,0)'); g.addColorStop(1, 'rgba(0,0,0,.92)'); c.fillStyle = g; c.fillRect(0, 140, W, 140);
+    topBar(ui.playing ? '//AUDIO' : '//PAUSED', true);
+    const title = s.title || 'NO SIGNAL', tw = title.length * 12;
+    c.save(); c.beginPath(); c.rect(0, 180, W, 30); c.clip();
+    if (tw <= 212) T(title, 14, 190, 2, '#fff'); else { const o = (frame * 2) % (tw + 60); T(title, 14 - o, 190, 2, '#fff'); T(title, 14 - o + tw + 60, 190, 2, '#fff'); }
+    c.restore();
+    T((s.artist || (s.title ? '' : 'play something on your phone')).slice(0, 35), 14, 212, 1, ACC);
+    const { pos, dur } = npTime(s, np, now), w = Math.max(2, dur ? 212 * pos / dur | 0 : 0);
+    R(14, 228, 212, 2, '#46465a'); if (dur) { R(14, 227, w, 4, ACC); R(12 + w, 224, 3, 10, '#fff'); const d = fmtMs(dur); T(d, 226 - d.length * 6, 240, 1, '#fff'); }
+    T(fmtMs(pos), 14, 240, 1, '#fff');
+    for (let i = 0; i < 20; i++) { const h = 2 + (eq(i) * 16 | 0); R(60 + i * 6, 258 - h, 4, h, mixw(ACC, i * 6 / 255)); }
+  }
+  function npTime(s, np, now) {
+    if (np.dur && np.at) return { dur: np.dur, pos: Math.min(np.dur, np.pos + (ui.playing ? now - np.at : 0)) };
+    const [m, sec] = (val('mLen') || '3:30').split(':').map(Number), dur = s.title ? ((m || 0) * 60 + (sec || 0)) * 1000 : 0;
+    return { dur, pos: dur ? (frame * 1000 / 60) % dur : 0 };
+  }
+  let npBig = false;
   function music() {
+    if (npBig) return musicBig();
     const s = song(), np = ui.np || {}, have = !!s.title, LOW = mixk(ACC, .18), DIMC = mixk(ACC, .45), now = performance.now();
     R(0, 0, W, H, TTY_BG);
     G('\x04', 12, 5, 2, ACC); G('SPOTIFY', 28, 5, 2, ACC);
@@ -320,7 +346,7 @@
     for (let x = 8; x < 232; x += 3) R(x, 24, 1, 1, DIMC);
     // the cover
     c.strokeStyle = ACC; c.lineWidth = 1; c.strokeRect(8.5, 30.5, 121, 121);
-    if (ui.artReady) c.drawImage($('artCv'), 9, 31, 120, 120);
+    if (ui.artReady) c.drawImage($('artCv'), 9, 31, 120, 120);   // the square cover, shrunk
     else {
       const cx = 69, cy = 91;
       for (let i = 0; i < 5; i++) circle(cx, cy, 14 + i * 10, i === 4 ? DIMC : LOW);
@@ -343,9 +369,7 @@
     let artist = have ? s.artist : 'play on spotify'; if (artist.length > 18) artist = artist.slice(0, 16) + '..';
     G(marquee(have ? s.title : 'NO SIGNAL', 18, 6), 12, 160, 2, '#fff'); G(artist, 12, 180, 2, ACC);
     // time
-    let dur = np.dur, pos;
-    if (dur && np.at) pos = Math.min(dur, np.pos + (ui.playing ? now - np.at : 0));
-    else { const [m, sec] = (val('mLen') || '3:30').split(':').map(Number); dur = have ? ((m || 0) * 60 + (sec || 0)) * 1000 : 0; pos = dur ? (frame * 1000 / 60) % dur : 0; }
+    const { pos, dur } = npTime(s, np, now);
     cellBar(12, 202, 36, dur ? pos / dur : 0, ACC, LOW, '#fff');
     G(fmtMs(pos), 12, 213, 1, '#fff');
     if (dur) { const d = fmtMs(dur), left = '-' + fmtMs(dur - pos); G(d, 228 - d.length * 6, 213, 1, TTY_TEXT); G(left, 120 - left.length * 3, 213, 1, TTY_DIM); }
@@ -358,6 +382,8 @@
     npKey(12, 40, 'prev', false); npKey(58, 124, 'toggle', ui.playing); npKey(188, 40, 'next', false);
   }
   window.npPreviewTap = (x, y) => {
+    if (npBig) { npBig = false; glitch = Math.max(glitch, 2); return true; }
+    if (x < 135 && y >= 25 && y < 157) { npBig = true; glitch = Math.max(glitch, 2); return true; }
     if (y < NP_VOL_Y - 8) return false;
     const k = y >= NP_KEY_Y - 4 ? (x < 54 ? 'prev' : x > 186 ? 'next' : 'toggle') : (x < 120 ? 'voldown' : 'volup');
     npFlash = { k, at: performance.now() };
@@ -1094,8 +1120,9 @@
     ACC = ui.playing && s.title && mx >= 40 ? `rgb(${r * 255 / mx | 0},${g * 255 / mx | 0},${b * 255 / mx | 0})` : THEMES[ui.theme] || THEMES[0];
     if (ACC[0] !== '#') ACC = '#' + ACC.match(/\d+/g).map(v => (+v).toString(16).padStart(2, '0')).join('');
 
+    if (shownMode !== 4) npBig = false;
     if (ui.mode !== shownMode && !zoom) {
-      const opening = shownMode === 8, ti = TMODE.indexOf(opening ? ui.mode : shownMode);
+      const opening = shownMode === 8, ti = tileOf(opening ? ui.mode : shownMode);
       if (ti >= 0 && (opening || ui.mode === 8) && !calm) zoom = { ti, s: 0, opening, to: ui.mode }; else { shownMode = ui.mode; glitch = Math.max(glitch, 3); }
     }
     c.save(); c.globalAlpha = 1;
