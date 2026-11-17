@@ -1,0 +1,89 @@
+name: ci
+
+# Every push: build the firmware, check the charm's and the website's spell engines against PyTorch,
+# run the training notebook end to end, and check the website.
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  firmware:
+    name: firmware builds
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: arduino/setup-arduino-cli@v2
+      - uses: actions/cache@v4
+        with:
+          path: ~/.arduino15
+          key: arduino-esp32-3.3.12-gfx-1.6.9-nimble-2.5.2-jpegdec-1.8.5
+      - name: board package and libraries (the versions the charm is built with)
+        run: |
+          arduino-cli config init --overwrite --additional-urls https://espressif.github.io/arduino-esp32/package_esp32_index.json
+          arduino-cli core update-index
+          arduino-cli core install esp32:esp32@3.3.12
+          arduino-cli lib install "GFX Library for Arduino@1.6.9" "NimBLE-Arduino@2.5.2" "JPEGDEC@1.8.5"
+      - name: compile
+        run: |
+          arduino-cli compile --fqbn "esp32:esp32:esp32s3:CDCOnBoot=cdc,FlashSize=16M,PSRAM=opi,PartitionScheme=app3M_fat9M_16MB" \
+            --build-path build firmware/LarpCharm 2>&1 | tee build.log
+          grep "Sketch uses" build.log >> "$GITHUB_STEP_SUMMARY"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: firmware
+          path: |
+            build/LarpCharm.ino.bin
+            build/LarpCharm.ino.bootloader.bin
+            build/LarpCharm.ino.partitions.bin
+
+  engines:
+    name: spell engines match PyTorch
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - name: the charm's C engine (spells_engine.h) on the test takes
+        working-directory: firmware/tools/spells
+        run: c++ -O2 -std=c++17 -o test_engine test_engine.cpp && ./test_engine
+      - name: the website's JS engine (spells-net.js) on the same takes
+        run: node firmware/tools/spells/test_net.js
+
+  notebook:
+    name: training notebook runs
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: firmware/tools/spells/requirements.txt
+      - name: dependencies
+        run: |
+          pip install torch --index-url https://download.pytorch.org/whl/cpu
+          pip install -r firmware/tools/spells/requirements.txt
+      - name: run train_spells.ipynb top to bottom on dataset/
+        working-directory: firmware/tools/spells
+        run: |
+          python - <<'PY'
+          import nbformat
+          from nbclient import NotebookClient
+          nb = nbformat.read('train_spells.ipynb', as_version=4)
+          NotebookClient(nb, timeout=1800, kernel_name='python3', resources={'metadata': {'path': '.'}}).execute()
+          print('notebook ran:', sum(c.cell_type == 'code' for c in nb.cells), 'code cells')
+          PY
+
+  website:
+    name: website checks
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - run: node .github/scripts/check_site.mjs
+      - name: larp-bridge parses
+        run: for f in larp-bridge/*.mjs; do node --check "$f"; done
