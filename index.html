@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
 <meta charset="utf-8">
-<meta name="build" content="9.4">
+<meta name="build" content="9.5">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <meta name="theme-color" content="#07090c">
 <meta name="description" content="Control panel for the Larp Charm, an ESP32-S3 touchscreen bag charm, over Web Bluetooth. Also links the charm to Claude Code.">
@@ -262,6 +262,12 @@ code{font-size:12px;background:var(--bg);border:1px solid var(--line);padding:1p
 .sp-take span{font-size:12.5px}.sp-take small{color:var(--dim);font-size:11px}
 .sp-take .sp-x{position:absolute;top:2px;right:2px}
 .sp-mode{margin-bottom:16px}
+dialog.pair{border:1px solid var(--acc);background:var(--pane);color:var(--text);padding:18px 20px;max-width:360px;width:calc(100% - 32px)}
+dialog.pair::backdrop{background:rgba(0,0,0,.7)}
+dialog.pair .pt{color:var(--acc);margin:0 0 10px}
+dialog.pair p{margin:0 0 12px}
+dialog.pair input{font:700 28px var(--mono);letter-spacing:.25em;text-align:center;width:100%;padding:8px;margin-bottom:8px;background:#000;border:1px solid var(--line2);color:#fff}
+esp-web-install-button{display:inline-flex}
 .sp-wandhelp{margin:0;padding-left:18px;display:grid;gap:4px;font-size:12.5px;color:var(--dim)}.sp-wandhelp b{color:var(--text);font-weight:500}
 #spSketch{width:100%;max-width:456px;aspect-ratio:228/196;height:auto;background:#000;border:1px solid var(--line)}
 #spMap{width:100%;aspect-ratio:1/.72;height:auto;background:#000;border:1px solid var(--line)}
@@ -691,6 +697,21 @@ $ node larp-bridge/bridge.mjs    # keep it running
       </div>
       <div class="actions"><button class="btn plain" id="syncTime">sync time</button><button class="btn plain" id="findMe">find (beep)</button></div>
       <div class="box">
+        <h3>security</h3>
+        <p class="meta">the charm only takes orders from browsers you have paired. the first time a browser connects, the charm shows a 6-digit code to type in; after that the browser proves itself with a key only it and the charm know (an HMAC-SHA256 challenge, never replayable). up to 4 browsers.</p>
+        <div class="actions"><button class="btn plain" id="forgetOthers">forget other browsers</button><button class="btn plain" id="unpairHere">unpair this browser</button></div>
+      </div>
+      <div class="box">
+        <h3>firmware</h3>
+        <p class="meta" id="fwInfo">connect to see what the charm runs</p>
+        <div class="actions">
+          <button class="btn" id="otaBtn">update over bluetooth</button>
+          <esp-web-install-button manifest="flash/manifest.json"><button slot="activate" class="btn plain">install over usb</button><span slot="unsupported" class="meta">install over usb needs Chrome or Edge on a computer</span></esp-web-install-button>
+        </div>
+        <div class="progress" id="otaProg"><div class="bar-track"><i></i></div><p></p></div>
+        <p class="meta">over bluetooth: from a paired browser, keeping your photos, songs and taught spells; the new firmware is checked (SHA-256) before the charm switches to it. over usb: plug the charm into a computer, for a new charm or if something went wrong.</p>
+      </div>
+      <div class="box">
         <h3>motion axes</h3>
         <p class="err hidden" id="imuNote">! motion sensor not responding</p>
         <div class="toggles">
@@ -702,6 +723,15 @@ $ node larp-bridge/bridge.mjs    # keep it running
     </section>
   </div>
 </main>
+<dialog id="pairDlg" class="pair">
+  <form id="pairForm" method="dialog">
+    <p class="pt">$ pair --browser</p>
+    <p>your charm is showing a 6-digit code. type it here to pair this browser.</p>
+    <input id="pairCode" inputmode="numeric" autocomplete="one-time-code" maxlength="7" placeholder="000 000" aria-label="pairing code">
+    <p class="meta" id="pairMsg"></p>
+    <div class="actions"><button class="btn" type="submit">pair</button><button class="btn plain" type="button" id="pairCancel">cancel</button></div>
+  </form>
+</dialog>
 
 <div class="cmdout"><pre id="cmdOut"></pre></div>
 <div class="cmd">
@@ -741,15 +771,17 @@ $ node larp-bridge/bridge.mjs    # keep it running
     if (t) { t.click(); e.preventDefault(); }
   });
   let saved = null; try { saved = localStorage.getItem('o_tab'); } catch (_) {}
+  const fromHash = location.hash.slice(1); if (tabs.some(t => t.dataset.tab === fromHash)) saved = fromHash;   // e.g. #settings
   show(tabs.some(t => t.dataset.tab === saved) ? saved : 'look');
 })();
 </script>
 <!-- bump ?v= and the build meta together on every release, so browsers fetch the new scripts -->
-<script src="songs.js?v=9.4"></script>
-<script src="app.js?v=9.4"></script>
-<script src="spells-model.js?v=9.4"></script>
-<script src="spells-net.js?v=9.4"></script>
-<script src="spells.js?v=9.4"></script>
-<script src="charm.js?v=9.4"></script>
+<script src="songs.js?v=9.5"></script>
+<script src="app.js?v=9.5"></script>
+<script type="module" src="https://unpkg.com/esp-web-tools@10.4.0/dist/web/install-button.js?module"></script>
+<script src="spells-model.js?v=9.5"></script>
+<script src="spells-net.js?v=9.5"></script>
+<script src="spells.js?v=9.5"></script>
+<script src="charm.js?v=9.5"></script>
 </body>
 </html>

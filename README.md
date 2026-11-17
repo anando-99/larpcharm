@@ -1,16 +1,22 @@
 # Larp Charm
 
+[![ci](https://github.com/anando-99/larpcharm/actions/workflows/ci.yml/badge.svg)](https://github.com/anando-99/larpcharm/actions/workflows/ci.yml) [![release](https://img.shields.io/github/v/release/anando-99/larpcharm)](https://github.com/anando-99/larpcharm/releases/latest)
+
 **A wearable bag charm with a touchscreen, a Web Bluetooth control app that looks and works like a terminal, a pocket remote for Claude Code, and on-device machine learning: draw spells in the air and the charm recognises them.**
 
-Larp Charm runs on a Waveshare ESP32-S3-Touch-LCD-1.69 (240×280 IPS, capacitive touch, 6-axis IMU, buzzer, LiPo). The firmware is a small single-sketch "OS" with a cyberdeck interface and a dozen apps. The companion web app pairs over Bluetooth LE: no install, no backend, no native app. It also runs a live copy of the charm's screen in the page, which follows the real charm while it's connected: it switches screens with it, shows the weather, pet, message and ID card the charm has kept, and the cover going full screen.
+Larp Charm runs on a Waveshare ESP32-S3-Touch-LCD-1.69 (240×280 IPS, capacitive touch, 6-axis IMU, buzzer, LiPo). The firmware is a small "OS" (21 modules, two cores) with a cyberdeck interface and a dozen apps. The companion web app pairs over Bluetooth LE: no install, no backend, no native app. It also runs a live copy of the charm's screen in the page, which follows the real charm while it's connected: it switches screens with it, shows the weather, pet, message and ID card the charm has kept, and the cover going full screen.
 
-**Live web app: [anando-99.github.io/larpcharm](https://anando-99.github.io/larpcharm/)**
+**Live web app: [anando-99.github.io/larpcharm](https://anando-99.github.io/larpcharm/)** · got the board? **[install the firmware from your browser](https://anando-99.github.io/larpcharm/#settings)** (sys tab, *install over usb*)
+
+![Every screen, captured from a real charm over USB](docs/screens/gallery.png)
+
+*Every screen above was read straight out of a real charm's frame buffer over USB ([`firmware/tools/screens.py`](firmware/tools/screens.py)); the spells were cast by replaying recorded takes through the network on the charm.*
 
 ![Web app with the live charm preview](docs/web-app.png)
 
 ## Highlights
 
-- **Spells: air-gesture recognition, on the charm.** Draw a circle, zigzag, flick or heart in the air and the charm recognises it, plays an effect and does something (torch, new colour, next song, eyes in love, or whatever you choose in the spellbook). A 1D CNN of 38,848 parameters, trained on accelerometer + gyro takes recorded with the charm itself, runs on the ESP32-S3 in 69 ms and turns a gesture into a 32-number fingerprint. **Teach it your own** gestures by drawing them 5 times: it learns them on the spot, with no retraining, using DTW on your recordings with the network able to veto. It is also a **wand**: twist it like a knob to set the volume, draw in the air and see the sketch on the screen (and on the website), cast big to overcharge a spell, and watch your gesture's fingerprint land on a live 2D map of the network's fingerprint space. Cross-validated: the built-in spells are 100% right with 96.7% of "not a spell" rejected, and new gestures are recognised 91.9% of the time with 0.2% false matches. The C engine and the website's JS port both match PyTorch to about 1e-7. **The full story, with figures: [docs/spells.md](docs/spells.md).** The recordings are in [`dataset/`](dataset) (one folder per shape), and the training, step by step with all its outputs, is a notebook: [`train_spells.ipynb`](firmware/tools/spells/train_spells.ipynb).
+- **Spells: air-gesture recognition, on the charm.** Draw a circle, zigzag, flick or heart in the air and the charm recognises it, plays an effect and does something (torch, new colour, next song, eyes in love, or whatever you choose in the spellbook). A 1D CNN of 38,848 parameters, trained on accelerometer + gyro takes recorded with the charm itself, runs on the ESP32-S3 in 69 ms and turns a gesture into a 32-number fingerprint. **Teach it your own** gestures by drawing them 5 times: it learns them on the spot, with no retraining, using DTW on your recordings with the network able to veto. It is also a **wand**: twist it like a knob to set the volume, draw in the air and see the sketch on the screen (and on the website), cast big to overcharge a spell, and watch your gesture's fingerprint land on a live 2D map of the network's fingerprint space. Cross-validated: the built-in spells are 100% right with 96.7% of "not a spell" rejected, and new gestures are recognised 91.9% of the time with 0.2% false matches. The C engine and the website's JS port both match PyTorch to about 1e-7, and replaying all 118 recorded takes through the network **on the charm** over USB gives the same decision as PyTorch for every one (hardware in the loop). **The full story, with figures: [docs/spells.md](docs/spells.md).** The recordings are in [`dataset/`](dataset) (one folder per shape), and the training, step by step with all its outputs, is a notebook: [`train_spells.ipynb`](firmware/tools/spells/train_spells.ipynb).
 
   <img src="docs/spells/embedding.png" width="440" alt="Every take's fingerprint, projected to 2D: the spells form separate clusters, and a gesture the network never trained on lands in its own place">
 
@@ -24,6 +30,9 @@ Larp Charm runs on a Waveshare ESP32-S3-Touch-LCD-1.69 (240×280 IPS, capacitive
   - **`cc`**: an homage to the Claude Code terminal UI, with its blocky orange mascot in the welcome box (it looks down while a prompt is typed, bounces and flaps while Claude works, does a happy hop when a session ends, waves when you tap, goes dizzy when shaken and sleeps when idle; tap it and it pops out to full screen as a pocket pet you can pet, make jump, walk around, tilt and shake, with a mood meter that fills when you pet it), the `✻` spinner and its whimsical verbs, tool calls with `⎿` results, and the input box. It loops through little sessions about the charm and answers with live data ("why is my battery at 76%?" reads the real voltage). Tap to say hi; shake it and it notices the g-force.
 - **Spotify, as a terminal music player.** OAuth 2.0 PKCE runs entirely in the browser (no client secret, no server). The charm's `spotify` screen is a little player drawn in the bitmap font: the cover top left, `ls -l`-style facts beside it (device, shuffle, repeat, state) over a `$ cava` spectrum, the song and artist, block-cell bars for time and volume, and `[ |◀◀ ] [ ▌▌ PLAYING ] [ ▶▶| ]` keys. The whole screen takes its accent colour from the cover. Tap the keys to skip or play/pause, and the volume row to turn it down or up. Tap the cover and it fills the screen, with the song, its length and an equaliser along the bottom; tap again to go back. Open it from the `$ np` pane or the `spt` window.
 - **Weather, as `curl wttr.in`.** Pick a city (or your location) in the app; it fetches the weather from [Open-Meteo](https://open-meteo.com) (free, no key) and sends it over Bluetooth. The charm types `$ curl wttr.in/<place>` and prints a weather report in the style of [wttr.in](https://wttr.in): a coloured ASCII-art sprite for the sky that moves (the sun's rays turn, rain and snow fall, fog drifts, the moon's stars twinkle, lightning flashes), the temperature with the day's high and low, an `ls -l`-style readout (feels like, wind, humidity, chance of rain) and the next four hours in a table with little three-character sprites. Beside it lives a kaomoji critter dressed for the weather: a straw hat in the sun, an umbrella in the rain, a bobble hat in the snow, `zZ` at night. It blinks, shivers when it's cold, sweats when it's hot, hops and says something cowsay-style when you tap it, and goes `(@_@)` when shaken. `weather <city>` works at the `larp>` prompt.
+- **Secure by default.** Every Bluetooth link starts locked. A browser pairs once with a 6-digit code the charm shows on its screen, then proves itself on every connection with an HMAC-SHA256 challenge-response (never replayable). Until then the charm ignores everything but pairing, which matters for something that can approve Claude Code's permission prompts. Threat model: [docs/firmware.md](docs/firmware.md#pairing-and-the-threat-model).
+- **Firmware updates over Bluetooth, and installs from the browser.** The website streams new firmware to a paired charm into its spare app slot, checks the SHA-256 and the image, and only then switches to it, keeping your photos, songs and taught spells. A new board can be flashed from the website over USB (ESP Web Tools). Releases are built by [`firmware/tools/release.sh`](firmware/tools/release.sh) and published on [GitHub Releases](https://github.com/anando-99/larpcharm/releases).
+- **Engineering.** Pairing and updates are tested on the real charm over USB (18 checks, a real 1.1 MB update included: [`firmware/tools/test_link.py`](firmware/tools/test_link.py)). CI builds the firmware with the exact toolchain, checks the charm's and the website's spell engines against PyTorch, runs the training notebook end to end and checks the website on every push. The firmware is split into 21 modules with a design doc: tasks and cores, memory map, the Bluetooth protocol, the USB serial interface. See [docs/firmware.md](docs/firmware.md).
 - **Spell recorder.** How the spells' training data was made. The charm's `spell --rec` screen turns on the gyro and samples accelerometer + gyro at exactly 100 Hz from a task on the second core, then sends each take to the website over Bluetooth. Hold your thumb on the screen while you draw, or let the website start timed calibration takes. The website's **spells** tab walks you through a recording plan (calibrate, four spells, "not a spell", your own test gestures), animates how to draw each spell, plots every take's six channels next to the stroke traced from the gyro, keeps everything in the browser (IndexedDB) and exports it as one JSON file. See [Recording spells](#recording-spells).
 - **Minigames.** Next to the oracle, dice and coin: tic-tac-toe against the charm (minimax with the odd deliberate slip, so it's beatable), rock-paper-scissors with a countdown, and a reflex test that times you in milliseconds and keeps your best. Playable in the web preview too, or start one with `game ttt` at the `larp>` prompt.
 - **Motion and sound.** Shake to wake, roll dice, ask the oracle or shuffle backdrops. There's a buzzer jukebox of public-domain melodies, and you can upload your own songs from MIDI files.
@@ -46,7 +55,7 @@ Larp Charm runs on a Waveshare ESP32-S3-Touch-LCD-1.69 (240×280 IPS, capacitive
 │ 127.0.0.1:7337, no deps    │      │
 └────────────────────────────┘      │
 ┌───────────────────────────────────▼────────────────────────────────────────┐
-│ firmware/LarpCharm/LarpCharm.ino   ESP32-S3, Arduino core 3.x              │
+│ firmware/LarpCharm/  21 modules (docs/firmware.md), ESP32-S3, Arduino 3.x  │
 │   ST7789V2 display (Arduino_GFX) · CST816T touch · QMI8658 IMU · buzzer    │
 │   NimBLE GATT server · FFat storage · JPEGDEC · PSRAM frame buffers        │
 │ spells_engine.h · spells_model.h (the network) · songs.h                   │
@@ -61,7 +70,7 @@ Larp Charm runs on a Waveshare ESP32-S3-Touch-LCD-1.69 (240×280 IPS, capacitive
 | `6e400002-…` | RX: app → charm, `[cmd][payload…]` |
 | `6e400003-…` | Status: charm → app, read and notify (`key=value` text) |
 
-Commands cover mode switching, text, time sync, now playing, chunked transfer (`XFER_BEGIN/DATA/END`), brightness, pet, ID card, settings, themes, eyes, jukebox, torch and song management. The full table, with payload layouts, is the `enum Cmd` in [`LarpCharm.ino`](firmware/LarpCharm/LarpCharm.ino).
+Commands cover mode switching, text, time sync, now playing, chunked transfer (`XFER_BEGIN/DATA/END`, including firmware), brightness, pet, ID card, settings, themes, eyes, jukebox, torch, song management, the spells, the Claude Code remote and pairing. Every link starts locked until the browser authenticates. The full table and the pairing design are in [docs/firmware.md](docs/firmware.md); the payload layouts are the `enum Cmd` in [`LarpCharm.ino`](firmware/LarpCharm/LarpCharm.ino).
 
 ## Repository layout
 
@@ -76,6 +85,10 @@ firmware/tools/                         generator for the melodies
 dataset/                                the spells' recordings, one folder per shape (with a datasheet)
 firmware/tools/spells/                  the spells' ML: training notebook, data tools, baseline, training, export, tests, model/
 docs/spells.md, docs/spells/            the spells write-up and its figures
+docs/firmware.md                        the firmware's design: modules, tasks, memory, protocol, pairing, updates
+docs/screens/                           the screen gallery, captured from a real charm
+flash/                                  the current firmware images the website installs (release.sh)
+.github/workflows/ci.yml                CI: firmware build, engine tests, the notebook, the website
 scrapped/                               retired looks (Aero, Quest, Ronin, Cotton) and the pixel-art weather, kept for reference
 ```
 
@@ -98,6 +111,10 @@ Open `http://localhost:7337` (the bridge serves this web app), connect the charm
 
 ### Firmware
 
+**The easy way:** open the [web app](https://anando-99.github.io/larpcharm/) in Chrome or Edge on a computer, plug the charm in, and use **sys → install over usb**. After that, **update over bluetooth** keeps it current. The first time a browser connects, the charm shows a 6-digit code to type in.
+
+**From source:**
+
 1. Install the **esp32 by Espressif** board package (3.x) and these libraries from the Library Manager: **GFX Library for Arduino** (1.6.x), **NimBLE-Arduino** (2.x), **JPEGDEC** (1.x).
 2. Open `firmware/LarpCharm/LarpCharm.ino` and select:
    - Board: **ESP32S3 Dev Module**
@@ -115,7 +132,7 @@ arduino-cli compile --upload -p <port> \
   firmware/LarpCharm
 ```
 
-The web app and the firmware are versioned together; this app expects firmware **9.4** (shown on the charm's status screen and in the app once connected).
+The web app and the firmware are versioned together; this app expects firmware **9.5** (shown on the charm's status screen and in the app once connected). To publish a release: `firmware/tools/release.sh --gh` (builds, refreshes `flash/` for the website's installers, and makes a GitHub release).
 
 ## Using the charm
 

@@ -8,7 +8,7 @@ if (/^https:/.test(location.protocol)) fetch(location.pathname + '?b=' + Date.no
   const m = t.match(/<meta name="build" content="([^"]+)"/);
   if (m && m[1] !== BUILD && !sessionStorage.getItem('o_build' + m[1])) { sessionStorage.setItem('o_build' + m[1], '1'); location.reload(); }
 }).catch(() => {});
-const CMD = {MODE:1, TEXT:2, TIME:3, NOWPLAYING:4, XFER_BEGIN:5, XFER_DATA:6, XFER_END:7, BRIGHT:8, PET:9, CARD:10, SETTINGS:11, PING:12, BUZZ:13, FEED:14, LOOK:18, TIMER:19, TOY:20, THEME:21, SKIN:22, EYES:23, TUNE:24, TORCH:25, SONG_LIST:26, SONG_DELETE:27, CC:30, WEATHER:31, REC:32, SPELL:33};
+const CMD = {MODE:1, TEXT:2, TIME:3, NOWPLAYING:4, XFER_BEGIN:5, XFER_DATA:6, XFER_END:7, BRIGHT:8, PET:9, CARD:10, SETTINGS:11, PING:12, BUZZ:13, FEED:14, LOOK:18, TIMER:19, TOY:20, THEME:21, SKIN:22, EYES:23, TUNE:24, TORCH:25, SONG_LIST:26, SONG_DELETE:27, CC:30, WEATHER:31, REC:32, SPELL:33, AUTH:34};
 const MODE = {CLOCK:0, TEXT:1, PHOTO:2, MUSIC:4, PET:5, TOY:6, CARD:7, DECK:8, EYES:9, JUKE:10, TORCH:11, CHARGE:12, TERM:13, CLAUDE:14, WEATHER:15, REC:16, CAST:17};
 const THEMES = ['#00E5FF', '#FF2BD6', '#FFB000', '#39FF14', '#FF3B30', '#C8DCFF'];
 const klog = m => { if (window.charmLog) window.charmLog(m); };       // lines for the preview's dmesg pane
@@ -56,10 +56,14 @@ async function connectGatt(){
   $('connText').textContent = 'Connecting…';
   const server = await device.gatt.connect();
   const svc = await server.getPrimaryService(SVC);
-  rxChar = await svc.getCharacteristic(RX);
+  const rx = await svc.getCharacteristic(RX);
   stChar = await svc.getCharacteristic(ST);
   await stChar.startNotifications();
   stChar.addEventListener('characteristicvaluechanged', e => onStatus(new TextDecoder().decode(e.target.value)));
+  $('connText').textContent = 'Unlocking…';
+  try { await authenticate(rx); }                          // the charm only listens to paired browsers
+  catch (e) { hud(e.message); manualDisconnect = true; try { device.gatt.disconnect(); } catch (_) {} return; }
+  rxChar = rx;
   document.body.classList.add('connected');
   $('dot').classList.add('on');
   $('connText').textContent = device.name || 'Larp Charm';
@@ -91,11 +95,96 @@ async function onDisconnected(){
   }
 }
 
+// ─────────── Pairing (firmware/LarpCharm/15_auth.ino) ───────────
+// Every link to the charm starts locked. The charm sends a fresh challenge; a browser it knows answers with
+// HMAC-SHA256(its key, challenge). A new browser pairs once with the 6-digit code the charm shows, and keeps the
+// random key the charm gives it (in this browser's storage, per charm). The key never crosses the air again.
+const authWait = { fn: null };
+function authNext(pred, ms = 8000){
+  return new Promise((resolve, reject) => {
+    const t = setTimeout(() => { authWait.fn = null; reject(new Error('The charm didn’t answer. Update its firmware (sys tab) if it is older than 9.5.')); }, ms);
+    authWait.fn = s => { if (!pred(s)) return; clearTimeout(t); authWait.fn = null; resolve(s); };
+  });
+}
+const hexBytes = h => Uint8Array.from(h.match(/../g).map(x => parseInt(x, 16)));
+const charmKeyName = () => 'o_charmkey_' + ((device && device.id) || 'charm');
+async function hmacSha256(keyHex, msg){
+  const k = await crypto.subtle.importKey('raw', hexBytes(keyHex), { name: 'HMAC', hash: 'SHA-256' }, false, ['sign']);
+  return new Uint8Array(await crypto.subtle.sign('HMAC', k, msg));
+}
+async function authenticate(rx){
+  const send = b => rx.writeValueWithResponse(b);
+  const chal = authNext(s => s.startsWith('auth=chal,'));
+  await send(packet(CMD.PING));
+  const nonce = (await chal).slice(10).split(',')[0];
+  const key = localStorage.getItem(charmKeyName());
+  if (key) {
+    const ans = authNext(s => s === 'auth=ok' || s === 'auth=fail');
+    await send(packet(CMD.AUTH, [1, ...await hmacSha256(key, hexBytes(nonce))]));
+    if (await ans === 'auth=ok') return 'unlocked';
+    localStorage.removeItem(charmKeyName());          // the charm forgot this browser: pair again
+  }
+  const shown = authNext(s => s === 'auth=code' || s.startsWith('auth=locked'));
+  await send(packet(CMD.AUTH, [0]));
+  const r = await shown;
+  if (r.startsWith('auth=locked')) throw new Error(`Too many wrong codes. Try again in ${r.split(',')[1]} s.`);
+  pairShow('');
+  try {
+    for (;;) {
+      const code = await pairAsk();
+      if (code === null) throw new Error('Pairing cancelled.');
+      const res = authNext(s => /^auth=(key|bad|locked|expired)/.test(s));
+      await send(packet(CMD.AUTH, [2], code));
+      const m = await res;
+      if (m.startsWith('auth=key,')) { localStorage.setItem(charmKeyName(), m.slice(9)); hud('Paired. This browser can connect from now on.'); klog('ble: paired'); return 'paired'; }
+      if (m.startsWith('auth=bad')) { pairShow(`Wrong code. ${m.split(',')[1]} tries left.`); continue; }
+      throw new Error(m.startsWith('auth=locked') ? 'Too many wrong codes. Wait 30 s, then connect again.' : 'The code expired. Connect again.');
+    }
+  } finally { pairHide(); }
+}
+// the dialog for the code
+let pairResolve = null;
+function pairShow(msg){ $('pairMsg').textContent = msg; if (!$('pairDlg').open) { $('pairCode').value = ''; $('pairDlg').showModal(); } setTimeout(() => $('pairCode').focus(), 30); }
+function pairHide(){ if ($('pairDlg').open) $('pairDlg').close(); if (pairResolve) { pairResolve(null); pairResolve = null; } }
+function pairAsk(){ return new Promise(res => { pairResolve = res; }); }
+$('pairForm').onsubmit = e => {
+  e.preventDefault();
+  const v = $('pairCode').value.replace(/\D/g, '');
+  if (v.length !== 6) { $('pairMsg').textContent = 'The code has 6 digits.'; return; }
+  if (pairResolve) { const r = pairResolve; pairResolve = null; r(v); }
+};
+$('pairCancel').onclick = () => pairHide();
+$('pairDlg').addEventListener('cancel', () => { if (pairResolve) { pairResolve(null); pairResolve = null; } });
+$('forgetOthers').onclick = act(async () => { await write(packet(CMD.AUTH, [3])); hud('The charm now only knows this browser'); });
+$('unpairHere').onclick = () => { localStorage.removeItem(charmKeyName()); hud('Forgot the key: this browser will pair again next time'); };
+
+// ─────────── Firmware: what's on the charm, updates over Bluetooth (16_ota.ino), installing over USB ───────────
+let fwLatest = null;
+fetch('flash/manifest.json', { cache: 'no-store' }).then(r => r.json()).then(m => { fwLatest = m.version; fwInfo(); }).catch(() => {});
+function fwInfo(){
+  const have = ($('fw') && $('fw').textContent) || '';
+  $('fwInfo').textContent = (have ? `this charm runs ${have}` : 'connect to see what the charm runs') + (fwLatest ? ` · latest is ${fwLatest}` : '') +
+    (have && fwLatest && have !== fwLatest ? ' · an update is ready' : have && fwLatest ? ' · up to date' : '');
+}
+new MutationObserver(fwInfo).observe($('fw'), { childList: true, characterData: true, subtree: true });
+$('otaBtn').onclick = act(async () => {
+  if (!rxChar) throw new Error('Connect the charm first.');
+  const pr = progress('otaProg'); pr.show('Downloading the firmware…'); $('otaBtn').disabled = true;
+  try {
+    const bytes = new Uint8Array(await (await fetch('flash/larpcharm-ota.bin', { cache: 'no-store' })).arrayBuffer());
+    const sha = new Uint8Array(await crypto.subtle.digest('SHA-256', bytes));
+    await sendBlob(6, bytes, 0, (f, eta) => pr.set(f, `Sending ${fmtBytes(bytes.length)}… ${eta != null ? fmtTime(eta) + ' left' : ''}`), sha);
+    pr.set(1, 'Updated. The charm restarts and reconnects.'); klog('ota: sent ' + fmtBytes(bytes.length));
+  } catch (e) { pr.set(0, e.message); throw e; }
+  finally { $('otaBtn').disabled = false; pr.hide(8000); }
+});
+
 // ─────────── Notifications ───────────
 let ackBytes = 0, ackWaiters = [], xferWaiter = null;
 function rejectWaiters(err){ ackWaiters.forEach(w => w.reject(err)); ackWaiters = []; if (xferWaiter) { xferWaiter.reject(err); xferWaiter = null; } }
 
 function onStatus(s){
+  if (s.startsWith('auth=')) { if (authWait.fn) authWait.fn(s); return; }
   if (s.startsWith('ack=')) {
     ackBytes = +s.slice(4);
     ackWaiters = ackWaiters.filter(w => { if (ackBytes >= w.n) { w.resolve(); return false; } return true; });
@@ -229,13 +318,13 @@ function waitAck(n, ms = 10000){
     setTimeout(() => { if (ackWaiters.includes(w)) { ackWaiters = ackWaiters.filter(x => x !== w); reject(new Error('The charm stopped responding. Move closer and try again.')); } }, ms);
   });
 }
-function sendBlob(kind, bytes, id, onProgress){
+function sendBlob(kind, bytes, id, onProgress, extra = []){
   return enqueue(async () => {
     if (!rxChar) throw new Error('not connected');
     ackBytes = 0;
     const done = new Promise((resolve, reject) => { xferWaiter = { resolve, reject }; });
     done.catch(() => {});
-    await rxChar.writeValueWithResponse(packet(CMD.XFER_BEGIN, [kind, ...u32(bytes.length), ...u32(id >>> 0)]));
+    await rxChar.writeValueWithResponse(packet(CMD.XFER_BEGIN, [kind, ...u32(bytes.length), ...u32(id >>> 0), ...extra]));
     await sleep(60);
     if (!xferWaiter) return done;   // rejected immediately (no space etc.)
     let noResp = typeof rxChar.writeValueWithoutResponse === 'function';

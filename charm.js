@@ -177,8 +177,8 @@
       if (now - chooser.at < (i >> 1) * 22) return;
       const x = 8 + (i % 2) * 114, y = 22 + (i >> 1) * 33, pick = i === chooser.pick;
       if (pick) R(x, y, 110, 29, ACC); else { c.strokeStyle = LOW; c.lineWidth = 1; c.strokeRect(x + .5, y + .5, 109, 28); }
-      G(i < 10 ? String(i) : String.fromCharCode(87 + i), x + 5, y + 4, 1, pick ? TTY_BG : ACC);
-      G(n, x + 16, y + 7, 2, pick ? TTY_BG : '#fff'); G(cmd, x + 106 - cmd.length * 6, y + 19, 1, pick ? TTY_BG : TTY_DIM);
+      G(i < 10 ? String(i) : String.fromCharCode(87 + i), x + 4, y + 2, 1, pick ? TTY_BG : ACC);
+      G(cmd, x + 107 - cmd.length * 6, y + 2, 1, pick ? TTY_BG : TTY_DIM); G(n, x + 8, y + 12, 2, pick ? TTY_BG : '#fff');
     });
     G('tap a window', 16, 264, 1, TTY_TEXT); G('pwr: back', 170, 264, 1, TTY_DIM);
   }

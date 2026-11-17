@@ -15,7 +15,10 @@ README, "Recording spells"). Needs Python 3 with numpy, matplotlib and PyTorch, 
 | `evaluate.py data.json model/eval.json` | cross-validation of the built-in spells and leave-one-gesture-out teach-your-own |
 | `train.py data.json model/eval.json` | trains the final network and exports `spells_model.h` (charm) and `spells-model.js` (website) |
 | `figures.py data.json` | the figures in `docs/spells/` |
-| `test_engine.cpp`, `test_net.js` | check the charm's and the website's engines against PyTorch |
+| `test_engine.cpp`, `test_net.js` | check the charm's and the website's engines against PyTorch (also in CI) |
+| `device_eval.py ../../../dataset model/device_eval.json` | hardware in the loop: replays every take through the network on a charm plugged in over USB |
+| `charm_serial.py` | talks to the charm over USB serial (standard library only) |
+| `requirements.txt` | the Python packages (PyTorch separately) |
 | `train_cnn.py` | the first CNN experiment (5-fold CV), kept for reference |
 
 The model itself, with a model card: [`model/`](model/). The full write-up: [docs/spells.md](../../../docs/spells.md).

@@ -1,0 +1,11 @@
+# The spell tools and the training notebook. PyTorch is listed separately so CI can take the CPU build:
+#   pip install torch --index-url https://download.pytorch.org/whl/cpu
+#   pip install -r requirements.txt
+# Tested with Python 3.14, torch 2.11, numpy 2.5, pandas 3.0, matplotlib 3.11 (and Python 3.12 in CI).
+numpy>=2.0
+pandas>=2.2
+matplotlib>=3.8
+pillow>=10
+nbformat>=5.9
+nbclient>=0.10
+ipykernel>=6.29

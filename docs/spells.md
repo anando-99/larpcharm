@@ -218,6 +218,11 @@ none     fingerprint max diff vs pytorch 1.49e-07   class none    0.949 ok
 | convolution loops reordered so each weight is read once, not once per time step; working memory (45 KB) in internal RAM; DTW against the built-in spells only when you have taught a spell | 124 ms |
 | the engine built with -O2 instead of the sketch's -Os | **69 ms** |
 
+**Hardware in the loop.** `device_eval.py` replays every recorded take over USB through the network *on the charm*
+(the same code path as a real cast, minus the action) and compares it with PyTorch: **118 of 118** get the same
+decision, the fingerprints differ by at most **6 × 10⁻⁷**, and the network takes **68 to 70 ms** each time
+(`model/device_eval.json`).
+
 **Memory.** The weights are 155 KB in flash, and the app is 1.07 MB of its 3 MB. Working memory is 45 KB of internal
 RAM plus about 100 KB of PSRAM for the take and the stored recordings. Each taught spell is a file in flash (`/spl/<slot>.bin`)
 holding its name, action, mean fingerprint, spread and its 5 recordings at 50 Hz.
