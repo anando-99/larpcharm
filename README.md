@@ -10,14 +10,14 @@ Larp Charm runs on a Waveshare ESP32-S3-Touch-LCD-1.69 (240×280 IPS, capacitive
 
 ## Highlights
 
-- **Spells: air-gesture recognition, on the charm.** Draw a circle, zigzag, flick or heart in the air and the charm recognises it, plays an effect and does something (torch, new colour, next song, eyes in love, or whatever you choose in the spellbook). A 1D CNN of 38,848 parameters, trained on accelerometer + gyro takes recorded with the charm itself, runs on the ESP32-S3 in 69 ms and turns a gesture into a 32-number fingerprint. **Teach it your own** gestures by drawing them 5 times: it learns them on the spot, with no retraining, using DTW on your recordings with the network able to veto. It is also a **wand**: twist it like a knob to set the volume, draw in the air and see the sketch on the screen (and on the website), cast big to overcharge a spell, and watch your gesture's fingerprint land on a live 2D map of the network's fingerprint space. Cross-validated: the built-in spells are 100% right with 96.7% of "not a spell" rejected, and new gestures are recognised 91.9% of the time with 0.2% false matches. The C engine and the website's JS port both match PyTorch to about 1e-7. **The full story, with figures: [docs/spells.md](docs/spells.md).**
+- **Spells: air-gesture recognition, on the charm.** Draw a circle, zigzag, flick or heart in the air and the charm recognises it, plays an effect and does something (torch, new colour, next song, eyes in love, or whatever you choose in the spellbook). A 1D CNN of 38,848 parameters, trained on accelerometer + gyro takes recorded with the charm itself, runs on the ESP32-S3 in 69 ms and turns a gesture into a 32-number fingerprint. **Teach it your own** gestures by drawing them 5 times: it learns them on the spot, with no retraining, using DTW on your recordings with the network able to veto. It is also a **wand**: twist it like a knob to set the volume, draw in the air and see the sketch on the screen (and on the website), cast big to overcharge a spell, and watch your gesture's fingerprint land on a live 2D map of the network's fingerprint space. Cross-validated: the built-in spells are 100% right with 96.7% of "not a spell" rejected, and new gestures are recognised 91.9% of the time with 0.2% false matches. The C engine and the website's JS port both match PyTorch to about 1e-7. **The full story, with figures: [docs/spells.md](docs/spells.md).** The recordings are in [`dataset/`](dataset) (one folder per shape), and the training, step by step with all its outputs, is a notebook: [`train_spells.ipynb`](firmware/tools/spells/train_spells.ipynb).
 
   <img src="docs/spells/embedding.png" width="440" alt="Every take's fingerprint, projected to 2D: the spells form separate clusters, and a gesture the network never trained on lands in its own place">
 
 - **A remote for Claude Code.** `larp-bridge` (a dependency-free Node script) plugs into Claude Code's hooks and status line. The charm's `cc` screen then mirrors your real session on the laptop: the live transcript with tool calls and results, the spinner with Claude's actual state, and a `/status`-style page with model, context, cost, time and lines changed. When Claude needs permission, the charm buzzes and shows an **approve / deny** card, and your tap answers Claude on the laptop. A launcher page starts preset sessions in Terminal. The mascot reacts to all of it. It is fail-safe by design: if the bridge or the charm isn't there, Claude Code behaves exactly as normal, and unanswered prompts fall back to the terminal after 45 s.
 - **A control panel that is a terminal.** The web app is styled like a tmux session (panes, `0:claude 1:look …` windows, `[ buttons ]`, `--flags`), with a real command line pinned to the bottom: `open claude`, `theme phosphor`, `msg ship it`, `timer 25`, `allow`, `launch 2`, `status`, with history and tab completion.
 - **Custom BLE protocol.** A Nordic-UART-style GATT service with 23 binary commands, chunked file transfer (JPEG photos, album art, songs) and a notify channel for battery, version and storage status.
-- **The deck: a live tmux session.** Home is a terminal drawn in the classic 5×7 bitmap font. Each pane is labelled with the command that would print it (`$ date`, `$ np`, `$ ps pet`, `$ imu --scope` with a live accelerometer oscilloscope, `$ cat motd`), and a tmux-style status bar holds the other screens as windows (`spt img id eye jbx tty cc wx`). Tap a pane and the prompt types `open <pane>` before zooming in.
+- **The deck: a live tmux session.** Home is a terminal drawn in the classic 5×7 bitmap font. Each pane is labelled with the command that would print it (`$ date`, `$ np`, `$ ps pet`, `$ imu --scope` with a live accelerometer oscilloscope, `$ cat motd`), and a tmux-style status bar holds the other screens as windows (`spl spt img id eye jbx tty cc wx`); tap it for the window chooser, every screen as a big target in two columns, like tmux's `prefix w`. Tap a pane and the prompt types `open <pane>` before zooming in.
 - **`dmesg -w` for a bag charm.** The firmware keeps its own kernel-style event log (`klog`) and tails it on the deck: Bluetooth link changes, charging and battery steps, shakes with their g-force, step milestones, time syncs, received messages and files, songs, timers. Every line is a real event, timestamped from boot.
 - **Two terminal companions.** Like the animated eyes, they can take over when the charm is idle:
   - **`tty`**: a big kaomoji living in the terminal (`(o_o)`, `(^_^)`, `(♥_♥)`, `(@_@)`, `(-_-) zZ`) over a faint cmatrix rain. It blinks, glances around and changes mood by itself, reacts to taps and shakes, and thinks out loud at a typed prompt using real data: battery, steps, the song playing, the time of night.
@@ -73,7 +73,8 @@ docs/                                   README media
 larp-bridge/                            Claude Code ⇄ charm bridge, hooks, installer, launcher presets
 firmware/LarpCharm/                     Arduino sketch and generated headers
 firmware/tools/                         generator for the melodies
-firmware/tools/spells/                  the spells' ML: data tools, baseline, training, export, tests, model/
+dataset/                                the spells' recordings, one folder per shape (with a datasheet)
+firmware/tools/spells/                  the spells' ML: training notebook, data tools, baseline, training, export, tests, model/
 docs/spells.md, docs/spells/            the spells write-up and its figures
 scrapped/                               retired looks (Aero, Quest, Ronin, Cotton) and the pixel-art weather, kept for reference
 ```
@@ -114,13 +115,14 @@ arduino-cli compile --upload -p <port> \
   firmware/LarpCharm
 ```
 
-The web app and the firmware are versioned together; this app expects firmware **9.3** (shown on the charm's status screen and in the app once connected).
+The web app and the firmware are versioned together; this app expects firmware **9.4** (shown on the charm's status screen and in the app once connected).
 
 ## Using the charm
 
 | Gesture | Action |
 | --- | --- |
 | Tap | Open a pane (the prompt types the command first) / interact |
+| Tap the status bar (home) | The window chooser: every screen, big, in two columns |
 | Swipe down, or the side button | Close / back home |
 | Swipe left or right | Colour theme (the terminal's colour) on home, backdrop on the clock, next or previous track, depending on the screen |
 | Swipe up or down on home | Brightness |
@@ -136,6 +138,7 @@ The web app and the firmware are versioned together; this app expects firmware *
    - **Spells, not a spell, your own** (thumb): thumb on the charm's screen, hold still ½ s, draw, hold still ½ s, let go.
 3. Check each take in the plot and the stroke; delete bad ones straight away (backspace).
 4. Press **download json** when you're done. Takes stay in the browser until then; nothing is uploaded.
+5. To add them to the repo's dataset: `python3 firmware/tools/spells/export_dataset.py <export>.json dataset`.
 
 The file (`larp-spells/1`) holds one entry per take: `label`, `group` (calibrate, spell, none, custom), `session`, `posture`, `grip`, `trigger` (thumb or timed), `hz` (100), `aLsb` / `gLsb` (raw units per g and per °/s), `missed` samples, `n`, and `data`: `n` rows of `ax ay az gx gy gz`, flattened, raw 16-bit, in the sensor's own axes. Over Bluetooth a take travels as `rec0` (header), `rec1` (base64 chunks) and `rec2` (chunk count and byte sum); a damaged take is asked for again.
 

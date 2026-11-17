@@ -5,7 +5,9 @@ README, "Recording spells"). Needs Python 3 with numpy, matplotlib and PyTorch, 
 
 | Script | What it does |
 | --- | --- |
-| `spells_data.py` | loads a `larp-spells/1` file; gyro offset, active-part trimming, the gyro stroke |
+| **`train_spells.ipynb`** | **the whole training, step by step, with every output: data, baseline, preprocessing, network, cross-validation, teach-your-own, the final model** |
+| `export_dataset.py export.json ../../../dataset` | turns a spells-tab export into the repo's dataset folder (one folder per shape) |
+| `spells_data.py` | loads the dataset folder or an export; gyro offset, active-part trimming, the gyro stroke |
 | `spells_model.py` | the network and its input pipeline (mirrored in the firmware and the website) |
 | `dtw.py`, `dtw.c` | dynamic time warping, compiled on first use |
 | `look.py data.json out.png` | a contact sheet of every take's stroke, one row per label |
@@ -18,7 +20,8 @@ README, "Recording spells"). Needs Python 3 with numpy, matplotlib and PyTorch, 
 
 The model itself, with a model card: [`model/`](model/). The full write-up: [docs/spells.md](../../../docs/spells.md).
 
-Recordings stay out of git (`larp-spells-*.json` and `data/` are ignored).
+The recordings are in [`dataset/`](../../../dataset) (raw exports, `larp-spells-*.json`, stay out of git). Every
+script takes the dataset folder or an export file as its first argument.
 
 ## The sensor, from the calibrate takes (firmware 9.1)
 

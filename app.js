@@ -112,6 +112,7 @@ function onStatus(s){
   if (kv.m !== undefined) setActiveMode(+kv.m);
   if (kv.nb !== undefined && window.npSetBig) window.npSetBig(kv.nb === '1');     // the cover full screen on the charm
   if (kv.wv !== undefined && window.spellsWandView) window.spellsWandView(+kv.wv);   // the spell screen's view
+  if (kv.ch !== undefined && window.charmChooser) window.charmChooser(kv.ch === '1');      // the window chooser on the deck
   if (kv.lk) { const [b, f] = kv.lk.split(',').map(Number); setLook(b, f, false); }
   if (kv.toy !== undefined) setToy(+kv.toy, false);
   if (kv.th !== undefined) setTheme(+kv.th, false);

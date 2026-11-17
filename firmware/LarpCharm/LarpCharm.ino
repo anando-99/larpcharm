@@ -1,11 +1,12 @@
 /*
-  LARP CHARM firmware v9.3
+  LARP CHARM firmware v9.4
   Board : Waveshare ESP32-S3-Touch-LCD-1.69 (240x280 ST7789V2, CST816T touch)
   Control: Bluetooth LE from the Larp Charm web app
 
   Home is a live tmux session: panes labelled with the command that prints them ($ date, $ np, $ ps pet,
   $ imu --scope, $ cat motd), the charm's own event log tailed like `dmesg -w`, and a status bar of
-  windows. Tap a pane and the prompt types `open <pane>` before it zooms in.
+  windows. Tap a pane and the prompt types `open <pane>` before it zooms in. Tap the status bar for the
+  window chooser: every screen, two big columns, like tmux's `prefix w`.
   Swipe down (or the side button) closes whatever is open.
 
   Blocks: weather (`curl wttr.in`: ASCII-art skies and a critter dressed for them), tty (a kaomoji in the terminal), cc (Claude Code: a live remote through larp-bridge, or a demo), clock, spotify (a terminal music player), spells and the wand (cast spells with a 1D CNN on the charm, teach your own, twist it like a knob, draw in the air, see the fingerprint map), spell recorder, eyes, jukebox, pet, dice, message, photo, ID card, torch,
@@ -74,7 +75,7 @@ struct EyeShape { float w, h, rad, lidT, slope, lidB; };
 #define SVC_UUID    "6e400001-c4a7-4d2e-9b3c-c4a2d7c0ffee"
 #define RX_UUID     "6e400002-c4a7-4d2e-9b3c-c4a2d7c0ffee"
 #define STATUS_UUID "6e400003-c4a7-4d2e-9b3c-c4a2d7c0ffee"
-#define FW_VERSION  "9.3"
+#define FW_VERSION  "9.4"
 #define DEVICE_NAME "Larp Charm"
 
 enum Cmd : uint8_t {
@@ -1141,17 +1142,76 @@ void deckRun(int ti) {                         // tap on a pane: type its comman
   deckPending = ti;
 }
 
+// The window chooser, like tmux's `prefix w`: tap the status bar and every screen is listed full size, two columns
+// of big targets instead of nine tiny windows. Tap one to open it; tap outside, swipe down or press PWR to go back.
+struct ChooseItem { const char *name, *cmd; uint8_t mode; };
+const ChooseItem CHOOSE[] = {
+  {"spells", "spl", M_CAST}, {"spotify", "spt", M_MUSIC}, {"weather", "wx", M_WEATHER}, {"claude", "cc", M_CLAUDE},
+  {"tty", "tty", M_TERM}, {"eyes", "eye", M_EYES}, {"pet", "ps", M_PET}, {"games", "rng", M_TOY},
+  {"clock", "date", M_CLOCK}, {"jukebox", "jbx", M_JUKE}, {"photo", "img", M_PHOTO}, {"message", "motd", M_TEXT},
+  {"id card", "id", M_CARD}, {"torch", "lux", M_TORCH}};
+#define CHOOSE_N (int)(sizeof(CHOOSE) / sizeof(CHOOSE[0]))
+#define CH_X0 8
+#define CH_Y0 22
+#define CH_W 110
+#define CH_H 29
+#define CH_GAP 4
+bool     deckChoose = false;
+uint32_t deckChooseAt = 0;
+int8_t   chosePick = -1;
+
+int chooseAt(int x, int y) {
+  int col = x < CH_X0 + CH_W + CH_GAP / 2 ? 0 : 1, row = (y - CH_Y0) / (CH_H + CH_GAP);
+  if (y < CH_Y0 || row < 0 || row >= (CHOOSE_N + 1) / 2) return -1;
+  int i = row * 2 + col;
+  return i < CHOOSE_N ? i : -1;
+}
+void deckOpenMode(const char *name, uint8_t m) {   // type `open <name>`, then open it (zooming out of its pane if it has one)
+  if (deckPending >= 0) return;
+  deckCmd = String("open ") + name;
+  deckCmdAt = millis();
+  int ti = tileOfMode(m);
+  deckPending = ti >= 0 ? ti : 100 + m;
+}
+void drawChooser() {
+  uint32_t now = millis();
+  gfx->fillScreen(TTY_BG);
+  textAt("$", 16, 3, 1, ACC); textAt("tmux choose-window", 28, 3, 1, COL_WHITE);
+  for (int i = 0; i < CHOOSE_N; i++) {
+    int x = CH_X0 + (i % 2) * (CH_W + CH_GAP), y = CH_Y0 + (i / 2) * (CH_H + CH_GAP);
+    bool pick = i == chosePick, cur = CHOOSE[i].mode == mode;
+    // the window opens in from the top, row by row
+    if (now - deckChooseAt < (uint32_t)(i / 2) * 22) continue;
+    if (pick) gfx->fillRect(x, y, CH_W, CH_H, ACC); else gfx->drawRect(x, y, CH_W, CH_H, ACC_LOW);
+    char idx[2] = {(char)(i < 10 ? '0' + i : 'a' + i - 10), 0};
+    textAt(idx, x + 5, y + 4, 1, pick ? TTY_BG : ACC);
+    textAt(CHOOSE[i].name, x + 16, y + 7, 2, pick ? TTY_BG : COL_WHITE);
+    textAt(CHOOSE[i].cmd, x + CH_W - 4 - (int)strlen(CHOOSE[i].cmd) * 6, y + CH_H - 10, 1, pick ? TTY_BG : (cur ? ACC : TTY_DIM));
+  }
+  textAt("tap a window", 16, 264, 1, TTY_TEXT);
+  textAt("pwr: back", 170, 264, 1, TTY_DIM);
+}
+void deckChooseTap(int x, int y) {
+  int i = chooseAt(x, y);
+  if (i < 0) { deckChoose = false; sfx(1); return; }
+  chosePick = i;
+  drawChooser(); gfx->flush(); delay(90);             // the pick lights up
+  deckChoose = false; chosePick = -1;
+  deckOpenMode(CHOOSE[i].name, CHOOSE[i].mode);
+}
+
 void drawDeck() {
   uint32_t now = millis();
   if (deckPending >= 0 && now - deckCmdAt >= deckCmd.length() * DECK_TYPE_MS + 160) {
     int ti = deckPending;
     deckPending = -1;
-    openedTile = ti;
-    klog("sh: open %s", TILE_OPEN[ti]);
+    klog("sh: %s", deckCmd.c_str());
     deckCmd = "";
-    openModule(TILE_MODE[ti]);
+    if (ti >= 100) { openedTile = -1; openModule(ti - 100); }     // a screen without a pane of its own
+    else { openedTile = ti; openModule(TILE_MODE[ti]); }
     return;
   }
+  if (deckChoose) { drawChooser(); return; }
   gfx->fillScreen(TTY_BG);
   char buf[48];
   struct tm t;
@@ -1290,7 +1350,7 @@ void drawDeck() {
     } else textAt(s, LOG_X + 5 + 54, ly, 1, newest ? COL_WHITE : TTY_TEXT);
   }
 
-  // tmux status bar: the other screens, as windows
+  // tmux status bar: the other screens, as windows (tap anywhere on it for the window chooser)
   gfx->fillRect(0, 258, SCR_W, 22, ACC);
   for (int i = 0; i < TILE_COUNT - 5; i++) {
     int k = 5 + i, wxp = TILE_X[k];
@@ -4444,10 +4504,10 @@ void sendStatus(const char *extra = nullptr) {
   char buf[300];
   unsigned long used = fsOK ? (unsigned long)FFat.usedBytes() : 0;
   unsigned long total = fsOK ? (unsigned long)FFat.totalBytes() : 0;
-  snprintf(buf, sizeof(buf), "b=%d;v=%.2f;c=%d;m=%d;fw=%s;fs=%lu,%lu;lk=%d,%d;imu=%d;toy=%d;th=%d;st=%lu;eye=%d;jb=%d;q=%d;nb=%d;wv=%d%s%s",
+  snprintf(buf, sizeof(buf), "b=%d;v=%.2f;c=%d;m=%d;fw=%s;fs=%lu,%lu;lk=%d,%d;imu=%d;toy=%d;th=%d;st=%lu;eye=%d;jb=%d;q=%d;nb=%d;wv=%d;ch=%d%s%s",
            batPct, batVolts, charging ? 1 : 0, mode, FW_VERSION, used, total,
            bgStyle, faceStyle, imuOK ? 1 : 0, toyKind, theme, (unsigned long)stepsToday,
-           exprAuto ? 255 : exprSet, jbPlaying ? jbSong : -1, jbQLen, npBig ? 1 : 0, wandView,
+           exprAuto ? 255 : exprSet, jbPlaying ? jbSong : -1, jbQLen, npBig ? 1 : 0, wandView, deckChoose ? 1 : 0,
            extra ? ";" : "", extra ? extra : "");
   notifyText(buf);
 }
@@ -4940,6 +5000,7 @@ void onSwipe(int dir) {
 
 // Swipe down closes whatever is open. On the home screen, up and down change brightness.
 void onVSwipe(int up) {
+  if (mode == M_DECK && deckChoose) { deckChoose = false; return; }
   if (mode == M_CLAUDE && ccBig) { if (up > 0) { cbJump(11); cbTouchAt = millis(); } else ccBigClose(); return; }
   if (up < 0 && mode != M_DECK) { closeModule(); return; }
   if (mode == M_TORCH) return;
@@ -4952,7 +5013,9 @@ void onTap(bool dbl) {
   sfx(0);
   switch (mode) {
     case M_DECK:
-      deckRun(tileAt(tch.x0, tch.y0));
+      if (deckChoose) deckChooseTap(tch.x0, tch.y0);
+      else if (tch.y0 >= 252 && deckPending < 0) { deckChoose = true; deckChooseAt = millis(); chosePick = -1; sfx(1); }   // the status bar: the window chooser
+      else deckRun(tileAt(tch.x0, tch.y0));
       break;
     case M_CLOCK:
       if (dbl) {              // second tap of a double tap: undo the style change, flip 12/24 h
@@ -5123,6 +5186,7 @@ void handleButton() {
     else if (sleeping) touchActivity();
     else if (mode == M_CLAUDE && ccBig) { touchActivity(); ccBigClose(); }
     else if (mode != M_DECK) { touchActivity(); closeModule(); }
+    else if (deckChoose) { touchActivity(); deckChoose = false; }  // back out of the window chooser
     else { sleeping = true; analogWrite(LCD_BL, 0); }             // on the deck: screen off
   }
   wasDown = down;
@@ -5414,7 +5478,7 @@ void loop() {
 
   // tell the web app straight away when the screen changes, so its preview follows the charm
   static uint32_t lastSig = 0;
-  uint32_t sig = mode | (theme << 5) | ((uint32_t)npBig << 8) | ((uint32_t)toyKind << 9) | ((uint32_t)(exprAuto ? 255 : exprSet) << 13) | ((uint32_t)bgStyle << 21) | ((uint32_t)faceStyle << 26) | ((uint32_t)wandView << 28);
+  uint32_t sig = mode | (theme << 5) | ((uint32_t)npBig << 8) | ((uint32_t)toyKind << 9) | ((uint32_t)(exprAuto ? 255 : exprSet) << 13) | ((uint32_t)bgStyle << 21) | ((uint32_t)faceStyle << 26) | ((uint32_t)wandView << 28) | ((uint32_t)deckChoose << 30);
   if (bleConnected && (millis() - lastStatus > 15000 || jbDirty || (sig != lastSig && millis() - lastStatus > 120))) { lastStatus = millis(); jbDirty = false; lastSig = sig; sendStatus(); }
 
   if (sleeping) { delay(10); return; }

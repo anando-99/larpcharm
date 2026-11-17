@@ -9,7 +9,7 @@
 | parameters | 38,848 (155 KB as float32) |
 | output | a 32-number fingerprint; classes by nearest prototype (cosine), "no match" under 0.85 or nearest = `none` |
 | classes | circle, zigzag, flick, heart, none (not a spell) |
-| training data | 110 takes from one person in one sitting (20 per spell, 30 not-a-spell), heavily augmented |
+| training data | 110 takes from one person in one sitting (20 per spell, 30 not-a-spell), heavily augmented: [`dataset/`](../../../../dataset) |
 | training | cosine softmax (scale 16), label smoothing 0.05, AdamW 3e-3, one-cycle, 160 epochs |
 | runs on | the charm (ESP32-S3, 69 ms, `spells_engine.h`) and the website (`spells-net.js`), both verified against PyTorch to ~1e-7 |
 
@@ -20,5 +20,5 @@ built-in spells 100% correct, none cast as another; "not a spell" 96.7% rejected
 **Limits.** One person, one sitting: it has learnt its owner's way of drawing, and cross-validation within a sitting is
 optimistic. Not tested on other people or other grips. Casting needs a thumb on the screen; it isn't made for always-on use.
 
-Files: `spells_cnn.pt` (PyTorch weights), `model.json` (training details and metrics), `eval.json` (the full
+How it was trained, step by step: [`../train_spells.ipynb`](../train_spells.ipynb). Files: `spells_cnn.pt` (PyTorch weights), `model.json` (training details and metrics), `eval.json` (the full
 evaluation), `testvec.*` (takes and their PyTorch fingerprints, for the C and JS tests).

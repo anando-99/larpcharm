@@ -93,6 +93,10 @@ the next**. So every take starts with half a second of stillness, and the offset
 
 ## 3. The data
 
+The recordings are in the repo: [`dataset/`](../dataset), one folder per shape, one CSV per take, with an index and
+a datasheet. Every step of the training, with its outputs, is in the notebook
+[`firmware/tools/spells/train_spells.ipynb`](../firmware/tools/spells/train_spells.ipynb).
+
 Recorded with the website's recorder. Hold your thumb on the charm's screen while drawing; on release, the take goes
 over Bluetooth as base64 chunks with a checksum, and a damaged take is asked for again.
 
@@ -226,18 +230,22 @@ dataset, which shows at a glance where the clusters are tight and which takes si
 
 ## 8. Reproduce it
 
+The notebook [`train_spells.ipynb`](../firmware/tools/spells/train_spells.ipynb) walks through all of it on the
+repo's [`dataset/`](../dataset), and reproduces the shipped weights exactly. From the command line:
+
 ```sh
 cd firmware/tools/spells
-python3 look.py data.json strokes.png          # every take's stroke
-python3 baseline.py data.json                  # the DTW baseline
-python3 evaluate.py data.json model/eval.json  # cross-validation and teach-your-own (about 45 s)
-python3 train.py data.json model/eval.json     # the final network -> spells_model.h, spells-model.js
-python3 figures.py data.json                   # the figures on this page
+python3 look.py ../../../dataset strokes.png             # every take's stroke
+python3 baseline.py ../../../dataset                     # the DTW baseline
+python3 evaluate.py ../../../dataset model/eval.json     # cross-validation and teach-your-own (about 45 s)
+python3 train.py ../../../dataset model/eval.json        # the final network -> spells_model.h, spells-model.js
+python3 figures.py ../../../dataset                      # the figures on this page
 c++ -O2 -std=c++17 -o /tmp/t test_engine.cpp && /tmp/t   # the charm's engine vs PyTorch
 node test_net.js                                          # the website's engine vs PyTorch
 ```
 
-`data.json` is a recording exported from the spells tab. Recordings stay out of git.
+New recordings: export them from the spells tab, then `python3 export_dataset.py <export>.json ../../../dataset`
+(the tools also read an export file directly).
 
 ## 9. Honest limits, and what's next
 

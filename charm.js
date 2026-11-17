@@ -1,4 +1,4 @@
-// A working copy of the charm's screen. It draws the same deck and blocks as firmware 9.3,
+// A working copy of the charm's screen. It draws the same deck and blocks as firmware 9.4,
 // follows the controls on this page, and opens a block when you tap it.
 (() => {
   const $ = id => document.getElementById(id);
@@ -152,7 +152,7 @@
   const boot = performance.now();
   const klog = [];
   const charmLog = window.charmLog = msg => { klog.push({ t: performance.now() - boot, s: String(msg).replace(/[^\x20-\x7e]/g, '?').slice(0, 31) }); if (klog.length > 8) klog.shift(); };
-  ['kernel: larp-os 9.3 up', 'imu: qmi8658 online', 'fs: ffat mounted', 'rtc: clock ok'].forEach(charmLog);
+  ['kernel: larp-os 9.4 up', 'imu: qmi8658 online', 'fs: ffat mounted', 'rtc: clock ok'].forEach(charmLog);
   const typing = { cmd: '', at: 0, tile: -1 };
   const scope = new Array(74).fill(0); let scopeHead = 0, lastTilt = 0;
   const bar = (f, n, fill, head, empty) => { const k = Math.round(Math.max(0, Math.min(1, f)) * (n - 2)); let s = '['; for (let i = 0; i < n - 2; i++) s += i < k - 1 ? fill : i === k - 1 ? head : empty; return s + ']'; };
@@ -164,9 +164,39 @@
     G('$', x + 9, y - 3, 1, active ? ACC : TTY_DIM); G(TCMD[i], x + 21, y - 3, 1, active ? '#fff' : ACC);
   }
   function deckRun(i) { if (i < 0 || typing.tile >= 0) return; typing.cmd = 'open ' + TOPEN[i]; typing.at = performance.now(); typing.tile = i; }
+  // the window chooser (the firmware's drawChooser): tap the status bar, every screen in two big columns
+  const CHOOSE = [['spells', 'spl', 17], ['spotify', 'spt', 4], ['weather', 'wx', 15], ['claude', 'cc', 14], ['tty', 'tty', 13], ['eyes', 'eye', 9], ['pet', 'ps', 5], ['games', 'rng', 6],
+    ['clock', 'date', 0], ['jukebox', 'jbx', 10], ['photo', 'img', 2], ['message', 'motd', 1], ['id card', 'id', 7], ['torch', 'lux', 11]];
+  const chooser = { on: false, at: 0, pick: -1 };
+  window.charmChooser = v => { if (v && !chooser.on) chooser.at = performance.now(); chooser.on = !!v; };
+  const chooseAt = (x, y) => { const col = x < 8 + 110 + 2 ? 0 : 1, row = Math.floor((y - 22) / 33); if (y < 22 || row < 0 || row >= 7) return -1; const i = row * 2 + col; return i < CHOOSE.length ? i : -1; };
+  function drawChooser() {
+    const now = performance.now(), LOW = mixk(ACC, .2);
+    R(0, 0, W, H, TTY_BG); G('$', 16, 3, 1, ACC); G('tmux choose-window', 28, 3, 1, '#fff');
+    CHOOSE.forEach(([n, cmd, m], i) => {
+      if (now - chooser.at < (i >> 1) * 22) return;
+      const x = 8 + (i % 2) * 114, y = 22 + (i >> 1) * 33, pick = i === chooser.pick;
+      if (pick) R(x, y, 110, 29, ACC); else { c.strokeStyle = LOW; c.lineWidth = 1; c.strokeRect(x + .5, y + .5, 109, 28); }
+      G(i < 10 ? String(i) : String.fromCharCode(87 + i), x + 5, y + 4, 1, pick ? TTY_BG : ACC);
+      G(n, x + 16, y + 7, 2, pick ? TTY_BG : '#fff'); G(cmd, x + 106 - cmd.length * 6, y + 19, 1, pick ? TTY_BG : TTY_DIM);
+    });
+    G('tap a window', 16, 264, 1, TTY_TEXT); G('pwr: back', 170, 264, 1, TTY_DIM);
+  }
+  function chooseTap(x, y) {
+    const i = chooseAt(x, y);
+    if (i < 0) { chooser.on = false; return; }
+    chooser.pick = i;
+    setTimeout(() => {
+      chooser.on = false; chooser.pick = -1;
+      const [n, , m] = CHOOSE[i], ti = TMODE.indexOf(m);
+      if (typing.tile >= 0) return;
+      typing.cmd = 'open ' + n; typing.at = performance.now(); typing.tile = ti >= 0 ? ti : 100 + m;
+    }, 90);
+  }
   function deck() {
     const now = performance.now(), up = now - boot, d = new Date(), on = document.body.classList.contains('connected');
-    if (typing.tile >= 0 && now - typing.at >= typing.cmd.length * 18 + 160) { const i = typing.tile; openedTile = i; typing.tile = -1; typing.cmd = ''; charmLog('sh: open ' + TOPEN[i]); window.charmGoto(TMODE[i]); }
+    if (typing.tile >= 0 && now - typing.at >= typing.cmd.length * 18 + 160) { const i = typing.tile; charmLog('sh: ' + typing.cmd); typing.tile = -1; typing.cmd = ''; if (i >= 100) { openedTile = -1; window.charmGoto(i - 100); } else { openedTile = i; window.charmGoto(TMODE[i]); } }
+    if (chooser.on) return drawChooser();
     const act = typing.tile, LOW = mixk(ACC, .2);
     R(0, 0, W, H, TTY_BG);
     // prompt
@@ -1190,6 +1220,8 @@
     }
     if (ui.mode === 4 && window.npPreviewTap(x, y)) return;
     if (ui.mode !== 8) return window.charmGoto(8);
+    if (chooser.on) return chooseTap(x, y);
+    if (y >= 252 && typing.tile < 0) { chooser.on = true; chooser.at = performance.now(); chooser.pick = -1; return; }   // the status bar: the window chooser
     for (let i = 0; i < TX.length; i++) if (x >= TX[i] - 2 && x < TX[i] + TW[i] + 2 && y >= TY[i] - 2 && y < (i >= 5 ? H : TY[i] + TH[i] + 3)) return deckRun(i);
   }
 
