@@ -102,7 +102,7 @@ async function onDisconnected(){
 const authWait = { fn: null };
 function authNext(pred, ms = 8000){
   return new Promise((resolve, reject) => {
-    const t = setTimeout(() => { authWait.fn = null; reject(new Error('The charm didn’t answer. Update its firmware (sys tab) if it is older than 9.5.')); }, ms);
+    const t = setTimeout(() => { authWait.fn = null; reject(new Error('The charm didn’t answer. If it runs a development build older than 1.0.0, install the firmware over usb (sys tab) first.')); }, ms);
     authWait.fn = s => { if (!pred(s)) return; clearTimeout(t); authWait.fn = null; resolve(s); };
   });
 }

@@ -12,7 +12,6 @@ Larp Charm runs on a Waveshare ESP32-S3-Touch-LCD-1.69 (240×280 IPS, capacitive
 
 *Every screen above was read straight out of a real charm's frame buffer over USB ([`firmware/tools/screens.py`](firmware/tools/screens.py)); the spells were cast by replaying recorded takes through the network on the charm.*
 
-![Web app with the live charm preview](docs/web-app.png)
 
 ## Highlights
 
@@ -78,7 +77,6 @@ Commands cover mode switching, text, time sync, now playing, chunked transfer (`
 index.html, app.js, charm.js, spells.js web app (served by GitHub Pages)
 spells-net.js                           the spell network in JS (the same as the charm's)
 songs.js, spells-model.js               generated data shared with the firmware
-docs/                                   README media
 larp-bridge/                            Claude Code ⇄ charm bridge, hooks, installer, launcher presets
 firmware/LarpCharm/                     Arduino sketch and generated headers
 firmware/tools/                         generator for the melodies
@@ -132,7 +130,7 @@ arduino-cli compile --upload -p <port> \
   firmware/LarpCharm
 ```
 
-The web app and the firmware are versioned together; this app expects firmware **9.5** (shown on the charm's status screen and in the app once connected). To publish a release: `firmware/tools/release.sh --gh` (builds, refreshes `flash/` for the website's installers, and makes a GitHub release).
+The web app and the firmware are versioned together; this app expects firmware **1.0.0** (shown on the charm's status screen and in the app once connected). Public releases start at **1.0.0**; the version numbers in older commits and in the docs' history (up to 9.5) were development builds. To publish a release: `firmware/tools/release.sh --gh` (builds, refreshes `flash/` for the website's installers, and makes a GitHub release).
 
 ## Using the charm
 

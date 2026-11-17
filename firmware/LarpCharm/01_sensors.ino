@@ -73,6 +73,11 @@ void imuInit() {
   if (Wire.endTransmission(false) != 0) return;
   if (Wire.requestFrom((uint8_t)IMU_ADDR, (uint8_t)1) != 1) return;
   if (Wire.read() != 0x05) return;
+  // A reboot (an update, a restart from USB) doesn't power-cycle the sensor, which keeps whatever the last session set,
+  // e.g. the spell screens' +-8 g range, and then ignores the changes below. Soft-reset it to its defaults first.
+  imuWrite(0x60, 0xB0);     // RESET
+  delay(30);
+  imuWrite(0x08, 0x00);     // CTRL7: everything off while it is set up
   imuWrite(0x02, 0x40);     // CTRL1: register auto-increment
   imuWrite(0x03, 0x16);     // CTRL2: accel +-4 g, 125 Hz
   imuWrite(0x08, 0x01);     // CTRL7: accelerometer on, gyro off (saves power)
@@ -92,6 +97,7 @@ void imuInit() {
     if (good >= 4) { imuOK = true; return; }
   }
   imuBE = false;
+  klog("imu: no 1 g at rest");
 }
 
 // Reads the accelerometer. Returns true when the charm was shaken.

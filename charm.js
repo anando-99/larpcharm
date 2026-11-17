@@ -1,4 +1,4 @@
-// A working copy of the charm's screen. It draws the same deck and blocks as firmware 9.4,
+// A working copy of the charm's screen. It draws the same deck and blocks as firmware 1.0.0,
 // follows the controls on this page, and opens a block when you tap it.
 (() => {
   const $ = id => document.getElementById(id);
@@ -152,7 +152,7 @@
   const boot = performance.now();
   const klog = [];
   const charmLog = window.charmLog = msg => { klog.push({ t: performance.now() - boot, s: String(msg).replace(/[^\x20-\x7e]/g, '?').slice(0, 31) }); if (klog.length > 8) klog.shift(); };
-  ['kernel: larp-os 9.4 up', 'imu: qmi8658 online', 'fs: ffat mounted', 'rtc: clock ok'].forEach(charmLog);
+  ['kernel: larp-os 1.0.0 up', 'imu: qmi8658 online', 'fs: ffat mounted', 'rtc: clock ok'].forEach(charmLog);
   const typing = { cmd: '', at: 0, tile: -1 };
   const scope = new Array(74).fill(0); let scopeHead = 0, lastTilt = 0;
   const bar = (f, n, fill, head, empty) => { const k = Math.round(Math.max(0, Math.min(1, f)) * (n - 2)); let s = '['; for (let i = 0; i < n - 2; i++) s += i < k - 1 ? fill : i === k - 1 ? head : empty; return s + ']'; };

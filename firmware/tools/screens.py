@@ -1,7 +1,7 @@
 """The screen gallery, captured from a real charm over USB:   python3 firmware/tools/screens.py
 Every screen is drawn by the firmware on the charm and read straight out of its frame buffer (serial command `shot`),
 so these are the exact pixels, scanlines and all. Sample content (a song, a sketch, weather in Tokyo, generic names)
-replaces anything personal, in memory only; the charm reboots before and after. Spells are cast by replaying
+replaces anything personal, in memory only, and the clock is set to UTC; the charm reboots before and after. Spells are cast by replaying
 recorded takes from dataset/ through the charm's own network.
 Writes docs/screens/<screen>.png and docs/screens/gallery.png."""
 import base64, os, sys, time
@@ -21,7 +21,7 @@ def take(label, k=0):
 
 c = Charm()
 print('rebooting the charm for a clean slate...'); c.reboot()
-c.cmd(f'time {int(time.time())} {int(-time.timezone / 60 if not time.localtime().tm_isdst else -time.altzone / 60)}')
+c.cmd(f'time {int(time.time())} 0')                     # UTC, so the gallery doesn't give away where it was made
 for d in ('card', 'np', 'art', 'wx', 'sketch'): c.cmd('demo ' + d)
 shots = []
 def grab(name, title, setup=(), wait=1.2):

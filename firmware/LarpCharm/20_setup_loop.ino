@@ -138,6 +138,7 @@ void klogWatch() {
 //   pkt <base64>                        handle a Bluetooth packet as if it came over the air; the answers come back as
 //                                       "NOTE <text>" (firmware/tools/test_link.py tests pairing and updates this way)
 //   unpair                              forget every paired browser
+//   imu                                 what the motion sensor answers (diagnostics)
 //   reboot
 // Used by firmware/tools/screens.py (the screen gallery) and firmware/tools/spells/device_eval.py.
 static size_t b64dec(const char *s, size_t n, uint8_t *o, size_t cap) {
@@ -209,6 +210,13 @@ void serialCmd(const String &l) {
     Serial.println("OK pkt");
   }
   else if (w == "unpair") { authForgetAll(); Serial.println("OK unpair"); }
+  else if (w == "imu") {                             // what the motion sensor says, step by step (a=again: set it up again)
+    if (a == "again" && !recSampling) { imuOK = false; imuInit(); }
+    Wire.beginTransmission(IMU_ADDR); Wire.write(0x00); int e = Wire.endTransmission(false);
+    int got = Wire.requestFrom((uint8_t)IMU_ADDR, (uint8_t)1); int who = got == 1 ? Wire.read() : -1;
+    int16_t x = 0, y = 0, z = 0; bool rd = imuReadRaw(x, y, z);
+    Serial.printf("IMU ok=%d who=%d tx=%d got=%d read=%d raw=%d,%d,%d be=%d sampling=%d\n", imuOK, who, e, got, rd, x, y, z, imuBE, recSampling);
+  }
   else if (w == "time") { int s2 = a.indexOf(' '); time_t e = (time_t)strtoul(a.c_str(), nullptr, 10); tzMin = s2 > 0 ? a.substring(s2 + 1).toInt() : tzMin; setSystemTime(e); rtcWriteUTC(e); Serial.println("OK time"); }
   else if (w == "reboot") { Serial.println("OK reboot"); delay(50); ESP.restart(); }
   else Serial.printf("ERR %s\n", w.c_str());

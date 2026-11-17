@@ -136,9 +136,11 @@ handler. A locked link refuses commands; a made-up answer fails; a wrong code is
 right code pairs; Python's HMAC-SHA256 unlocks a new link (so mbedtls on the charm agrees); a replayed answer fails;
 a locked link can't start an update; an image with the wrong SHA-256 is refused; and a real 1.1 MB image is accepted,
 after which the charm restarts into the other app slot and unlocks again. (These tests found that, before any
-Bluetooth connection, a just-booted charm's first challenge was all zeros; challenges are now fresh every time one is issued.)
+Bluetooth connection, a just-booted charm's first challenge was all zeros; challenges are now fresh every time one is issued.
+Capturing the gallery found that a restart from a spell screen left the motion sensor in its ±8 g range, where startup
+rejected it; the sensor is now soft-reset at every startup.)
 
-**Hardware in the loop** (`device_eval.py`, firmware 9.5): all 118 recorded takes, replayed through the network on
+**Hardware in the loop** (`device_eval.py`, firmware 1.0.0): all 118 recorded takes, replayed through the network on
 the charm, give **the same decision as PyTorch for 118 of 118**. The fingerprints differ by at most **6 × 10⁻⁷**, and
 the network takes **68 to 70 ms** each time.
 

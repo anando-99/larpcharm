@@ -4,7 +4,7 @@ Air gestures ("spells") drawn with the Larp Charm in hand, recorded by the charm
 the spell network was trained and evaluated on (see [docs/spells.md](../docs/spells.md) and the training notebook,
 [firmware/tools/spells/train_spells.ipynb](../firmware/tools/spells/train_spells.ipynb)).
 
-**127 takes, 5.8 minutes of motion**, one person, one sitting (2026-11-16), firmware 9.1.
+**127 takes, 5.8 minutes of motion**, one person, one sitting (2026-11-16), recorded with a development build of the firmware (9.1).
 
 | folder | what | takes | length |
 | --- | --- | --- | --- |

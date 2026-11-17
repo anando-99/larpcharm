@@ -4,7 +4,7 @@ python3 device_eval.py ../../../dataset [model/device_eval.json]
 Each take goes over USB (serial command `take`); the charm runs its own engine (spells_engine.h: the input
 pipeline, the 38,848-parameter CNN, the prototypes, the 0.85 threshold) exactly as when you cast, and reports its
 decision, its fingerprint and its timing. They are compared with PyTorch's for the same take. Casting from serial
-plays the effect but skips the spell's action. Needs the charm on USB with firmware 9.5 or later."""
+plays the effect but skips the spell's action. Needs the charm on USB with firmware 1.0.0 or later."""
 import base64, json, re, sys, time
 import numpy as np, torch
 from spells_data import load

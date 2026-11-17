@@ -59,9 +59,15 @@ class Charm:
     def shot(self):
         """the screen, as a (280, 240, 3) uint8 array"""
         import numpy as np
-        self.send('shot')
-        w, h, b64 = self.until('SHOT', 20).split(' ', 3)[1:]
-        v = np.frombuffer(base64.b64decode(b64), '<u2').reshape(int(h), int(w)).astype(np.uint32)
+        for attempt in range(4):                              # a byte can get lost on the way: ask again
+            self.send('shot')
+            w, h, b64 = self.until('SHOT', 20).split(' ', 3)[1:]
+            try:
+                raw = base64.b64decode(b64, validate=True)
+                if len(raw) == int(w) * int(h) * 2: break
+            except ValueError: pass
+        else: raise IOError('the screenshot kept arriving damaged')
+        v = np.frombuffer(raw, '<u2').reshape(int(h), int(w)).astype(np.uint32)
         r, g, b = (v >> 11) & 31, (v >> 5) & 63, v & 31
         return np.stack([r * 255 // 31, g * 255 // 63, b * 255 // 31], -1).astype(np.uint8)
 

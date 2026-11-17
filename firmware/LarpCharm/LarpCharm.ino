@@ -1,5 +1,5 @@
 /*
-  LARP CHARM firmware v9.5
+  LARP CHARM firmware v1.0.0
   Board : Waveshare ESP32-S3-Touch-LCD-1.69 (240x280 ST7789V2, CST816T touch)
   Control: Bluetooth LE from the Larp Charm web app
 
@@ -77,7 +77,7 @@ struct EyeShape { float w, h, rad, lidT, slope, lidB; };
 #define SVC_UUID    "6e400001-c4a7-4d2e-9b3c-c4a2d7c0ffee"
 #define RX_UUID     "6e400002-c4a7-4d2e-9b3c-c4a2d7c0ffee"
 #define STATUS_UUID "6e400003-c4a7-4d2e-9b3c-c4a2d7c0ffee"
-#define FW_VERSION  "9.5"
+#define FW_VERSION  "1.0.0"
 #define DEVICE_NAME "Larp Charm"
 
 enum Cmd : uint8_t {
