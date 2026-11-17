@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// larp-bridge: links Claude Code on this computer to the Larp Charm.
+// larp-bridge: links Claude Code on this computer to the Larp Charm (and, with an API key, your Steam profile).
 //
 //   Claude Code ──hooks / statusline──▶ bridge (127.0.0.1:7337) ──SSE──▶ web app ──BLE──▶ charm
 //                                           ▲                                            │
@@ -207,6 +207,132 @@ function launch(i) {
   return true;
 }
 
+// ── Steam: your profile, library, hours and the game you're playing (Steam Web API) ──
+// Steam's Web API sends no CORS headers, so the web page can't ask it. The bridge asks, with your API key, and streams
+// the answer to the page like Claude Code's state. The key stays on this computer: STEAM_API_KEY / STEAM_ID in the
+// environment, or larp-bridge/steam.json ({ "key": "...", "id": "profile URL, vanity name or SteamID64" }, git ignores it).
+const STEAM_API = (process.env.STEAM_API_BASE || 'https://api.steampowered.com').replace(/\/$/, '');
+const STEAM_NOW_MS = 30000, STEAM_LIB_MS = 10 * 60000;
+const STEAM_FILE = process.env.LARP_STEAM_FILE || path.join(HERE, 'steam.json');
+const steamCfg = (() => {
+  let f = {};
+  try { f = JSON.parse(fs.readFileSync(STEAM_FILE, 'utf8')); } catch {}
+  return { key: String(process.env.STEAM_API_KEY || f.key || '').trim(), id: String(process.env.STEAM_ID || f.id || '').trim() };
+})();
+const steam = { type: 'steam', configured: !!(steamCfg.key && steamCfg.id), ok: false, err: '', at: 0, profile: null, level: 0,
+  playing: null, games: [], gameCount: 0, totalMin: 0, wkMin: 0, libPrivate: false, keySet: !!steamCfg.key, idText: steamCfg.id };
+const steamPriv = { id: '', libAt: 0, busy: false, first: true, avaUrl: '', ava: null, avaFor: '' };
+
+async function steamGet(iface, method, ver, params) {
+  const q = new URLSearchParams({ key: steamCfg.key, format: 'json', ...params });
+  const r = await fetch(`${STEAM_API}/${iface}/${method}/v${ver}/?${q}`, { signal: AbortSignal.timeout(10000) });
+  if (r.status === 401 || r.status === 403) throw new Error('Steam rejected the API key');
+  if (r.status === 429) throw new Error('Steam says: too many requests, slowing down');
+  if (!r.ok) throw new Error(`Steam answered ${r.status}`);
+  return (await r.json()).response || {};
+}
+// a profile URL, a vanity name or a SteamID64, to a SteamID64
+async function steamResolve() {
+  if (steamPriv.id) return steamPriv.id;
+  let id = steamCfg.id.replace(/\/+$/, '');
+  const m = id.match(/steamcommunity\.com\/(?:id|profiles)\/([^/?#]+)/);
+  if (m) id = decodeURIComponent(m[1]);
+  if (/^\d{17}$/.test(id)) return (steamPriv.id = id);
+  const r = await steamGet('ISteamUser', 'ResolveVanityURL', 1, { vanityurl: id });
+  if (r.success !== 1 || !r.steamid) throw new Error(`no Steam profile called "${tidy(id, 32)}"`);
+  return (steamPriv.id = r.steamid);
+}
+async function steamLibrary(id) {
+  const [own, lvl] = await Promise.all([
+    steamGet('IPlayerService', 'GetOwnedGames', 1, { steamid: id, include_appinfo: 1, include_played_free_games: 1 }),
+    steamGet('IPlayerService', 'GetSteamLevel', 1, { steamid: id }).catch(() => ({})),
+  ]);
+  steamPriv.libAt = Date.now();
+  if (lvl.player_level != null) steam.level = lvl.player_level | 0;
+  const all = (own.games || []).map(g => ({ appid: g.appid | 0, name: String(g.name || `app ${g.appid}`).slice(0, 80),
+    min: g.playtime_forever | 0, wk: g.playtime_2weeks | 0, last: g.rtime_last_played | 0, icon: g.img_icon_url || '' }));
+  steam.libPrivate = own.game_count === undefined;          // Steam answers {} when "game details" aren't public
+  steam.gameCount = own.game_count | 0;
+  steam.totalMin = all.reduce((s, g) => s + g.min, 0);
+  steam.wkMin = all.reduce((s, g) => s + g.wk, 0);
+  // the most played, plus anything played in the last two weeks
+  const top = [...all].sort((a, b) => b.min - a.min).slice(0, 40), seen = new Set(top.map(g => g.appid));
+  steam.games = [...top, ...all.filter(g => g.wk && !seen.has(g.appid))];
+}
+async function steamPoll(force = false) {
+  if (!steam.configured || steamPriv.busy) return;
+  steamPriv.busy = true;
+  try {
+    const id = await steamResolve();
+    const p = ((await steamGet('ISteamUser', 'GetPlayerSummaries', 2, { steamids: id })).players || [])[0];
+    if (!p) throw new Error('Steam has no profile with that id');
+    const was = steam.playing, appid = +p.gameid || 0;
+    // the start is only known if this bridge saw the game begin; a game already running when it starts is "seen"
+    steam.playing = p.gameextrainfo ? (was && was.appid === appid ? was : { name: String(p.gameextrainfo).slice(0, 80), appid, since: Date.now(), exact: !steamPriv.first }) : null;
+    const ended = was && (!steam.playing || steam.playing.appid !== was.appid);
+    steam.profile = { id, name: String(p.personaname || '').slice(0, 32), state: p.personastate | 0, url: p.profileurl || '',
+      country: p.loccountrycode || '', since: p.timecreated ? new Date(p.timecreated * 1000).getUTCFullYear() : 0,
+      public: p.communityvisibilitystate === 3, avatar: p.avatarhash || '' };
+    steamPriv.avaUrl = p.avatarmedium || '';
+    if (force || ended || steamPriv.first || Date.now() - steamPriv.libAt > STEAM_LIB_MS) await steamLibrary(id);
+    steamPriv.first = false;
+    steam.ok = true; steam.err = '';
+  } catch (e) {
+    steam.err = e.name === 'TimeoutError' ? 'Steam did not answer' : e.message;
+    if (/API key/.test(steam.err)) steamPriv.id = '';
+  } finally {
+    steamPriv.busy = false; steam.at = Date.now();
+    publishSteam();
+  }
+}
+// the avatar, fetched here because the page can't read Steam's CDN; only from Steam's own hosts (or the test API)
+const steamHostOK = u => { try { const h = new URL(u).host; return /(^|\.)(steamstatic\.com|akamaihd\.net)$/.test(h) || h === new URL(STEAM_API).host; } catch { return false; } };
+async function steamAvatar() {
+  const u = steamPriv.avaUrl;
+  if (!u || !steamHostOK(u)) return null;
+  if (steamPriv.avaFor !== u) {
+    const r = await fetch(u, { signal: AbortSignal.timeout(10000) });
+    if (!r.ok) return null;
+    steamPriv.ava = Buffer.from(await r.arrayBuffer()); steamPriv.avaFor = u;
+  }
+  return steamPriv.ava;
+}
+const publishSteam = () => { const m = `data: ${JSON.stringify(steam)}\n\n`; for (const res of subs.keys()) res.write(m); };
+if (!steam.configured) steam.err = !steamCfg.key ? 'no key' : 'no id';
+
+// Setting the key and profile from the web app: tried against Steam first, and only kept (in steam.json, readable by
+// you alone) if Steam accepts them. The key is never sent back to a page; the page only learns that one is saved.
+function steamReset() {
+  Object.assign(steam, { configured: !!(steamCfg.key && steamCfg.id), ok: false, err: '', at: 0, profile: null, level: 0, playing: null,
+    games: [], gameCount: 0, totalMin: 0, wkMin: 0, libPrivate: false, keySet: !!steamCfg.key, idText: steamCfg.id });
+  Object.assign(steamPriv, { id: '', libAt: 0, first: true, avaUrl: '', ava: null, avaFor: '' });
+  if (!steam.configured) steam.err = !steamCfg.key ? 'no key' : 'no id';
+}
+async function steamConfigure(c) {
+  if (c.clear) {
+    steamCfg.key = ''; steamCfg.id = '';
+    try { fs.unlinkSync(STEAM_FILE); } catch {}
+    steamReset(); publishSteam();
+    return { ok: true };
+  }
+  const key = String(c.key || '').trim() || steamCfg.key, id = String(c.id || '').trim();
+  if (!/^[0-9A-Fa-f]{32}$/.test(key)) return { ok: false, err: c.key ? 'a Steam Web API key is 32 letters and digits (0-9, A-F)' : 'enter your API key' };
+  if (!id || id.length > 200) return { ok: false, err: 'enter your profile URL, custom name or SteamID64' };
+  for (let i = 0; steamPriv.busy && i < 100; i++) await new Promise(r => setTimeout(r, 100));
+  const old = { ...steamCfg };
+  steamCfg.key = key; steamCfg.id = id;
+  steamReset();
+  await steamPoll(true);
+  if (!steam.ok) {
+    const err = steam.err;
+    Object.assign(steamCfg, old); steamReset(); if (steam.configured) steamPoll(true); else publishSteam();
+    return { ok: false, err };
+  }
+  fs.writeFileSync(STEAM_FILE, JSON.stringify({ key, id }, null, 2) + '\n', { mode: 0o600 });
+  try { fs.chmodSync(STEAM_FILE, 0o600); } catch {}
+  return { ok: true, name: steam.profile && steam.profile.name };
+}
+
 // ── web clients (SSE) ──
 const subs = new Map();               // response -> { id, remote }
 let clientSeq = 1;
@@ -249,6 +375,13 @@ const server = http.createServer(async (req, res) => {
       return send(res, 200, url.pathname === '/hook' ? await onHook(data) : (onStatus(data), {}));
     }
     // from the web app
+    if (url.pathname === '/steam/avatar') {
+      if (origin && !ORIGINS.has(origin)) return send(res, 403, { error: 'origin not allowed' });
+      const img = await steamAvatar().catch(() => null);
+      if (!img) return send(res, 404, { error: 'no avatar' });
+      res.writeHead(200, { 'Content-Type': 'image/jpeg', 'Cache-Control': 'no-cache' });
+      return res.end(img);
+    }
     if (url.pathname === '/events' || url.pathname === '/cmd') {
       if (origin && !ORIGINS.has(origin)) return send(res, 403, { error: 'origin not allowed' });
       if (url.pathname === '/events') {
@@ -257,6 +390,8 @@ const server = http.createServer(async (req, res) => {
         subs.set(res, { id, remote: false }); countRemotes();
         res.write(`data: ${JSON.stringify({ type: 'hello', client: id })}\n\n`);
         res.write(`data: ${JSON.stringify(snapshot())}\n\n`);
+        res.write(`data: ${JSON.stringify(steam)}\n\n`);
+        if (steam.configured && Date.now() - steam.at > STEAM_NOW_MS) steamPoll();
         req.on('close', () => { subs.delete(res); countRemotes(); });
         return;
       }
@@ -264,6 +399,8 @@ const server = http.createServer(async (req, res) => {
       const c = await body(req);
       if (c.op === 'perm') return send(res, 200, { ok: answerPerm(+c.id, c.decision === 'allow') });
       if (c.op === 'launch') return send(res, 200, { ok: launch(+c.index) });
+      if (c.op === 'steam') { steamPoll(true); return send(res, 200, { ok: steam.configured }); }
+      if (c.op === 'steamConfig') return send(res, 200, await steamConfigure(c));
       if (c.op === 'remote') { for (const v of subs.values()) if (v.id === +c.client) v.remote = !!c.on; countRemotes(); publish(); return send(res, 200, { ok: true }); }
       return send(res, 400, { error: 'unknown op' });
     }
@@ -286,4 +423,7 @@ server.listen(PORT, '127.0.0.1', () => {
   console.log(`larp-bridge on http://localhost:${PORT}`);
   console.log(`  open http://localhost:${PORT} in Chrome, press Connect, and the charm follows Claude Code.`);
   console.log(`  presets: ${presets.map(p => p.name).join(', ')}`);
+  console.log(steam.configured ? '  steam: on (checks what you play every 30 s while a page is open)' : '  steam: off (enter your API key in the web app\'s steam tab)');
+  if (steam.configured) steamPoll();
+  setInterval(() => { if (subs.size && steam.configured) steamPoll(); }, STEAM_NOW_MS);
 });

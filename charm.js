@@ -1,4 +1,4 @@
-// A working copy of the charm's screen. It draws the same deck and blocks as firmware 1.0.0,
+// A working copy of the charm's screen. It draws the same deck and blocks as firmware 1.1.0,
 // follows the controls on this page, and opens a block when you tap it.
 (() => {
   const $ = id => document.getElementById(id);
@@ -152,7 +152,7 @@
   const boot = performance.now();
   const klog = [];
   const charmLog = window.charmLog = msg => { klog.push({ t: performance.now() - boot, s: String(msg).replace(/[^\x20-\x7e]/g, '?').slice(0, 31) }); if (klog.length > 8) klog.shift(); };
-  ['kernel: larp-os 1.0.0 up', 'imu: qmi8658 online', 'fs: ffat mounted', 'rtc: clock ok'].forEach(charmLog);
+  ['kernel: larp-os 1.1.0 up', 'imu: qmi8658 online', 'fs: ffat mounted', 'rtc: clock ok'].forEach(charmLog);
   const typing = { cmd: '', at: 0, tile: -1 };
   const scope = new Array(74).fill(0); let scopeHead = 0, lastTilt = 0;
   const bar = (f, n, fill, head, empty) => { const k = Math.round(Math.max(0, Math.min(1, f)) * (n - 2)); let s = '['; for (let i = 0; i < n - 2; i++) s += i < k - 1 ? fill : i === k - 1 ? head : empty; return s + ']'; };
@@ -166,19 +166,19 @@
   function deckRun(i) { if (i < 0 || typing.tile >= 0) return; typing.cmd = 'open ' + TOPEN[i]; typing.at = performance.now(); typing.tile = i; }
   // the window chooser (the firmware's drawChooser): tap the status bar, every screen in two big columns
   const CHOOSE = [['spells', 'spl', 17], ['spotify', 'spt', 4], ['weather', 'wx', 15], ['claude', 'cc', 14], ['tty', 'tty', 13], ['eyes', 'eye', 9], ['pet', 'ps', 5], ['games', 'rng', 6],
-    ['clock', 'date', 0], ['jukebox', 'jbx', 10], ['photo', 'img', 2], ['message', 'motd', 1], ['id card', 'id', 7], ['torch', 'lux', 11]];
+    ['clock', 'date', 0], ['jukebox', 'jbx', 10], ['photo', 'img', 2], ['message', 'motd', 1], ['id card', 'id', 7], ['torch', 'lux', 11], ['steam', 'stm', 18]];
   const chooser = { on: false, at: 0, pick: -1 };
   window.charmChooser = v => { if (v && !chooser.on) chooser.at = performance.now(); chooser.on = !!v; };
-  const chooseAt = (x, y) => { const col = x < 8 + 110 + 2 ? 0 : 1, row = Math.floor((y - 22) / 33); if (y < 22 || row < 0 || row >= 7) return -1; const i = row * 2 + col; return i < CHOOSE.length ? i : -1; };
+  const chooseAt = (x, y) => { const col = x < 8 + 110 + 1 ? 0 : 1, row = Math.floor((y - 22) / 29); if (y < 22 || row < 0 || row >= 8) return -1; const i = row * 2 + col; return i < CHOOSE.length ? i : -1; };
   function drawChooser() {
     const now = performance.now(), LOW = mixk(ACC, .2);
     R(0, 0, W, H, TTY_BG); G('$', 16, 3, 1, ACC); G('tmux choose-window', 28, 3, 1, '#fff');
     CHOOSE.forEach(([n, cmd, m], i) => {
       if (now - chooser.at < (i >> 1) * 22) return;
-      const x = 8 + (i % 2) * 114, y = 22 + (i >> 1) * 33, pick = i === chooser.pick;
-      if (pick) R(x, y, 110, 29, ACC); else { c.strokeStyle = LOW; c.lineWidth = 1; c.strokeRect(x + .5, y + .5, 109, 28); }
+      const x = 8 + (i % 2) * 112, y = 22 + (i >> 1) * 29, pick = i === chooser.pick;
+      if (pick) R(x, y, 110, 27, ACC); else { c.strokeStyle = LOW; c.lineWidth = 1; c.strokeRect(x + .5, y + .5, 109, 26); }
       G(i < 10 ? String(i) : String.fromCharCode(87 + i), x + 4, y + 2, 1, pick ? TTY_BG : ACC);
-      G(cmd, x + 107 - cmd.length * 6, y + 2, 1, pick ? TTY_BG : TTY_DIM); G(n, x + 8, y + 12, 2, pick ? TTY_BG : '#fff');
+      G(cmd, x + 107 - cmd.length * 6, y + 2, 1, pick ? TTY_BG : TTY_DIM); G(n, x + 8, y + 11, 2, pick ? TTY_BG : '#fff');
     });
     G('tap a window', 16, 264, 1, TTY_TEXT); G('pwr: back', 170, 264, 1, TTY_DIM);
   }
@@ -1053,6 +1053,73 @@
     wxb.say = !d ? 'eh? where am i?' : d.cond === 7 ? 'kaminari!! eek' : d.cond === 5 || d.cond === 4 ? 'ame da~ puddles!' : d.cond === 6 ? 'yuki da!! snowball!' : d.cond === 3 ? "kiri... can't see" : !day ? 'oyasumi~ zzz' : tc >= 28 ? 'atsui~ so hot' : tc < 5 ? 'samui! brrr' : d.cond === 2 ? 'kumori... meh' : 'ii tenki da!';
     wxb.sayUntil = performance.now() + 2200; wxb.hop = performance.now();
   };
+  // ── steam: whoami, pgrep and ls (same layout as the firmware's drawSteam, 21_steam.ino); data from steam.js ──
+  const stb = { open: 0, shownMode: -1, view: 0 };
+  const STG = '#90ba3c', STB = '#57cbde', STGR = '#898989', STDB = '#3e7e8c';
+  const LVL = ['#9b9b9b', '#d63c3c', '#e87828', '#eccc32', '#5ab43c', '#4682dc', '#9650d2', '#e650a0', '#aa6e3c', '#d6ba88'];
+  const stH = m => m < 60 ? m + 'm' : m < 600 ? `${m / 60 | 0}.${(m % 60) / 6 | 0}h` : `${(m + 30) / 60 | 0}h`;
+  function tpane(x, y, w, h, cmd, active) {
+    c.strokeStyle = active ? ACC : mixk(ACC, .2); c.lineWidth = 1; c.strokeRect(x + .5, y + .5, w - 1, h - 1);
+    R(x + 6, y - 4, (cmd.length + 4) * 6, 9, TTY_BG); G('$', x + 9, y - 3, 1, active ? ACC : TTY_DIM); G(cmd, x + 21, y - 3, 1, active ? '#fff' : ACC);
+  }
+  function steam() {
+    const v = window.steamView && window.steamView(), now = performance.now();
+    if (stb.shownMode !== 18) stb.open = now;
+    stb.shownMode = 18;
+    R(0, 0, W, H, TTY_BG);
+    const cmd = 'steam --whoami', typed = calm ? cmd.length : Math.min(cmd.length, (now - stb.open) / 22 | 0);
+    G('$', 14, 3, 1, ACC); G(cmd.slice(0, typed), 26, 3, 1, '#fff');
+    if (typed < cmd.length) { R(26 + typed * 6, 2, 6, 9, ACC); return; }
+    if (!calm && now - stb.open < cmd.length * 22 + 160) return;
+    const inGame = !!(v && v.playing && v.live);
+    if (v) { const s = v.live ? 'live' : 'cached'; G(s, 226 - s.length * 6, 3, 1, v.live ? STG : TTY_DIM); }
+    const sc = inGame ? STG : !v || v.state === 0 ? STGR : v.state === 1 || v.state >= 5 ? STB : STDB;
+    c.strokeStyle = sc; c.lineWidth = 2; c.strokeRect(11, 17, 66, 66);
+    if (v && v.avatar) { c.imageSmoothingEnabled = true; c.drawImage(v.avatar, 12, 18, 64, 64); }
+    else { R(12, 18, 64, 64, '#121822'); G(v && v.name ? v.name[0].toUpperCase() : '?', 32, 34, 4, sc); }
+    if (v) {
+      G(v.name.length > 12 ? marquee(v.name, 12, 9) : v.name, 86, 20, 2, '#fff');
+      R(86, 43, 5, 5, sc); G(inGame ? 'in-game' : ['offline', 'online', 'busy', 'away', 'snooze', 'trading', 'looking to play'][Math.min(v.state, 6)], 96, 42, 1, sc);
+      if (v.since) G('since ' + v.since, 86, 56, 1, TTY_TEXT);
+      if (v.country) G(v.country, 86, 68, 1, TTY_DIM);
+      const lc = LVL[(v.level / 10 | 0) % 10]; c.strokeStyle = lc; c.lineWidth = 2; c.beginPath(); c.arc(214.5, 64.5, 12.5, 0, 7); c.stroke();
+      const ls = String(v.level); G(ls, 215 - ls.length * 3, 61, 1, '#fff'); G('lvl', 206, 80, 1, TTY_DIM);
+    } else { G('nobody yet', 86, 20, 2, TTY_DIM); G('no profile on the charm', 86, 42, 1, TTY_DIM); }
+    const py = 98;
+    tpane(2, py, 236, 46, 'pgrep -l game', inGame);
+    if (inGame) {
+      const p = v.playing, s = Math.max(0, (Date.now() - p.since) / 1000 | 0);
+      G(p.name.length > 18 ? marquee(p.name, 18, 9) : p.name, 10, py + 8, 2, '#fff');
+      G(`${p.exact ? 'session' : 'seen'} ${s / 3600 | 0}:${pad((s / 60 | 0) % 60)}:${pad(s % 60)}`, 10, py + 30, 1, STG);
+      const tot = stH(p.min) + ' total'; G(tot, 230 - tot.length * 6, py + 30, 1, TTY_TEXT);
+      if ((now / 500 | 0) % 2) R(226, py + 9, 4, 4, STG);
+    } else {
+      G(v && !v.live ? '> no live link' : '> no game running', 10, py + 9, 1, TTY_DIM);
+      const last = v ? v.games.filter(g => g.days !== 65535).sort((a, b) => a.days - b.days)[0] : null;
+      if (last) { G('last', 10, py + 22, 1, TTY_DIM); G(last.name.slice(0, 21), 40, py + 22, 1, TTY_TEXT); const a = last.days ? last.days + 'd ago' : 'today'; G(a, 230 - a.length * 6, py + 32, 1, TTY_DIM); }
+      else if (!v) G('set it up: app > steam', 10, py + 22, 1, TTY_TEXT);
+    }
+    const ly = 156;
+    tpane(2, ly, 236, 98, stb.view ? 'ls -t ~/library' : 'ls -S ~/library', false);
+    const list = v ? v.games.filter(g => !stb.view || g.wk).sort((a, b) => stb.view ? b.wk - a.wk : b.min - a.min) : [];
+    if (!list.length) {
+      G(!v ? 'the charm gets this from' : stb.view ? 'nothing played in the' : 'no games visible.', 10, ly + 12, 1, TTY_DIM);
+      G(!v ? 'larp-bridge on your computer' : stb.view ? 'last two weeks' : 'is the library private?', 10, ly + 24, 1, TTY_DIM);
+    } else {
+      const top = Math.max(1, ...list.map(g => stb.view ? g.wk : g.min));
+      list.slice(0, 6).forEach((g, k) => {
+        const y = ly + 8 + k * 15, val = stb.view ? g.wk : g.min, h = stH(val), room = Math.max(4, ((222 - h.length * 6) / 6 | 0) - 1);
+        G(g.name.slice(0, room), 8, y, 1, inGame && g.name === v.playing.name.slice(0, 27) ? STG : k ? TTY_TEXT : '#fff');
+        G(h, 231 - h.length * 6, y, 1, k ? TTY_TEXT : ACC);
+        R(8, y + 9, Math.max(1, 222 * val / top | 0), 2, k ? mixk(ACC, .5) : ACC);
+      });
+    }
+    if (v) {
+      const l = `${v.count} games  ${stH(v.totalMin)}`, pg = `1/${Math.max(1, Math.ceil(list.length / 6))}`, wk = '2wk ' + stH(v.wkMin), right = 226 - pg.length * 6, wx2 = right - 12 - wk.length * 6;
+      G(l, 14, 262, 1, TTY_TEXT); G(pg, right, 262, 1, ACC); if (wx2 > 14 + l.length * 6 + 6) G(wk, wx2, 262, 1, TTY_DIM);
+    } else G('tap: sort  swipe: page', 14, 262, 1, TTY_DIM);
+  }
+  window.steamPreviewTap = () => { stb.view ^= 1; glitch = Math.max(glitch, 1); };
   // ── the spell recorder (same layout as the firmware's drawRec; the live traces are on the charm only) ──
   const REC_COL = ['#ff6060', '#60e080', '#60a0ff', '#ffb040', '#c878ff', '#50e6e6'];
   function recScreen() {
@@ -1186,7 +1253,7 @@
     }
     G('pwr: exit', 12, 246, 1, TTY_DIM); G('1d cnn, 39k', 160, 246, 1, TTY_DIM);
   }
-  const scenes = { 0: clock, 1: text, 2: photo, 4: music, 5: pet, 6: toy, 7: card, 8: deck, 9: eyes, 10: jukeDeck, 11: torch, 12: chargeDeck, 13: tty, 14: claude, 15: weather, 16: recScreen, 17: castScreen };
+  const scenes = { 0: clock, 1: text, 2: photo, 4: music, 5: pet, 6: toy, 7: card, 8: deck, 9: eyes, 10: jukeDeck, 11: torch, 12: chargeDeck, 13: tty, 14: claude, 15: weather, 16: recScreen, 17: castScreen, 18: steam };
   // Quest: frames rendered by the firmware itself (desktop simulator), packed in one sheet.
   // d00..d10 day village, n00..n10 night village, then the screens behind the doors.
   // ── tap a block to open it, tap again to go back ──
@@ -1210,6 +1277,7 @@
     const r = cv.getBoundingClientRect(), x = (e.clientX - r.left) * W / r.width, y = (e.clientY - r.top) * H / r.height;
     if (ui.mode === 6 && ui.toy >= 3) return window.toyPreviewTap(x, y, performance.now());
     if (ui.mode === 15) return window.wxPreviewTap();
+    if (ui.mode === 18) return window.steamPreviewTap();
     if (ui.mode === 13) { const n = performance.now(); window.ttyPoke(n - (tapAt.last || 0) < 350); tapAt.last = n; return; }   // poke the face
     if (ui.mode === 14) {
       const n = performance.now(), dbl = n - (tapAt.last || 0) < 350; tapAt.last = n;
@@ -1236,6 +1304,7 @@
 
     if (ui.mode !== 4) npBig = false;
     if (shownMode !== 15) wxb.shownMode = -1;
+    if (shownMode !== 18) stb.shownMode = -1;
     if (ui.mode !== shownMode && !zoom) {
       const opening = shownMode === 8, ti = tileOf(opening ? ui.mode : shownMode);
       if (ti >= 0 && (opening || ui.mode === 8) && !calm) zoom = { ti, s: 0, opening, to: ui.mode }; else { shownMode = ui.mode; glitch = Math.max(glitch, 3); }

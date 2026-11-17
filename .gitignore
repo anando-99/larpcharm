@@ -7,3 +7,4 @@ firmware/tools/fonts/
 firmware/tools/quest/fonts/
 data/
 larp-spells-*.json
+larp-bridge/steam.json

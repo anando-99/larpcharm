@@ -8,8 +8,8 @@ if (/^https:/.test(location.protocol)) fetch(location.pathname + '?b=' + Date.no
   const m = t.match(/<meta name="build" content="([^"]+)"/);
   if (m && m[1] !== BUILD && !sessionStorage.getItem('o_build' + m[1])) { sessionStorage.setItem('o_build' + m[1], '1'); location.reload(); }
 }).catch(() => {});
-const CMD = {MODE:1, TEXT:2, TIME:3, NOWPLAYING:4, XFER_BEGIN:5, XFER_DATA:6, XFER_END:7, BRIGHT:8, PET:9, CARD:10, SETTINGS:11, PING:12, BUZZ:13, FEED:14, LOOK:18, TIMER:19, TOY:20, THEME:21, SKIN:22, EYES:23, TUNE:24, TORCH:25, SONG_LIST:26, SONG_DELETE:27, CC:30, WEATHER:31, REC:32, SPELL:33, AUTH:34};
-const MODE = {CLOCK:0, TEXT:1, PHOTO:2, MUSIC:4, PET:5, TOY:6, CARD:7, DECK:8, EYES:9, JUKE:10, TORCH:11, CHARGE:12, TERM:13, CLAUDE:14, WEATHER:15, REC:16, CAST:17};
+const CMD = {MODE:1, TEXT:2, TIME:3, NOWPLAYING:4, XFER_BEGIN:5, XFER_DATA:6, XFER_END:7, BRIGHT:8, PET:9, CARD:10, SETTINGS:11, PING:12, BUZZ:13, FEED:14, LOOK:18, TIMER:19, TOY:20, THEME:21, SKIN:22, EYES:23, TUNE:24, TORCH:25, SONG_LIST:26, SONG_DELETE:27, CC:30, WEATHER:31, REC:32, SPELL:33, AUTH:34, STEAM:35};
+const MODE = {CLOCK:0, TEXT:1, PHOTO:2, MUSIC:4, PET:5, TOY:6, CARD:7, DECK:8, EYES:9, JUKE:10, TORCH:11, CHARGE:12, TERM:13, CLAUDE:14, WEATHER:15, REC:16, CAST:17, STEAM:18};
 const THEMES = ['#00E5FF', '#FF2BD6', '#FFB000', '#39FF14', '#FF3B30', '#C8DCFF'];
 const klog = m => { if (window.charmLog) window.charmLog(m); };       // lines for the preview's dmesg pane
 const ui = window.ui = { mode: 8, bg: 9, face: 0, toy: 0, theme: 0, playing: false, artReady: false, expr: 255, torch: 0, jbSong: -1, jbQueue: 0, charging: false, bat: 76 };
@@ -72,6 +72,7 @@ async function connectGatt(){
   await write(packet(CMD.PING));
   await refreshMySongs();
   ccResync(); ccSetRemote(); wxSend();
+  if (window.steamOnConnect) window.steamOnConnect();
   hud('Connected to ' + (device.name || 'Larp Charm'));
   klog('ble: link up');
   if (spotifyToken()) startSpotifyLoop();
@@ -815,6 +816,7 @@ function ccConnectBridge(){
     const m = JSON.parse(e.data);
     if (m.type === 'hello') { ccB.client = m.client; ccB.up = true; klog('cc: bridge linked'); ccSetRemote(); }
     else if (m.type === 'state') { m.at = performance.now(); ccB.st = m; ccRelay(m); ccRender(); }
+    else if (m.type === 'steam') { ccB.steam = m; if (window.steamFromBridge) window.steamFromBridge(m); }      // steam.js (kept: it may arrive before steam.js loads)
     else if (m.type === 'permEnd' && rxChar) write(packet(CMD.CC, [4, ...u16(m.id), m.how === 'answered' ? 1 : 0])).catch(() => {});
   };
 }
