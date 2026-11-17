@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
 <meta charset="utf-8">
-<meta name="build" content="1.1.0">
+<meta name="build" content="1.1.1">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <meta name="theme-color" content="#07090c">
 <meta name="description" content="Control panel for the Larp Charm, an ESP32-S3 touchscreen bag charm, over Web Bluetooth. Also links the charm to Claude Code.">
@@ -122,7 +122,7 @@ body:not(.connected) .fwtag{display:none}
 .label,.field>label:not(.switch){font-size:12px;color:var(--dim)}
 .label::before,.field>label:not(.switch)::before{content:"--";color:var(--faint)}
 .meta{font-size:12px;color:var(--dim);margin:0}
-input[type=text],input[type=url],input[type=password],input[type=number],textarea,select{width:100%;padding:7px 9px;border:1px solid var(--line2);border-radius:0;background:var(--bg);font-size:13px;
+input[type=text],input[type=url],input[type=number],textarea,select{width:100%;padding:7px 9px;border:1px solid var(--line2);border-radius:0;background:var(--bg);font-size:13px;
   outline:none;-webkit-appearance:none;appearance:none;caret-color:var(--acc)}
 input:focus,textarea:focus,select:focus{border-color:var(--acc)}
 ::placeholder{color:var(--faint)}
@@ -297,6 +297,7 @@ esp-web-install-button{display:inline-flex}
 .sp-danger{border-color:color-mix(in srgb,var(--bad) 50%,transparent) !important;color:var(--bad) !important}
 
 .term.wttr{white-space:pre;overflow-x:auto;overflow-wrap:normal;line-height:1.3;max-height:none}
+#stKey{-webkit-text-security:disc;text-security:disc}   /* masked, but not a password field: password managers would save and sync it */
 .st-who{display:flex;gap:14px;align-items:center;min-width:0}
 .st-who img{flex:none;width:64px;height:64px;border:2px solid var(--line2);background:#000}
 .st-who div{line-height:1.6;font-size:12.5px;min-width:0;overflow-wrap:anywhere}
@@ -436,12 +437,12 @@ $ node larp-bridge/bridge.mjs    # keep it running
       <div class="box">
         <h3>your steam</h3>
         <div class="row">
-          <div class="field"><label for="stKey">api key</label><input type="password" id="stKey" placeholder="32 characters" autocomplete="off" spellcheck="false" maxlength="64"></div>
+          <div class="field"><label for="stKey">api key</label><input type="text" id="stKey" placeholder="32 characters" autocomplete="off" autocapitalize="off" spellcheck="false" maxlength="64" data-1p-ignore data-lpignore="true" data-form-type="other"></div>
           <div class="field"><label for="stId">profile</label><input type="text" id="stId" placeholder="profile URL, custom name or SteamID64" autocomplete="off" spellcheck="false" maxlength="200"></div>
         </div>
         <div class="actions"><button class="btn" id="stSave">save</button><button class="btn plain" id="stClear">forget</button>
           <a class="link" href="https://steamcommunity.com/dev/apikey" target="_blank" rel="noopener">get a key ↗</a><span class="meta" id="stKeyNote"></span></div>
-        <p class="meta">the key goes only to larp-bridge on this computer, which checks it with Steam and keeps it in larp-bridge/steam.json (just for you; git ignores it). it is never stored in this browser or shown again. hours and games need Steam &gt; Edit Profile &gt; Privacy Settings &gt; Game details: Public.</p>
+        <p class="meta">the key goes only to larp-bridge on this computer, which checks it with Steam and keeps it in ~/.larp-bridge/steam.json, a folder only you can open, outside the project. it is never stored in this browser, saved by password managers, or shown again. hours and games need Steam &gt; Edit Profile &gt; Privacy Settings &gt; Game details: Public.</p>
       </div>
       <p class="meta">checks what you're playing every 30 s and your library every 10 min while this page is open; the charm keeps the last of it. tap the charm's screen to sort, swipe for more, shake for a random pick.</p>
     </section>
@@ -802,13 +803,13 @@ $ node larp-bridge/bridge.mjs    # keep it running
 })();
 </script>
 <!-- bump ?v= and the build meta together on every release, so browsers fetch the new scripts -->
-<script src="songs.js?v=1.1.0"></script>
-<script src="app.js?v=1.1.0"></script>
+<script src="songs.js?v=1.1.1"></script>
+<script src="app.js?v=1.1.1"></script>
 <script type="module" src="https://unpkg.com/esp-web-tools@10.4.0/dist/web/install-button.js?module"></script>
-<script src="spells-model.js?v=1.1.0"></script>
-<script src="spells-net.js?v=1.1.0"></script>
-<script src="spells.js?v=1.1.0"></script>
-<script src="steam.js?v=1.1.0"></script>
-<script src="charm.js?v=1.1.0"></script>
+<script src="spells-model.js?v=1.1.1"></script>
+<script src="spells-net.js?v=1.1.1"></script>
+<script src="spells.js?v=1.1.1"></script>
+<script src="steam.js?v=1.1.1"></script>
+<script src="charm.js?v=1.1.1"></script>
 </body>
 </html>

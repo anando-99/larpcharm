@@ -87,3 +87,5 @@ jobs:
       - run: node .github/scripts/check_site.mjs
       - name: larp-bridge parses
         run: for f in larp-bridge/*.mjs; do node --check "$f"; done
+      - name: the Steam key stays private (larp-bridge safety tests)
+        run: node larp-bridge/test_security.mjs

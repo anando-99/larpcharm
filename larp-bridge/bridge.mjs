@@ -213,16 +213,20 @@ function launch(i) {
 // environment, or larp-bridge/steam.json ({ "key": "...", "id": "profile URL, vanity name or SteamID64" }, git ignores it).
 const STEAM_API = (process.env.STEAM_API_BASE || 'https://api.steampowered.com').replace(/\/$/, '');
 const STEAM_NOW_MS = 30000, STEAM_LIB_MS = 10 * 60000;
-const STEAM_FILE = process.env.LARP_STEAM_FILE || path.join(HERE, 'steam.json');
+// The key file lives in your home folder (~/.larp-bridge/steam.json, a folder only you can open), outside the repository,
+// so no copy, zip or `git add` of the project can carry it. An older larp-bridge/steam.json is read once, then moved.
+const STEAM_FILE = process.env.LARP_STEAM_FILE || path.join(os.homedir(), '.larp-bridge', 'steam.json');
+const STEAM_OLD_FILE = path.join(HERE, 'steam.json');
 const steamCfg = (() => {
   let f = {};
-  try { f = JSON.parse(fs.readFileSync(STEAM_FILE, 'utf8')); } catch {}
+  for (const file of [STEAM_FILE, STEAM_OLD_FILE]) { try { f = JSON.parse(fs.readFileSync(file, 'utf8')); break; } catch {} }
   return { key: String(process.env.STEAM_API_KEY || f.key || '').trim(), id: String(process.env.STEAM_ID || f.id || '').trim() };
 })();
 const steam = { type: 'steam', configured: !!(steamCfg.key && steamCfg.id), ok: false, err: '', at: 0, profile: null, level: 0,
   playing: null, games: [], gameCount: 0, totalMin: 0, wkMin: 0, libPrivate: false, keySet: !!steamCfg.key, idText: steamCfg.id };
 const steamPriv = { id: '', libAt: 0, busy: false, first: true, avaUrl: '', ava: null, avaFor: '' };
 
+const steamScrub = s => steamCfg.key ? String(s).split(steamCfg.key).join('[key]') : String(s);
 async function steamGet(iface, method, ver, params) {
   const q = new URLSearchParams({ key: steamCfg.key, format: 'json', ...params });
   const r = await fetch(`${STEAM_API}/${iface}/${method}/v${ver}/?${q}`, { signal: AbortSignal.timeout(10000) });
@@ -278,7 +282,7 @@ async function steamPoll(force = false) {
     steamPriv.first = false;
     steam.ok = true; steam.err = '';
   } catch (e) {
-    steam.err = e.name === 'TimeoutError' ? 'Steam did not answer' : e.message;
+    steam.err = e.name === 'TimeoutError' ? 'Steam did not answer' : steamScrub(tidy(e.message, 120));
     if (/API key/.test(steam.err)) steamPriv.id = '';
   } finally {
     steamPriv.busy = false; steam.at = Date.now();
@@ -299,9 +303,20 @@ async function steamAvatar() {
 }
 const publishSteam = () => { const m = `data: ${JSON.stringify(steam)}\n\n`; for (const res of subs.keys()) res.write(m); };
 if (!steam.configured) steam.err = !steamCfg.key ? 'no key' : 'no id';
+if (steam.configured && !process.env.STEAM_API_KEY && fs.existsSync(STEAM_OLD_FILE) && !fs.existsSync(STEAM_FILE)) { try { steamSave(steamCfg.key, steamCfg.id); } catch {} }
 
 // Setting the key and profile from the web app: tried against Steam first, and only kept (in steam.json, readable by
 // you alone) if Steam accepts them. The key is never sent back to a page; the page only learns that one is saved.
+function steamSave(key, id) {
+  const dir = path.dirname(STEAM_FILE);
+  fs.mkdirSync(dir, { recursive: true, mode: 0o700 });
+  try { fs.chmodSync(dir, 0o700); } catch {}
+  const tmp = `${STEAM_FILE}.${process.pid}.tmp`;
+  fs.writeFileSync(tmp, JSON.stringify({ key, id }, null, 2) + '\n', { mode: 0o600 });
+  fs.chmodSync(tmp, 0o600);
+  fs.renameSync(tmp, STEAM_FILE);
+  if (STEAM_FILE !== STEAM_OLD_FILE) { try { fs.unlinkSync(STEAM_OLD_FILE); } catch {} }
+}
 function steamReset() {
   Object.assign(steam, { configured: !!(steamCfg.key && steamCfg.id), ok: false, err: '', at: 0, profile: null, level: 0, playing: null,
     games: [], gameCount: 0, totalMin: 0, wkMin: 0, libPrivate: false, keySet: !!steamCfg.key, idText: steamCfg.id });
@@ -311,7 +326,7 @@ function steamReset() {
 async function steamConfigure(c) {
   if (c.clear) {
     steamCfg.key = ''; steamCfg.id = '';
-    try { fs.unlinkSync(STEAM_FILE); } catch {}
+    for (const file of [STEAM_FILE, STEAM_OLD_FILE]) { try { fs.unlinkSync(file); } catch {} }
     steamReset(); publishSteam();
     return { ok: true };
   }
@@ -328,8 +343,7 @@ async function steamConfigure(c) {
     Object.assign(steamCfg, old); steamReset(); if (steam.configured) steamPoll(true); else publishSteam();
     return { ok: false, err };
   }
-  fs.writeFileSync(STEAM_FILE, JSON.stringify({ key, id }, null, 2) + '\n', { mode: 0o600 });
-  try { fs.chmodSync(STEAM_FILE, 0o600); } catch {}
+  steamSave(key, id);
   return { ok: true, name: steam.profile && steam.profile.name };
 }
 
@@ -362,7 +376,11 @@ const body = req => new Promise((ok, bad) => { let b = ''; req.on('data', d => {
 const send = (res, code, obj) => { res.writeHead(code, { 'Content-Type': 'application/json' }); res.end(JSON.stringify(obj)); };
 const MIME = { '.html': 'text/html', '.js': 'text/javascript', '.css': 'text/css', '.png': 'image/png', '.json': 'application/json', '.svg': 'image/svg+xml' };
 
+// Only requests addressed to this computer are answered. A web page whose own name has been pointed at 127.0.0.1
+// (DNS rebinding) would otherwise count as this site in the browser and could read everything here.
+const HOSTS = new Set([`localhost:${PORT}`, `127.0.0.1:${PORT}`]);
 const server = http.createServer(async (req, res) => {
+  if (!HOSTS.has(String(req.headers.host || '').toLowerCase())) { res.writeHead(421, { 'Content-Type': 'text/plain' }); return res.end('wrong host'); }
   const url = new URL(req.url, 'http://localhost');
   const origin = req.headers.origin;
   cors(req, res);
@@ -408,7 +426,7 @@ const server = http.createServer(async (req, res) => {
     if (req.method === 'GET') {
       const rel = decodeURIComponent(url.pathname === '/' ? '/index.html' : url.pathname);
       const file = path.resolve(WEB_ROOT, '.' + rel);
-      if (!file.startsWith(WEB_ROOT + path.sep) || rel.includes('/.') || /\/(larp-bridge|firmware|scrapped)\//.test(rel)) return send(res, 404, { error: 'not found' });
+      if (!file.startsWith(WEB_ROOT + path.sep) || rel.includes('/.') || /\/(larp-bridge|firmware|scrapped)\//i.test(rel) || /steam\.json/i.test(rel)) return send(res, 404, { error: 'not found' });
       return fs.readFile(file, (err, data) => {
         if (err) return send(res, 404, { error: 'not found' });
         res.writeHead(200, { 'Content-Type': MIME[path.extname(file)] || 'application/octet-stream', 'Cache-Control': 'no-cache' });
